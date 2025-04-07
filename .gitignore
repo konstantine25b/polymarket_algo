@@ -1,0 +1,70 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions (DLLs, Pyd files)
+*.so
+*.pyd
+
+# Package Distribution
+.eggs/
+dist/
+build/
+sdist/
+*.egg-info/
+.python-version
+_wheels/
+*.whl
+
+# Installer logs
+pip-log.txt
+pip-delete-this.txt
+
+# Unit test / coverage reports
+.tox/
+nosetests.xml
+coverage*
+.coverage
+.cache
+pytest_cache/
+htmlcov/
+.pytest_cache
+
+# MyPy cache
+.mypy_cache/
+
+# Jupyter Notebook related files
+.ipynb_checkpoints/
+
+# Poetry related files
+poetry.lock
+.venv/
+
+# pyenv virtual environments
+.python-version
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# OS Specific files (add more if needed)
+.DS_Store
+Thumbs.db
+
+# Other temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*.pyc
+
+# Project specific - adjust as needed
+# If you have a specific data or results directory that shouldn't be tracked
+# data/
+# results/
+
+# If you have a local configuration file that shouldn't be tracked
+# config.ini
