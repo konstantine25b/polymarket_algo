@@ -1,103 +1,101 @@
 import csv
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- Configuration ---
-
-# Determine the absolute path of the script and the project's src directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(script_dir) # Go up one level from src/formating to src
+src_dir = os.path.dirname(script_dir)  # Go up one level from src/formating to src
 
-# Define input and output file paths relative to the src directory
 input_filename = os.path.join(src_dir, 'data', 'elonmusk.csv')
-# Output file will be saved in the same data directory with a new name
 output_filename = os.path.join(src_dir, 'data', 'elonmusk_reformatted.csv')
-
-# Define the starting date for the sequence
-start_date = datetime(2024, 9, 1) # Year 2024, Month 9 (September), Day 1
-
-# --- Processing Logic ---
-
-current_date = start_date
-output_data = []
-processed_rows = 0
-skipped_rows = 0
 
 print(f"Starting script...")
 print(f"Input file: {input_filename}")
 print(f"Output file: {output_filename}")
-print(f"Starting sequence date: {start_date.strftime('%Y-%m-%d')}")
+
+output_data = []
+processed_rows = 0
+skipped_rows = 0
 
 try:
     with open(input_filename, 'r', newline='', encoding='utf-8') as infile:
         reader = csv.reader(infile)
         try:
-            header = next(reader) # Read the header
+            header = next(reader)  # Read header
             if header != ['id', 'text', 'created_at']:
                 print(f"Warning: CSV header mismatch. Expected ['id', 'text', 'created_at'], got {header}. Proceeding anyway.")
-            output_data.append(header) # Add header to output
+            output_data.append(header)
         except StopIteration:
             print("Error: Input CSV file is empty.")
-            exit() # Exit if the file is empty
+            exit()
 
         for i, row in enumerate(reader, start=1):
-            if len(row) < 3: # Check if row has at least 3 columns
+            if len(row) < 3:
                 print(f"Skipping malformed row #{i}: Not enough columns. Row data: {row}")
                 skipped_rows += 1
                 continue
 
-            original_created_at_str = row[2] # Get the original date string
+            original_created_at_str = row[2]  # e.g., "Apr 8, 10:06:20 AM EDT"
 
             try:
-                # --- Extract the TIME part from the original string ---
-                # Example: "Apr 18, 6:41:57 PM EDT"
-                # We need to extract "6:41:57 PM"
-                # Split by comma, take the second part, strip whitespace
-                time_section = original_created_at_str.split(',')[1].strip()
-                # Split the time section by space, take the first two parts ("H:M:S", "AM/PM")
-                time_str_parts = time_section.split()[:2]
-                time_str = " ".join(time_str_parts) # e.g., "6:41:57 PM"
+                # Parse the original date (e.g., "Apr 8, 10:06:20 AM EDT")
+                month_day = original_created_at_str.split(',')[0].strip()  # "Apr 8"
+                time_part = original_created_at_str.split(',')[1].strip().split(' ')[0]  # "10:06:20"
+                ampm_part = original_created_at_str.split(',')[1].strip().split(' ')[1]  # "AM" or "PM"
 
-                # Parse the extracted time string to get a time object
-                original_time_obj = datetime.strptime(time_str, '%I:%M:%S %p').time()
+                # Construct new date in 2024 (e.g., "Apr 8 2024")
+                new_date_str = f"{month_day} 2024"  # "Apr 8 2024"
+                new_time_str = f"{time_part} {ampm_part}"  # "10:06:20 AM"
 
-                # --- Combine the sequential DATE with the extracted TIME ---
-                new_dt = datetime.combine(current_date.date(), original_time_obj)
+                # Parse into datetime
+                new_date = datetime.strptime(new_date_str, '%b %d %Y').date()  # "Apr 8 2024" → 2024-04-08
+                new_time = datetime.strptime(new_time_str, '%I:%M:%S %p').time()  # "10:06:20 AM" → 10:06:20
 
-                # --- Format the new datetime object as YYYY:MM:DD:HH:MM:SS ---
-                formatted_date = new_dt.strftime('%Y:%m:%d:%H:%M:%S') # Using : as requested
+                # Combine and format
+                new_datetime = datetime.combine(new_date, new_time)
+                formatted_date = new_datetime.strftime('%Y:%m:%d:%H:%M:%S')  # "2024:04:08:10:06:20"
 
-                # --- Update the row with the new formatted date ---
                 row[2] = formatted_date
                 output_data.append(row)
-
-                # --- Increment the date for the *next* row ---
-                current_date += timedelta(days=1)
                 processed_rows += 1
 
-            except (ValueError, IndexError, AttributeError) as e:
-                print(f"Skipping row #{i} due to error processing 'created_at': '{original_created_at_str}'. Error: {e}. Row data: {row}")
+            except Exception as e:
+                print(f"Skipping row #{i} due to error: {e}. Row data: {row}")
                 skipped_rows += 1
-            except Exception as e: # Catch any other unexpected errors
-                 print(f"Skipping row #{i} due to unexpected error: {e}. Row data: {row}")
-                 skipped_rows += 1
 
+    # Find the index of the first row with date starting from 2024:09:01
+    start_index = -1
+    for index, row in enumerate(output_data):
+        if index > 0 and len(row) > 2 and row[2].startswith('2024:09:01'):
+            start_index = index
+            break
 
-    # --- Writing the modified data to the new CSV file ---
-    print(f"\nWriting output to {output_filename}...")
+    # Create a new output data list starting from the found index
+    final_output_data = []
+    if start_index != -1:
+        final_output_data.append(output_data[0])  # Add the header
+        final_output_data.extend(output_data[start_index:])
+    else:
+        # If 2024:09:01 is not found, keep the header and all processed rows
+        final_output_data = output_data
+
+    # Write output
     with open(output_filename, 'w', newline='', encoding='utf-8') as outfile:
         writer = csv.writer(outfile)
-        writer.writerows(output_data)
+        writer.writerows(final_output_data)
 
     print("-" * 30)
     print("Processing complete.")
     print(f"Successfully processed: {processed_rows} rows.")
     print(f"Skipped:             {skipped_rows} rows.")
+    if start_index != -1:
+        print(f"Data before 2024-09-01 removed.")
+    else:
+        print(f"No data found starting from 2024-09-01. All processed data retained.")
     print(f"Output saved to:     {output_filename}")
     print("-" * 30)
 
-
 except FileNotFoundError:
-    print(f"Error: Input file not found at '{input_filename}'. Please ensure the file exists and the path is correct.")
+    print(f"Error: Input file not found at '{input_filename}'.")
 except Exception as e:
-    print(f"An unexpected error occurred during file reading or writing: {e}")
+    print(f"An unexpected error occurred: {e}")
