@@ -16,6 +16,8 @@ print(f"Output file: {output_filename}")
 output_data = []
 processed_rows = 0
 skipped_rows = 0
+current_year = 2024
+max_month_2024 = 0
 
 try:
     with open(input_filename, 'r', newline='', encoding='utf-8') as infile:
@@ -38,22 +40,37 @@ try:
             original_created_at_str = row[2]  # e.g., "Apr 8, 10:06:20 AM EDT"
 
             try:
-                # Parse the original date (e.g., "Apr 8, 10:06:20 AM EDT")
-                month_day = original_created_at_str.split(',')[0].strip()  # "Apr 8"
-                time_part = original_created_at_str.split(',')[1].strip().split(' ')[0]  # "10:06:20"
-                ampm_part = original_created_at_str.split(',')[1].strip().split(' ')[1]  # "AM" or "PM"
+                # Parse the month from the original date string
+                month_str = original_created_at_str.split(' ')[0]
+                original_month = datetime.strptime(month_str, '%b').month
 
-                # Construct new date in 2024 (e.g., "Apr 8 2024")
-                new_date_str = f"{month_day} 2024"  # "Apr 8 2024"
-                new_time_str = f"{time_part} {ampm_part}"  # "10:06:20 AM"
+                # Determine the year
+                year_to_assign = current_year
+                if current_year == 2024:
+                    max_month_2024 = max(max_month_2024, original_month)
+                    if original_month == 1 and max_month_2024 == 12:
+                        year_to_assign = 2025
+                        current_year = 2025
+                elif current_year == 2025:
+                    if original_month != 1: # If the year is 2025, subsequent Januarys will remain 2025
+                        pass # Keep the year as 2025
 
-                # Parse into datetime
-                new_date = datetime.strptime(new_date_str, '%b %d %Y').date()  # "Apr 8 2024" → 2024-04-08
-                new_time = datetime.strptime(new_time_str, '%I:%M:%S %p').time()  # "10:06:20 AM" → 10:06:20
+                # Parse day, time, and AM/PM
+                day = original_created_at_str.split(' ')[1].rstrip(',')
+                time_part = original_created_at_str.split(',')[1].strip().split(' ')[0]
+                ampm_part = original_created_at_str.split(',')[1].strip().split(' ')[1]
+
+                # Construct new date and time strings
+                new_date_str = f"{month_str} {day} {year_to_assign}"
+                new_time_str = f"{time_part} {ampm_part}"
+
+                # Parse into datetime objects
+                new_date_obj = datetime.strptime(new_date_str, '%b %d %Y').date()
+                new_time_obj = datetime.strptime(new_time_str, '%I:%M:%S %p').time()
 
                 # Combine and format
-                new_datetime = datetime.combine(new_date, new_time)
-                formatted_date = new_datetime.strftime('%Y:%m:%d:%H:%M:%S')  # "2024:04:08:10:06:20"
+                new_datetime = datetime.combine(new_date_obj, new_time_obj)
+                formatted_date = new_datetime.strftime('%Y:%m:%d:%H:%M:%S')
 
                 row[2] = formatted_date
                 output_data.append(row)
@@ -91,7 +108,7 @@ try:
     if start_index != -1:
         print(f"Data before 2024-09-01 removed.")
     else:
-        print(f"No data found starting from 2024-09-01. All processed data retained.")
+        print(f"No data found starting from 2024-09-01 or later. All processed data retained.")
     print(f"Output saved to:     {output_filename}")
     print("-" * 30)
 
