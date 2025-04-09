@@ -8,7 +8,7 @@ Predicts daily tweet counts using a moving average algorithm.
 
 ```bash
 python3 MA_daily.py [--window DAYS] [--file FILEPATH]
-
+ ```
 Markdown
 
 # Tweet Count Predictor
