@@ -179,7 +179,7 @@ Markdown
 
 Predicts whether Elon Musk will tweet on a given day and estimates the expected number of tweets using a Random Forest Classifier.
 
-**Algo num 4: Random Forest**
+**Algo num 6: Random Forest**
 
 ## What the Random Forest Algorithm Does
 
@@ -211,3 +211,54 @@ Predicting for the next 7 days using the default data file:
 
 python3 randomForest.py --days 7
 ```
+
+
+**Algo num 7: Historical Patterns**
+
+## How to Use the Fixed Version:
+
+To get predictions based on historical averages (long-term patterns) without the influence of recent trends:
+
+```bash
+python3 historical_pattern.py --date YYYY-MM-DD --no-trend
+
+```
+Markdown
+
+# Tweet Count Predictor (Historical Patterns)
+
+Predicts daily and hourly tweet counts based on historical averages, with options for trend adjustment and precision evaluation.
+
+**Algo num 7: Historical Patterns**
+
+## How to Use the Fixed Version:
+
+To get predictions based on historical averages (long-term patterns) without the influence of recent trends:
+
+```bash
+python3 historical_pattern.py --date YYYY-MM-DD --no-trend
+```
+
+Replace YYYY-MM-DD with the specific date you want to predict for. This will use the long-term historical averages for each weekday instead of scaling them down based on recent activity.
+
+Description
+This script analyzes historical tweet data to predict future tweet counts. It calculates average tweet rates by weekday and hour of day to make predictions. Key features include:
+
+Historical Averages: Predicts based on long-term historical tweet patterns.
+Trend Adjustment: Optionally scales predictions based on the recent 7-day average tweet activity. This can be disabled using the --no-trend flag to rely solely on historical averages.
+Same-Day Prediction: Accurately predicts tweet counts for the current date by considering the remaining hours.
+Hourly Analysis: Provides a detailed breakdown of average tweet rates for all 24 hours of the day, sorted by activity.
+Precision Evaluation: Compares predictions against actual past data using Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE).
+Precision Visualization: Generates a plot comparing predicted versus actual tweet counts for a visual representation of accuracy.
+
+
+Options:
+
+--file FILEPATH: Path to the reformatted CSV file (default: data/elonmusk_reformatted.csv).
+--date YYYY-MM-DD: Target date to predict tweet count for.
+--days COUNT: Number of future days to predict (default: 7).
+--plot: Generate activity plots (daily and hourly distributions).
+--precision: Evaluate prediction precision against past data. Requires --days-back.
+--days-back N: Number of days back to evaluate precision (default: 14). Used with --precision.
+--all-hours: Display average tweet counts for all 24 hours, sorted by activity.
+--no-trend: Disable the adjustment of predictions based on the recent 7-day trend.
