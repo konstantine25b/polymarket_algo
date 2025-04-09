@@ -72,3 +72,45 @@ EWMA span of 14 days and rate window of 5 days:
 
 python3 EWMA_daily.py --ewma 14 --rate 5
 ```
+
+**Algo num 3: Moving Average Daily**
+
+## Usage
+
+```bash
+python3 moving_average.py [--window DAYS] [--file FILEPATH] [--days COUNT]
+ ```
+Arguments:
+
+--window DAYS: Number of days to use for moving average (default: 7)
+--file FILEPATH: Path to CSV file (default: data/elonmusk_daily_counts.csv)
+--days COUNT: Number of future days to predict (default: 1)
+
+Example :
+``` bash
+python3 moving_average.py --window 10 --days 3
+```
+
+**Algo num 4: EWMA + Rate + Weekly Seasonality**
+
+## Usage
+
+```bash
+python3 EWMA_daily.py [--ewma DAYS] [--rate DAYS] [--file FILEPATH] [--days COUNT]
+
+```
+Arguments:
+
+--ewma DAYS: EWMA span for baseline trend (default: 7)
+--rate DAYS: Window for recent rate of change calculation (default: 3)
+--file FILEPATH: Path to CSV file (default: data/elonmusk_daily_counts.csv)
+--days COUNT: Number of future days to predict (default: 1)
+
+example:
+
+``` bash
+
+python3 EWMA_daily.py --ewma 14 --rate 5 --days 3
+
+```
+
