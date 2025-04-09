@@ -114,3 +114,100 @@ python3 EWMA_daily.py --ewma 14 --rate 5 --days 3
 
 ```
 
+
+
+**Algo num 5: Hybrid SARIMA + Seasonality**
+
+## What the SARIMA Algorithm Does
+
+SARIMA is a powerful time series forecasting method that extends the ARIMA (Autoregressive Integrated Moving Average) model to handle seasonal patterns in the data. It works by understanding the past patterns of the time series data (like trends and cycles) to forecast future values.
+
+Here's a breakdown of the components of SARIMA:
+
+* **Autoregressive (AR):** Uses past values of the time series to predict future values.
+* **Integrated (I):** Makes the time series stationary (removes trends) by differencing the data.
+* **Moving Average (MA):** Uses past forecast errors to predict future values.
+* **Seasonal (SAR, SI, SMA):** These components account for recurring patterns within a specific period (e.g., weekly, monthly).
+
+In this script, the SARIMA model is used with a specific order `(1, 1, 1)` and a seasonal order `(1, 1, 1, 7)`. The `7` in the seasonal order indicates a weekly seasonality (as there are 7 days in a week).
+
+Additionally, this script incorporates:
+
+* **Weekly Seasonality:** It calculates factors based on the average tweet count for each day of the week relative to the overall average. This helps adjust the predictions based on typical weekday behavior.
+* **Monthly Seasonality:** Similarly, it calculates factors based on the average tweet count for each month of the year.
+
+The final prediction is a result of the SARIMA model's output adjusted by these weekly and monthly seasonality factors.
+
+## Usage
+
+While the specific command-line arguments for this script weren't provided, it likely takes the data file as input and runs the SARIMA model to predict future tweet counts. Based on the output, a simple execution might look like:
+
+```bash
+python3 sarima.py
+
+```
+
+
+
+
+
+**Algo num 4: Random Forest**
+
+## What the Random Forest Algorithm Does
+
+Random Forest is a powerful machine learning algorithm that belongs to the ensemble learning family. It works by constructing multiple decision trees during training and outputs the mode of the classes (for classification) or the mean prediction (for regression) of the individual trees.
+
+In this script, a Random Forest Classifier is used to predict whether Elon Musk will tweet on a particular day. The model is trained on historical tweet data, likely using features derived from the date, such as:
+
+* **weekday:** The day of the week.
+* **month:** The month of the year.
+* **streak:** Possibly a measure of consecutive days with or without tweets.
+* **month_cos:** Cosine transformation of the month (for cyclical representation).
+* **month_sin:** Sine transformation of the month (for cyclical representation).
+
+After predicting whether a tweet will occur (with a certain probability), the script also provides an "Expected" number of tweets for that day. The method for calculating this expected number isn't explicitly shown in the output but is likely based on historical averages or patterns associated with the predicted features.
+
+## Usage
+
+```bash
+python3 randomForest.py [--days COUNT] [--file FILEPATH]
+
+```
+Markdown
+
+# Tweet Prediction using Random Forest
+
+Predicts whether Elon Musk will tweet on a given day and estimates the expected number of tweets using a Random Forest Classifier.
+
+**Algo num 4: Random Forest**
+
+## What the Random Forest Algorithm Does
+
+Random Forest is a powerful machine learning algorithm that belongs to the ensemble learning family. It works by constructing multiple decision trees during training and outputs the mode of the classes (for classification) or the mean prediction (for regression) of the individual trees.
+
+In this script, a Random Forest Classifier is used to predict whether Elon Musk will tweet on a particular day. The model is trained on historical tweet data, likely using features derived from the date, such as:
+
+* **weekday:** The day of the week.
+* **month:** The month of the year.
+* **streak:** Possibly a measure of consecutive days with or without tweets.
+* **month_cos:** Cosine transformation of the month (for cyclical representation).
+* **month_sin:** Sine transformation of the month (for cyclical representation).
+
+After predicting whether a tweet will occur (with a certain probability), the script also provides an "Expected" number of tweets for that day. The method for calculating this expected number isn't explicitly shown in the output but is likely based on historical averages or patterns associated with the predicted features.
+
+## Usage
+
+```bash
+python3 randomForest.py [--days COUNT] [--file FILEPATH]
+```
+Arguments:
+
+--days COUNT: The number of future days for which to predict tweet activity (default: 1, though in the example it was 14).
+--file FILEPATH: Path to the CSV file containing the tweet history data (default: data/elonmusk_reformatted.csv).
+Examples
+Predicting for the next 7 days using the default data file:
+
+``` bash
+
+python3 randomForest.py --days 7
+```
