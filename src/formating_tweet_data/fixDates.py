@@ -83,7 +83,7 @@ try:
     # Find the index of the first row with date starting from 2024:09:01
     start_index = -1
     for index, row in enumerate(output_data):
-        if index > 0 and len(row) > 2 and row[2].startswith('2024:07:01'):
+        if index > 0 and len(row) > 2 and row[2].startswith('2024:06:01'):
             start_index = index
             break
 
