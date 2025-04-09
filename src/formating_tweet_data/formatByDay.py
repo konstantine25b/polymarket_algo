@@ -7,7 +7,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(script_dir)  # Go up one level from src/formating to src
 
 input_filename = os.path.join(src_dir, 'data', 'elonmusk_reformatted.csv')
-output_filename = os.path.join(src_dir, 'data', 'elonmusk_tweet_counts.csv')
+output_filename = os.path.join(src_dir, 'data', 'elonmusk_daily_counts.csv')
 
 print(f"Starting script...")
 print(f"Input file: {input_filename}")
