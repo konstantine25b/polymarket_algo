@@ -138,14 +138,15 @@ class ElonTweetCountPredictor:
         
         return self.hourly_rates
     
-    def predict_count(self, target_date_str=None, days=None, use_trend=True):
+    def predict_count(self, target_date_str=None, days=None, use_trend=True, hours=None):
         """
-        Predict how many tweets Elon will post until a specific date.
+        Predict how many tweets Elon will post until a specific date and time.
         
         Parameters:
         target_date_str (str): Target date in format YYYY-MM-DD
         days (int): Number of days to predict for (alternative to target_date)
         use_trend (bool): Whether to apply recent trend adjustment to predictions
+        hours (list): List of specific hours (0-23) to include in the prediction
         
         Returns:
         dict: Prediction results
@@ -168,6 +169,22 @@ class ElonTweetCountPredictor:
             print("Please choose a future date.")
             return
         
+        # Validate hours input if provided
+        if hours is not None:
+            valid_hours = []
+            for hour in hours:
+                if isinstance(hour, int) and 0 <= hour < 24:
+                    valid_hours.append(hour)
+                else:
+                    print(f"Ignoring invalid hour: {hour}. Hours must be integers between 0-23.")
+            
+            if not valid_hours and hours:
+                print("No valid hours provided. Using all hours for prediction.")
+                hours = None
+            else:
+                hours = valid_hours
+                print(f"Using specific hours for prediction: {sorted(hours)}")
+        
         current_datetime = datetime.combine(self.last_date, self.last_time)
         target_datetime = datetime.combine(target_date, datetime.max.time())
         
@@ -181,7 +198,7 @@ class ElonTweetCountPredictor:
         # If target date is the same as last date, we predict for remaining hours
         if target_date == self.last_date:
             print(f"\nPredicting tweets for remaining hours of {target_date}")
-            remaining_prediction = self._predict_remaining_hours(current_datetime, target_datetime, trend_factor)
+            remaining_prediction = self._predict_remaining_hours(current_datetime, target_datetime, trend_factor, specific_hours=hours)
             
             # Display results even for same day
             print(f"\nPrediction results:")
@@ -205,7 +222,8 @@ class ElonTweetCountPredictor:
         current_day_prediction = self._predict_remaining_hours(
             current_datetime, 
             datetime.combine(self.last_date, datetime.max.time()),
-            trend_factor
+            trend_factor,
+            specific_hours=hours
         )
         
         remaining_days = (target_date - self.last_date).days
@@ -223,11 +241,21 @@ class ElonTweetCountPredictor:
             predict_date = self.last_date + timedelta(days=i)
             weekday = predict_date.weekday()
             
-            # Get average tweets for this weekday
-            day_avg = self.weekday_averages.get(weekday, self.daily_counts['count'].mean())
-            
-            # Apply trend factor if enabled
-            expected = day_avg * (trend_factor if use_trend else 1.0)
+            # If using specific hours, calculate based on those hours only
+            if hours is not None:
+                expected = 0
+                for hour in hours:
+                    try:
+                        hour_rate = self.hour_of_day_averages.get((weekday, hour), 0)
+                        expected += hour_rate * (trend_factor if use_trend else 1.0)
+                    except:
+                        # Fallback to overall hourly rate
+                        hour_rate = self.hourly_rates.get(hour, 0)
+                        expected += hour_rate / 24 * (trend_factor if use_trend else 1.0)
+            else:
+                # Get average tweets for this weekday
+                expected = self.weekday_averages.get(weekday, self.daily_counts['count'].mean())
+                expected *= (trend_factor if use_trend else 1.0)
             
             day_by_day[str(predict_date)] = expected
             total_expected += expected
@@ -236,7 +264,8 @@ class ElonTweetCountPredictor:
             prediction_details.append({
                 'date': predict_date,
                 'weekday': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][weekday],
-                'expected_tweets': expected
+                'expected_tweets': expected,
+                'hours_included': hours
             })
         
         # Wrap up prediction results
@@ -246,23 +275,159 @@ class ElonTweetCountPredictor:
             'days': remaining_days + (0 if current_day_prediction['expected_tweets'] == 0 else 1),
             'total_expected_tweets': total_expected,
             'daily_breakdown': day_by_day,
-            'prediction_details': prediction_details
+            'prediction_details': prediction_details,
+            'specific_hours': hours
         }
         
         # Display results
         print(f"\nPrediction results:")
+        if hours is not None:
+            hour_str = ", ".join([f"{h}:00" for h in sorted(hours)])
+            print(f"Predicting for specific hours: {hour_str}")
+            
         print(f"From {self.last_date} to {target_date}")
         print(f"Expected tweets: {total_expected:.1f}")
         print("\nDay-by-day breakdown:")
         
         for detail in prediction_details:
             if 'weekday' in detail:
-                print(f"- {detail['date']} ({detail['weekday']}): {detail['expected_tweets']:.1f} tweets")
+                hour_info = f" (specific hours only)" if hours is not None else ""
+                print(f"- {detail['date']} ({detail['weekday']}){hour_info}: {detail['expected_tweets']:.1f} tweets")
             else:
                 print(f"- {self.last_date} (remaining hours): {detail['expected_tweets']:.1f} tweets")
         
         return prediction_results
-    
+    def predict_next_hours(self, hours_ahead=4, use_trend=True):
+        """
+        Predict how many tweets Elon will post in the next N hours.
+        
+        Parameters:
+        hours_ahead (int): Number of hours to predict for
+        use_trend (bool): Whether to apply recent trend adjustment to predictions
+        
+        Returns:
+        dict: Prediction results
+        """
+        if self.df is None or self.hourly_rates is None:
+            print("Please load data and analyze patterns first")
+            return
+        
+        # Get current datetime from last available data point
+        current_datetime = datetime.combine(self.last_date, self.last_time)
+        target_datetime = current_datetime + timedelta(hours=hours_ahead)
+        
+        print(f"\nPredicting tweets for the next {hours_ahead} hours")
+        print(f"From: {current_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"To: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Calculate trend factor
+        recent_avg = self.daily_counts.iloc[-7:]['count'].mean() if len(self.daily_counts) >= 7 else self.daily_counts['count'].mean()
+        overall_avg = self.daily_counts['count'].mean()
+        trend_factor = recent_avg / overall_avg if overall_avg > 0 and use_trend else 1.0
+        
+        print(f"Trend adjustment factor: {trend_factor:.2f}" if use_trend else "Using historical averages without trend adjustment")
+        
+        # Initialize prediction
+        expected_tweets = 0
+        hour_by_hour = []
+        
+        # Current hour
+        current_hour = current_datetime.hour
+        current_weekday = current_datetime.weekday()
+        
+        # Remaining portion of current hour
+        current_minute = current_datetime.minute
+        current_second = current_datetime.second
+        remaining_portion = (60 - current_minute) / 60 - current_second / 3600
+        
+        # Track how many hours we've predicted
+        hours_counted = 0
+        
+        # First handle partial remaining hour
+        try:
+            current_hour_rate = self.hour_of_day_averages.get((current_weekday, current_hour), 0)
+            hour_expected = current_hour_rate * remaining_portion * trend_factor
+        except:
+            # Fallback to overall hourly rate
+            current_hour_rate = self.hourly_rates.get(current_hour, 0)
+            hour_expected = current_hour_rate * remaining_portion / 24 * trend_factor
+        
+        expected_tweets += hour_expected
+        
+        # Add current hour to hour-by-hour breakdown
+        hour_by_hour.append({
+            'datetime': current_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+            'hour': current_hour,
+            'weekday': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][current_weekday],
+            'expected_tweets': hour_expected,
+            'partial': True,
+            'portion': remaining_portion
+        })
+        
+        hours_counted += remaining_portion
+        
+        # Now predict for full hours
+        while hours_counted < hours_ahead:
+            # Calculate the next hour
+            next_datetime = current_datetime + timedelta(hours=int(hours_counted) + 1)
+            next_hour = next_datetime.hour
+            next_weekday = next_datetime.weekday()
+            
+            # If we've reached the last hour boundary
+            if hours_counted + 1 > hours_ahead:
+                # Calculate portion of the last hour
+                portion = hours_ahead - hours_counted
+            else:
+                portion = 1.0  # Full hour
+            
+            try:
+                hour_rate = self.hour_of_day_averages.get((next_weekday, next_hour), 0)
+                hour_expected = hour_rate * portion * trend_factor
+            except:
+                # Fallback to overall hourly rate
+                hour_rate = self.hourly_rates.get(next_hour, 0)
+                hour_expected = hour_rate * portion / 24 * trend_factor
+            
+            expected_tweets += hour_expected
+            
+            # Add to hour-by-hour breakdown
+            hour_by_hour.append({
+                'datetime': next_datetime.strftime('%Y-%m-%d %H:%M'),
+                'hour': next_hour,
+                'weekday': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][next_weekday],
+                'expected_tweets': hour_expected,
+                'partial': portion < 1.0,
+                'portion': portion
+            })
+            
+            hours_counted += portion
+            
+            # Stop if we've counted enough hours
+            if hours_counted >= hours_ahead:
+                break
+        
+        # Prepare results
+        prediction_results = {
+            'from_datetime': current_datetime,
+            'to_datetime': target_datetime,
+            'hours': hours_ahead,
+            'total_expected_tweets': expected_tweets,
+            'hour_by_hour': hour_by_hour
+        }
+        
+        # Display results
+        print(f"\nPrediction results:")
+        print(f"Expected tweets in the next {hours_ahead} hours: {expected_tweets:.2f}")
+        print("\nHour-by-hour breakdown:")
+        
+        for detail in hour_by_hour:
+            hour_ampm = f"{detail['hour'] % 12 or 12} {'AM' if detail['hour'] < 12 else 'PM'}"
+            if detail['partial']:
+                print(f"- {detail['datetime']} ({hour_ampm}, {detail['portion']*60:.0f} min): {detail['expected_tweets']:.2f} tweets")
+            else:
+                print(f"- {detail['datetime']} ({hour_ampm}): {detail['expected_tweets']:.2f} tweets")
+        
+        return prediction_results
     def _predict_remaining_hours(self, current_datetime, target_datetime, trend_factor=1.0):
         """Predict tweets for remaining hours of a day"""
         # Calculate remaining hours
@@ -311,7 +476,71 @@ class ElonTweetCountPredictor:
             'expected_tweets': expected_tweets,
             'remaining_hours': remaining_hours
         }
-    
+    def _predict_remaining_hours(self, current_datetime, target_datetime, trend_factor=1.0, specific_hours=None):
+        """
+        Predict tweets for remaining hours of a day
+        
+        Parameters:
+        current_datetime: Current datetime
+        target_datetime: Target datetime
+        trend_factor: Trend adjustment factor
+        specific_hours: List of specific hours (0-23) to include in the prediction
+        """
+        # Calculate remaining hours
+        remaining_seconds = (target_datetime - current_datetime).total_seconds()
+        remaining_hours = remaining_seconds / 3600
+        
+        if remaining_hours <= 0:
+            return {
+                'date': current_datetime.date(),
+                'expected_tweets': 0,
+                'remaining_hours': 0
+            }
+        
+        current_hour = current_datetime.hour
+        current_weekday = current_datetime.weekday()
+        
+        # For the exact hours, calculate expected tweets based on hourly rates
+        expected_tweets = 0
+        
+        # Remaining portion of current hour
+        current_minute = current_datetime.minute
+        current_second = current_datetime.second
+        remaining_portion = (60 - current_minute) / 60 - current_second / 3600
+        
+        # Check if we should include the current hour
+        include_current_hour = specific_hours is None or current_hour in specific_hours
+        
+        if include_current_hour:
+            # Get rate for current hour and weekday
+            try:
+                current_hour_rate = self.hour_of_day_averages.get((current_weekday, current_hour), 0)
+                expected_tweets += current_hour_rate * remaining_portion * trend_factor
+            except:
+                # Fallback to overall hourly rate
+                current_hour_rate = self.hourly_rates.get(current_hour, 0)
+                expected_tweets += current_hour_rate * remaining_portion / 24 * trend_factor
+        
+        # Full hours after current hour
+        for hour in range(current_hour + 1, 24):
+            # Skip hours not in specific_hours if provided
+            if specific_hours is not None and hour not in specific_hours:
+                continue
+                
+            try:
+                hour_rate = self.hour_of_day_averages.get((current_weekday, hour), 0)
+                expected_tweets += hour_rate * trend_factor
+            except:
+                # Fallback to overall hourly rate
+                hour_rate = self.hourly_rates.get(hour, 0)
+                expected_tweets += hour_rate / 24 * trend_factor
+        
+        return {
+            'date': current_datetime.date(),
+            'expected_tweets': expected_tweets,
+            'remaining_hours': remaining_hours,
+            'hours_included': specific_hours
+        }
     def evaluate_precision(self, days_back=14):
         """Calculate precision by comparing predictions for past days with actual counts"""
         if self.df is None or self.daily_counts is None:
@@ -491,6 +720,10 @@ def main():
                       help='Target date to predict (YYYY-MM-DD)')
     parser.add_argument('--days', type=int, default=7,
                       help='Number of days to predict (default: 7)')
+    parser.add_argument('--hours', type=str,
+                      help='Comma-separated list of specific hours (0-23) to include in prediction (e.g., 9,12,18)')
+    parser.add_argument('--next-hours', type=int,
+                      help='Predict for the next N hours instead of full days (e.g., 4)')
     parser.add_argument('--plot', action='store_true',
                       help='Generate activity plots')
     parser.add_argument('--precision', action='store_true',
@@ -503,6 +736,14 @@ def main():
                       help='Disable trend adjustment (use historical averages only)')
 
     args = parser.parse_args()
+    
+    # Parse hours if provided
+    specific_hours = None
+    if args.hours:
+        try:
+            specific_hours = [int(h.strip()) for h in args.hours.split(',')]
+        except ValueError:
+            print("Warning: Invalid hours format. Please use comma-separated integers (e.g., 9,12,18)")
     
     # Determine file path
     file_path = args.file
@@ -524,10 +765,15 @@ def main():
                 if precision_results and args.plot:
                     predictor.plot_precision_results(precision_results)
             
-            if args.date:
-                predictor.predict_count(target_date_str=args.date, use_trend=not args.no_trend)
+            # If next-hours is specified, use that prediction method
+            if args.next_hours:
+                predictor.predict_next_hours(hours_ahead=args.next_hours, use_trend=not args.no_trend)
+            # Otherwise use the standard date/days prediction
+            elif args.date:
+                predictor.predict_count(target_date_str=args.date, use_trend=not args.no_trend, hours=specific_hours)
             else:
-                predictor.predict_count(days=args.days, use_trend=not args.no_trend)
+                predictor.predict_count(days=args.days, use_trend=not args.no_trend, hours=specific_hours)
+                
             if args.plot:
                 predictor.plot_activity()
         else:
