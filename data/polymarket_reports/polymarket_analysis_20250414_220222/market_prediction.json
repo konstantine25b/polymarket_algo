@@ -1,0 +1,42 @@
+{
+  "0-99": {
+    "range": [
+      0,
+      99
+    ],
+    "probability": 8.0,
+    "price": "0.08"
+  },
+  "100-199": {
+    "range": [
+      100,
+      199
+    ],
+    "probability": 23.0,
+    "price": "0.23"
+  },
+  "200-299": {
+    "range": [
+      200,
+      299
+    ],
+    "probability": 42.0,
+    "price": "0.42"
+  },
+  "300-399": {
+    "range": [
+      300,
+      399
+    ],
+    "probability": 17.0,
+    "price": "0.17"
+  },
+  "400+": {
+    "range": [
+      400,
+      Infinity
+    ],
+    "probability": 10.0,
+    "price": "0.10"
+  }
+}

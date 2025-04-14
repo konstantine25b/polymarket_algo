@@ -1,0 +1,6 @@
+fetch_time,market_id,market_title,market_end_date,market_volume,market_liquidity,outcome_name,outcome_price,outcome_probability,outcome_volume
+2025-04-14T21:49:44.605724,elon-musk-of-tweets-april-11-18-628?tid=1744647093443,How many tweets will Elon Musk post from April 11-18?,2025-04-18T23:59:59Z,125200,85000,0-99,0.08,8.0,12500
+2025-04-14T21:49:44.605724,elon-musk-of-tweets-april-11-18-628?tid=1744647093443,How many tweets will Elon Musk post from April 11-18?,2025-04-18T23:59:59Z,125200,85000,100-199,0.23,23.0,32400
+2025-04-14T21:49:44.605724,elon-musk-of-tweets-april-11-18-628?tid=1744647093443,How many tweets will Elon Musk post from April 11-18?,2025-04-18T23:59:59Z,125200,85000,200-299,0.42,42.0,47800
+2025-04-14T21:49:44.605724,elon-musk-of-tweets-april-11-18-628?tid=1744647093443,How many tweets will Elon Musk post from April 11-18?,2025-04-18T23:59:59Z,125200,85000,300-399,0.17,17.0,18200
+2025-04-14T21:49:44.605724,elon-musk-of-tweets-april-11-18-628?tid=1744647093443,How many tweets will Elon Musk post from April 11-18?,2025-04-18T23:59:59Z,125200,85000,400+,0.10,10.0,14300
