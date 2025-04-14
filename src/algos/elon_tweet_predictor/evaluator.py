@@ -82,13 +82,23 @@ class PredictionEvaluator:
             # Fix for division by zero
             avg_actual = sum(p['actual'] for p in predictions.values()) / len(predictions) if predictions else 0
             
+            # Calculate percentage errors properly - only for days with actual tweets
+            valid_percent_errors = [
+                abs(p['predicted'] - p['actual']) / p['actual'] * 100 
+                for p in predictions.values() 
+                if p['actual'] > 0
+            ]
+            
+            avg_percent_error = sum(valid_percent_errors) / len(valid_percent_errors) if valid_percent_errors else float('inf')
+            
             self.logger.info(f"\nPrediction Metrics:")
             self.logger.info(f"Mean Absolute Error (MAE): {mae:.2f} tweets")
             self.logger.info(f"Root Mean Squared Error (RMSE): {rmse:.2f} tweets")
             
-            # Safe division to handle zero actual tweets
-            if avg_actual > 0:
-                self.logger.info(f"Average Error Percentage: {(mae / avg_actual) * 100:.1f}%")
+            # Use the properly calculated average percentage error
+            if valid_percent_errors:
+                self.logger.info(f"Average Error Percentage: {avg_percent_error:.1f}%")
+                self.logger.info(f"Mean Error / Mean Actual: {(mae / avg_actual) * 100:.1f}%")
             else:
                 self.logger.info("Average Error Percentage: Cannot calculate (no actual tweets)")
             
@@ -104,7 +114,8 @@ class PredictionEvaluator:
             return {
                 'mae': mae,
                 'rmse': rmse,
-                'avg_error_percent': (mae / avg_actual) * 100 if avg_actual > 0 else None,
+                'avg_percent_error': avg_percent_error if valid_percent_errors else None,
+                'mae_over_avg_actual': (mae / avg_actual) * 100 if avg_actual > 0 else None,
                 'predictions': predictions
             }
         

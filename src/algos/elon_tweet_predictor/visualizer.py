@@ -62,16 +62,34 @@ class TweetVisualizer:
         predicted_values = [predictions[d]['predicted'] for d in dates]
         actual_values = [predictions[d]['actual'] for d in dates]
         
-        plt.figure(figsize=(12, 6))
-        plt.plot(dates, predicted_values, 'b-', label='Predicted')
-        plt.plot(dates, actual_values, 'r-', label='Actual')
+        plt.figure(figsize=(12, 8))
+        
+        # Plot 1: Predicted vs Actual
+        plt.subplot(2, 1, 1)
+        plt.plot(dates, predicted_values, 'b-', marker='o', label='Predicted')
+        plt.plot(dates, actual_values, 'r-', marker='x', label='Actual')
         plt.title('Prediction Accuracy Evaluation')
-        plt.xlabel('Date')
         plt.ylabel('Number of Tweets')
         plt.xticks(rotation=45)
         plt.legend()
         plt.grid(True, alpha=0.3)
-        plt.tight_layout()
         
+        # Plot 2: Error percentages
+        plt.subplot(2, 1, 2)
+        error_percentages = [predictions[d]['percent_error'] for d in dates if predictions[d]['actual'] > 0]
+        error_dates = [d for d in dates if predictions[d]['actual'] > 0]
+        
+        if error_percentages:
+            plt.bar(error_dates, error_percentages)
+            plt.axhline(y=sum(error_percentages)/len(error_percentages), color='r', linestyle='--', 
+                      label=f'Avg: {sum(error_percentages)/len(error_percentages):.1f}%')
+            plt.title('Error Percentages by Day')
+            plt.xlabel('Date')
+            plt.ylabel('Error Percentage (%)')
+            plt.xticks(rotation=45)
+            plt.legend()
+            plt.grid(True, axis='y', alpha=0.3)
+        
+        plt.tight_layout()
         plt.savefig('elon_tweet_prediction_accuracy.png')
         self.logger.info("\nPrecision plot saved as 'elon_tweet_prediction_accuracy.png'") 
