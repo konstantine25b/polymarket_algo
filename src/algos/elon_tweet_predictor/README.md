@@ -53,13 +53,21 @@ Analyzes historical tweet patterns to extract:
 - Combined weekday-hour averages
 - Recent tweet volume trends
 
-### 3. Predictor (`predictor.py`)
+### 3. Predictor Module (`predictor/`)
 
-Uses analyzed patterns to make predictions:
+Uses analyzed patterns to make predictions. The predictor has been refactored into a modular structure:
+
+- `base_predictor.py`: Core TweetPredictor class
+- `daily_predictor.py`: Daily prediction logic
+- `hourly_predictor.py`: Hourly prediction logic
+- `utils.py`: Shared utility functions
+
+Main prediction methods:
 
 - `predict_count()`: Predicts tweets until a specific date or for N days
 - `predict_next_hours()`: Predicts tweets for the next N hours
-- Applies trend adjustments and can focus on specific hours
+
+See the [Predictor README](predictor/README.md) for detailed information.
 
 ### 4. Evaluator (`evaluator.py`)
 
