@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 from src.algos.elon_tweet_predictor.predictor.utils import (
     calculate_trend_factor,
     get_weekday_name,
@@ -18,9 +19,10 @@ def predict_next_hours(predictor, hours_ahead=4, use_trend=True):
     dict: Prediction results
     """
     analyzer = predictor.analyzer
+    logger = predictor.logger
     
     if analyzer is None or analyzer.hourly_rates is None:
-        print("Please set analyzer with analyzed patterns first")
+        logger.error("Please set analyzer with analyzed patterns first")
         return
     
     # Get current datetime from last available data point
@@ -30,14 +32,17 @@ def predict_next_hours(predictor, hours_ahead=4, use_trend=True):
     )
     target_datetime = current_datetime + timedelta(hours=hours_ahead)
     
-    print(f"\nPredicting tweets for the next {hours_ahead} hours")
-    print(f"From: {current_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"To: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"\nPredicting tweets for the next {hours_ahead} hours")
+    logger.info(f"From: {current_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"To: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Calculate trend factor
     trend_factor = calculate_trend_factor(analyzer, use_trend)
     
-    print(f"Trend adjustment factor: {trend_factor:.2f}" if use_trend else "Using historical averages without trend adjustment")
+    if use_trend:
+        logger.info(f"Trend adjustment factor: {trend_factor:.2f}")
+    else:
+        logger.info("Using historical averages without trend adjustment")
     
     # Initialize prediction
     expected_tweets = 0
@@ -128,15 +133,15 @@ def predict_next_hours(predictor, hours_ahead=4, use_trend=True):
     }
     
     # Display results
-    print(f"\nPrediction results:")
-    print(f"Expected tweets in the next {hours_ahead} hours: {expected_tweets:.2f}")
-    print("\nHour-by-hour breakdown:")
+    logger.info(f"\nPrediction results:")
+    logger.info(f"Expected tweets in the next {hours_ahead} hours: {expected_tweets:.2f}")
+    logger.info("\nHour-by-hour breakdown:")
     
     for detail in hour_by_hour:
         hour_ampm = format_hour_ampm(detail['hour'])
         if detail['partial']:
-            print(f"- {detail['datetime']} ({hour_ampm}, {detail['portion']*60:.0f} min): {detail['expected_tweets']:.2f} tweets")
+            logger.info(f"- {detail['datetime']} ({hour_ampm}, {detail['portion']*60:.0f} min): {detail['expected_tweets']:.2f} tweets")
         else:
-            print(f"- {detail['datetime']} ({hour_ampm}): {detail['expected_tweets']:.2f} tweets")
+            logger.info(f"- {detail['datetime']} ({hour_ampm}): {detail['expected_tweets']:.2f} tweets")
     
     return prediction_results 

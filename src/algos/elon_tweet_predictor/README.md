@@ -15,6 +15,7 @@ This is a data-driven tool that analyzes Elon Musk's Twitter/X posting patterns 
 - **Trend Adjustment**: Adjusts predictions based on recent tweet frequency changes
 - **Precision Evaluation**: Evaluates prediction accuracy against historical data
 - **Data Visualization**: Creates plots of tweeting patterns and prediction accuracy
+- **Configurable Logging**: Control verbosity level of output and log to files
 
 ## Data
 
@@ -61,6 +62,7 @@ Uses analyzed patterns to make predictions. The predictor has been refactored in
 - `daily_predictor.py`: Daily prediction logic
 - `hourly_predictor.py`: Hourly prediction logic
 - `utils.py`: Shared utility functions
+- `logging_utils.py`: Logging configuration utilities
 
 Main prediction methods:
 
@@ -126,24 +128,73 @@ python -m src.algos.elon_tweet_predictor.main --all-hours
 # Disable trend adjustment (use historical averages only)
 python -m src.algos.elon_tweet_predictor.main --no-trend
 
+# Control output verbosity
+python -m src.algos.elon_tweet_predictor.main --verbose INFO
+
+# Log to file instead of console
+python -m src.algos.elon_tweet_predictor.main --log-file logs/prediction.log
+
+# Show detailed logs with timestamps and module names
+python -m src.algos.elon_tweet_predictor.main --detailed-logs
+
 # Combine multiple options
-python -m src.algos.elon_tweet_predictor.main --date 2023-12-31 --hours 9,12,18,21 --plot --precision
+python -m src.algos.elon_tweet_predictor.main --date 2023-12-31 --hours 9,12,18,21 --plot --precision --verbose INFO
 ```
 
 ## Command-Line Arguments
 
-| Argument       | Type | Description                                                  |
-| -------------- | ---- | ------------------------------------------------------------ |
-| `--file`       | str  | Path to custom data file (default: elonmusk_reformatted.csv) |
-| `--date`       | str  | Target date to predict (YYYY-MM-DD format)                   |
-| `--days`       | int  | Number of days to predict (default: 7)                       |
-| `--hours`      | str  | Comma-separated list of specific hours (0-23) to include     |
-| `--next-hours` | int  | Predict for the next N hours instead of full days            |
-| `--plot`       | flag | Generate activity plots                                      |
-| `--precision`  | flag | Evaluate prediction precision                                |
-| `--days-back`  | int  | Number of days back for precision evaluation (default: 14)   |
-| `--all-hours`  | flag | Display tweet counts for all 24 hours                        |
-| `--no-trend`   | flag | Disable trend adjustment (use historical averages only)      |
+| Argument          | Type | Description                                                    |
+| ----------------- | ---- | -------------------------------------------------------------- |
+| `--file`          | str  | Path to custom data file (default: elonmusk_reformatted.csv)   |
+| `--date`          | str  | Target date to predict (YYYY-MM-DD format)                     |
+| `--days`          | int  | Number of days to predict (default: 7)                         |
+| `--hours`         | str  | Comma-separated list of specific hours (0-23) to include       |
+| `--next-hours`    | int  | Predict for the next N hours instead of full days              |
+| `--plot`          | flag | Generate activity plots                                        |
+| `--precision`     | flag | Evaluate prediction precision                                  |
+| `--days-back`     | int  | Number of days back for precision evaluation (default: 14)     |
+| `--all-hours`     | flag | Display tweet counts for all 24 hours                          |
+| `--no-trend`      | flag | Disable trend adjustment (use historical averages only)        |
+| `--verbose`       | str  | Verbosity level (SILENT, ERROR, WARNING, INFO, DEBUG, VERBOSE) |
+| `--log-file`      | str  | Path to save logs instead of printing to console               |
+| `--detailed-logs` | flag | Show detailed logs with timestamps and module names            |
+
+## Logging Options
+
+The predictor now offers two types of log output formats:
+
+1. **Default Clean Format**: Just shows the messages without timestamps or logger names for cleaner output
+2. **Detailed Format**: Shows timestamps, module names, and log levels (use `--detailed-logs` to enable)
+
+### Verbosity Levels
+
+The predictor supports different verbosity levels to control the amount of output:
+
+- **SILENT**: No output is displayed (useful for automated runs)
+- **ERROR**: Only show error messages
+- **WARNING**: Show warnings and errors
+- **INFO** (default): Show standard information, warnings, and errors
+- **DEBUG**: Show detailed debug information
+- **VERBOSE**: Show extremely detailed output (useful for debugging)
+
+Examples:
+
+```bash
+# Minimal output - shows only errors
+python -m src.algos.elon_tweet_predictor.main --verbose ERROR
+
+# Default level - shows standard information
+python -m src.algos.elon_tweet_predictor.main --verbose INFO
+
+# Detailed output for debugging
+python -m src.algos.elon_tweet_predictor.main --verbose DEBUG --detailed-logs
+
+# Completely silent operation
+python -m src.algos.elon_tweet_predictor.main --verbose SILENT
+
+# Log to file with detailed format while console output is clean
+python -m src.algos.elon_tweet_predictor.main --log-file logs/prediction.log
+```
 
 ## Installation
 

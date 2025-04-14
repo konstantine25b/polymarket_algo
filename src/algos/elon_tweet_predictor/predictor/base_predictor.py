@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
 import pandas as pd
+import logging
 from src.algos.elon_tweet_predictor.predictor.utils import (
     calculate_trend_factor, 
     validate_hours,
@@ -9,8 +10,9 @@ from src.algos.elon_tweet_predictor.predictor.utils import (
 )
 
 class TweetPredictor:
-    def __init__(self, analyzer=None):
+    def __init__(self, analyzer=None, logger=None):
         self.analyzer = analyzer
+        self.logger = logger or logging.getLogger(__name__)
     
     def predict_count(self, target_date_str=None, days=None, use_trend=True, hours=None):
         """

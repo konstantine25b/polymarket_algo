@@ -1,13 +1,15 @@
 import matplotlib.pyplot as plt
+import logging
 
 class TweetVisualizer:
-    def __init__(self, analyzer=None):
+    def __init__(self, analyzer=None, logger=None):
         self.analyzer = analyzer
+        self.logger = logger or logging.getLogger(__name__)
         
     def plot_activity(self):
         """Plot tweet activity over time"""
         if self.analyzer is None or self.analyzer.daily_counts is None:
-            print("Please set analyzer with analyzed patterns first")
+            self.logger.error("Please set analyzer with analyzed patterns first")
             return
             
         plt.figure(figsize=(12, 8))
@@ -46,12 +48,12 @@ class TweetVisualizer:
         plt.grid(True, axis='y', alpha=0.3)
         
         plt.savefig('elon_tweet_activity.png')
-        print("\nActivity plot saved as 'elon_tweet_activity.png'")
+        self.logger.info("\nActivity plot saved as 'elon_tweet_activity.png'")
         
     def plot_precision_results(self, precision_results):
         """Plot precision evaluation results"""
         if not precision_results or 'predictions' not in precision_results:
-            print("No precision results to plot")
+            self.logger.warning("No precision results to plot")
             return
             
         predictions = precision_results['predictions']
@@ -72,4 +74,4 @@ class TweetVisualizer:
         plt.tight_layout()
         
         plt.savefig('elon_tweet_prediction_accuracy.png')
-        print("\nPrecision plot saved as 'elon_tweet_prediction_accuracy.png'") 
+        self.logger.info("\nPrecision plot saved as 'elon_tweet_prediction_accuracy.png'") 

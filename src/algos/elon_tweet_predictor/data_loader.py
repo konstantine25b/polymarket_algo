@@ -1,16 +1,18 @@
 import pandas as pd
 from datetime import datetime
+import logging
 
 class TweetDataLoader:
-    def __init__(self):
+    def __init__(self, logger=None):
         self.df = None
         self.last_date = None
         self.last_time = None
+        self.logger = logger or logging.getLogger(__name__)
         
     def load_data(self, file_path):
         """Load the tweet data from the reformatted CSV"""
-        print(f"\n{'='*50}")
-        print(f"Loading data from: {file_path}")
+        self.logger.info(f"\n{'='*50}")
+        self.logger.info(f"Loading data from: {file_path}")
         
         try:
             # Load the data
@@ -38,12 +40,12 @@ class TweetDataLoader:
             self.last_date = self.df['created_at'].max().date()
             self.last_time = self.df['created_at'].max().time()
             
-            print(f"Loaded {len(self.df)} tweets")
-            print(f"Date range: {self.df['date'].min()} to {self.df['date'].max()}")
-            print(f"Last tweet time: {self.last_time}")
+            self.logger.info(f"Loaded {len(self.df)} tweets")
+            self.logger.info(f"Date range: {self.df['date'].min()} to {self.df['date'].max()}")
+            self.logger.info(f"Last tweet time: {self.last_time}")
             
             return True
             
         except Exception as e:
-            print(f"Error loading data: {str(e)}")
+            self.logger.error(f"Error loading data: {str(e)}")
             return False 

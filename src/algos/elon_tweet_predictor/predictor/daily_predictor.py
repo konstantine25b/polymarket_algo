@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
+import logging
 from src.algos.elon_tweet_predictor.predictor.utils import (
     calculate_trend_factor, 
     validate_hours,
@@ -21,15 +22,16 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
     dict: Prediction results
     """
     analyzer = predictor.analyzer
+    logger = predictor.logger
     
     if analyzer is None or analyzer.hourly_rates is None:
-        print("Please set analyzer with analyzed patterns first")
+        logger.error("Please set analyzer with analyzed patterns first")
         return
     
     # Validate hours input if provided
     hours = validate_hours(hours)
     if hours:
-        print(f"Using specific hours for prediction: {sorted(hours)}")
+        logger.info(f"Using specific hours for prediction: {sorted(hours)}")
     
     # Determine target date
     if target_date_str:
@@ -41,8 +43,8 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
         
     # Check if target date is in the past
     if target_date < analyzer.df['date'].max():
-        print(f"Target date {target_date} is before the last date in the dataset {analyzer.df['date'].max()}.")
-        print("Please choose a future date.")
+        logger.error(f"Target date {target_date} is before the last date in the dataset {analyzer.df['date'].max()}.")
+        logger.error("Please choose a future date.")
         return
     
     current_datetime = datetime.combine(analyzer.df['date'].max(), analyzer.df['created_at'].max().time())
@@ -51,11 +53,14 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
     # Calculate trend factor
     trend_factor = calculate_trend_factor(analyzer, use_trend)
     
-    print(f"\nTrend adjustment factor: {trend_factor:.2f}" if use_trend else "\nUsing historical averages without trend adjustment")
+    if use_trend:
+        logger.info(f"\nTrend adjustment factor: {trend_factor:.2f}")
+    else:
+        logger.info("\nUsing historical averages without trend adjustment")
     
     # If target date is the same as last date, we predict for remaining hours
     if target_date == current_datetime.date():
-        print(f"\nPredicting tweets for remaining hours of {target_date}")
+        logger.info(f"\nPredicting tweets for remaining hours of {target_date}")
         remaining_prediction = predictor.predict_remaining_hours(
             current_datetime, 
             target_datetime, 
@@ -64,10 +69,10 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
         )
         
         # Display results even for same day
-        print(f"\nPrediction results:")
-        print(f"From {current_datetime.strftime('%Y-%m-%d %H:%M:%S')} to {target_date}")
-        print(f"Expected tweets for remaining hours: {remaining_prediction['expected_tweets']:.1f}")
-        print(f"Remaining hours: {remaining_prediction['remaining_hours']:.2f}")
+        logger.info(f"\nPrediction results:")
+        logger.info(f"From {current_datetime.strftime('%Y-%m-%d %H:%M:%S')} to {target_date}")
+        logger.info(f"Expected tweets for remaining hours: {remaining_prediction['expected_tweets']:.1f}")
+        logger.info(f"Remaining hours: {remaining_prediction['remaining_hours']:.2f}")
         
         return {
             'from_date': current_datetime.date(),
@@ -79,7 +84,7 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
         }
     
     # For future days
-    print(f"\nPredicting tweets from {current_datetime.date()} to {target_date}")
+    logger.info(f"\nPredicting tweets from {current_datetime.date()} to {target_date}")
     
     # Get counts for remaining hours of the current day
     current_day_prediction = predictor.predict_remaining_hours(
@@ -90,7 +95,7 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
     )
     
     remaining_days = (target_date - current_datetime.date()).days
-    print(f"Days to predict: {remaining_days} full days + remaining hours today")
+    logger.info(f"Days to predict: {remaining_days} full days + remaining hours today")
     
     # Initialize results
     day_by_day = defaultdict(float)
@@ -143,20 +148,20 @@ def predict_daily(predictor, target_date_str=None, days=None, use_trend=True, ho
     }
     
     # Display results
-    print(f"\nPrediction results:")
+    logger.info(f"\nPrediction results:")
     if hours is not None:
         hour_str = ", ".join([f"{h}:00" for h in sorted(hours)])
-        print(f"Predicting for specific hours: {hour_str}")
+        logger.info(f"Predicting for specific hours: {hour_str}")
         
-    print(f"From {current_datetime.date()} to {target_date}")
-    print(f"Expected tweets: {total_expected:.1f}")
-    print("\nDay-by-day breakdown:")
+    logger.info(f"From {current_datetime.date()} to {target_date}")
+    logger.info(f"Expected tweets: {total_expected:.1f}")
+    logger.info("\nDay-by-day breakdown:")
     
     for detail in prediction_details:
         if 'weekday' in detail:
             hour_info = f" (specific hours only)" if hours is not None else ""
-            print(f"- {detail['date']} ({detail['weekday']}){hour_info}: {detail['expected_tweets']:.1f} tweets")
+            logger.info(f"- {detail['date']} ({detail['weekday']}){hour_info}: {detail['expected_tweets']:.1f} tweets")
         else:
-            print(f"- {current_datetime.date()} (remaining hours): {detail['expected_tweets']:.1f} tweets")
+            logger.info(f"- {current_datetime.date()} (remaining hours): {detail['expected_tweets']:.1f} tweets")
     
     return prediction_results 

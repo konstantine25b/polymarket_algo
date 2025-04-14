@@ -2,21 +2,23 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pandas import Timestamp
 import os
+import logging
 from pathlib import Path
 from src.utils.file_utils import get_data_path
 
 class PredictionEvaluator:
-    def __init__(self, predictor=None, analyzer=None):
+    def __init__(self, predictor=None, analyzer=None, logger=None):
         self.predictor = predictor
         self.analyzer = analyzer
+        self.logger = logger or logging.getLogger(__name__)
         
     def evaluate_precision(self, days_back=14):
         """Calculate precision by comparing predictions for past days with actual counts"""
         if self.analyzer is None or self.analyzer.daily_counts is None:
-            print("Please set analyzer with analyzed patterns first")
+            self.logger.error("Please set analyzer with analyzed patterns first")
             return
             
-        print(f"\nEvaluating prediction precision over the past {days_back} days...")
+        self.logger.info(f"\nEvaluating prediction precision over the past {days_back} days...")
         
         # Get the actual daily counts for comparison
         end_date = self.analyzer.df['date'].max()
@@ -80,23 +82,23 @@ class PredictionEvaluator:
             # Fix for division by zero
             avg_actual = sum(p['actual'] for p in predictions.values()) / len(predictions) if predictions else 0
             
-            print(f"\nPrediction Metrics:")
-            print(f"Mean Absolute Error (MAE): {mae:.2f} tweets")
-            print(f"Root Mean Squared Error (RMSE): {rmse:.2f} tweets")
+            self.logger.info(f"\nPrediction Metrics:")
+            self.logger.info(f"Mean Absolute Error (MAE): {mae:.2f} tweets")
+            self.logger.info(f"Root Mean Squared Error (RMSE): {rmse:.2f} tweets")
             
             # Safe division to handle zero actual tweets
             if avg_actual > 0:
-                print(f"Average Error Percentage: {(mae / avg_actual) * 100:.1f}%")
+                self.logger.info(f"Average Error Percentage: {(mae / avg_actual) * 100:.1f}%")
             else:
-                print("Average Error Percentage: Cannot calculate (no actual tweets)")
+                self.logger.info("Average Error Percentage: Cannot calculate (no actual tweets)")
             
             # Display prediction vs actual for each day
-            print("\nDay-by-day comparison:")
+            self.logger.info("\nDay-by-day comparison:")
             for date, data in sorted(predictions.items()):
                 error_percent = data['percent_error'] if data['actual'] > 0 else "N/A"
                 error_percent_display = f"({error_percent:.1f}%)" if isinstance(error_percent, (int, float)) else f"({error_percent})"
                 
-                print(f"- {date}: Predicted {data['predicted']:.1f}, Actual {data['actual']}, " +
+                self.logger.info(f"- {date}: Predicted {data['predicted']:.1f}, Actual {data['actual']}, " +
                       f"Error {data['error']:.1f} {error_percent_display}")
             
             return {
@@ -106,5 +108,5 @@ class PredictionEvaluator:
                 'predictions': predictions
             }
         
-        print("No valid prediction days found for evaluation")
+        self.logger.warning("No valid prediction days found for evaluation")
         return None 

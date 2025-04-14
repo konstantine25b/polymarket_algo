@@ -9,6 +9,7 @@ This module contains the code for predicting tweet activity based on historical 
 - `daily_predictor.py` - Implements daily prediction logic
 - `hourly_predictor.py` - Implements hourly prediction logic
 - `utils.py` - Common utility functions shared across prediction modules
+- `logging_utils.py` - Logging configuration and verbosity control
 
 ## Main Classes and Functions
 
@@ -51,3 +52,43 @@ predictor.predict_next_hours(hours_ahead=4)
 - `validate_hours()`: Validate and filter hour inputs
 - `get_weekday_name()`: Convert weekday index to name
 - `format_hour_ampm()`: Format hour in 12-hour AM/PM format
+
+### Logging Utilities
+
+The `logging_utils.py` module provides tools to control the verbosity of output:
+
+- `setup_logger()`: Configure logging with specified verbosity level
+
+  - Parameters:
+    - `name`: Logger name (default: 'elon_tweet_predictor')
+    - `level`: Verbosity level (SILENT, ERROR, WARNING, INFO, DEBUG, VERBOSE)
+    - `log_file`: Optional path to log file
+    - `clean_format`: Whether to use a clean format (True) or detailed format with timestamps (False)
+
+- `get_verbosity()`: Get current verbosity level
+- `set_verbosity()`: Set global verbosity level
+- `verbose_print()`: Print message only if current verbosity allows it
+
+Example usage:
+
+```python
+from src.algos.elon_tweet_predictor.predictor.logging_utils import setup_logger
+
+# Create logger with INFO level
+logger = setup_logger(level='INFO')
+logger.info("Standard information")
+logger.debug("Detailed debug information - not shown at INFO level")
+
+# Create logger with DEBUG level and file output
+logger = setup_logger(level='DEBUG', log_file='logs/prediction.log')
+logger.debug("Detailed debug information - now visible and saved to file")
+```
+
+Available log levels (from less to more verbose):
+
+- SILENT: No output
+- ERROR: Only errors
+- WARNING: Warnings and errors
+- INFO: Standard information, warnings, and errors
+- DEBUG: Detailed debugging information
+- VERBOSE: Maximum verbosity
