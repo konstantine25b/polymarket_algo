@@ -7,15 +7,35 @@ from typing import List, Dict, Optional, Any, Tuple
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 import time
+import random
 
 # --- Configuration ---
 GAMMA_API_HOST = "https://gamma-api.polymarket.com"
 CLOB_API_HOST = "https://clob.polymarket.com"
 POLYMARKET_API_HOST = "https://polymarket.com/api"
-POLYMARKET_ORDER_BOOK_API = "https://strapi-matic.poly.market/order-books"
+POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books" # Updated endpoint
 
 class PolymarketAPIClient:
     """Client for interacting with Polymarket APIs."""
+    
+    # Class-level singleton instance
+    _instance = None
+    
+    @classmethod
+    def _get_instance(cls):
+        """
+        Get or create a singleton instance of the PolymarketAPIClient.
+        
+        Returns:
+            PolymarketAPIClient: The singleton instance
+        """
+        if cls._instance is None:
+            cls._instance = cls()
+            # Initialize clob_client for the instance
+            cls._instance.clob_client = ClobClient(host=CLOB_API_HOST, chain_id=137)  # 137 is for Polygon
+            cls._instance.conditions_and_outcomes = {}
+        
+        return cls._instance
     
     @staticmethod
     def extract_slug_from_url(url: str) -> Optional[str]:
@@ -224,226 +244,318 @@ class PolymarketAPIClient:
         except Exception as e:
             print(f"An error occurred fetching data from CLOB API: {e}")
             return None
-    
-    @classmethod
-    def get_order_frames(cls, event_slug: str, thread_id: Optional[str] = None) -> Optional[Dict[str, Dict[str, List[Dict[str, float]]]]]:
+            
+    @staticmethod
+    def get_order_book_from_direct_api(market_id: str) -> Optional[Dict[str, Any]]:
         """
-        Fetches order frames (buy/sell orders) for an event using the Polymarket API.
+        Fetch order book data directly from the Polymarket API.
         
         Args:
-            event_slug: The event slug identifier
-            thread_id: Optional thread ID from the URL
+            market_id: The market ID
             
         Returns:
-            A dictionary of market questions mapping to dictionaries containing:
-                - 'buy_orders': List of buy orders for YES outcomes
-                - 'sell_orders': List of sell orders for YES outcomes
-                
-            Example:
-            {
-                "Market Question 1": {
-                    "buy_orders": [
-                        {"price": 95.5, "size": 100.0, "total": 9550.0},
-                        ...
-                    ],
-                    "sell_orders": [
-                        {"price": 97.8, "size": 200.0, "total": 19560.0},
-                        ...
-                    ],
-                    "market_id": "token_id_here"
-                },
-                ...
-            }
-            
-            Returns None if fetching fails.
+            Dictionary of order book data or None if request fails
         """
         try:
-            # First try to get market details from the Polymarket API directly
-            market_details, event_title = cls.get_market_details_from_polymarket_api(event_slug, thread_id)
+            # Build the URL with the market ID
+            api_url = f"{POLYMARKET_API_HOST}/markets/{market_id}/orderbook"
             
-            # If that fails, fall back to the Gamma API
-            if not market_details:
-                print("Falling back to Gamma API...")
-                market_details, event_title = cls.get_market_details_from_gamma(event_slug)
+            # Make the request
+            headers = {
+                # Add standard headers to appear like a browser request
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://polymarket.com/"
+            }
             
-            if not market_details:
-                print("Could not retrieve market details from any API.")
+            response = requests.get(api_url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('data', {})
+            else:
+                print(f"Failed to fetch order book for market {market_id}, status code: {response.status_code}")
                 return None
-            
-            # Group market details by question and store market IDs
-            market_question_map = {}
-            
-            for item in market_details:
-                question = item.get("question", "")
-                market_id = item.get("market_id")
                 
-                if not question or not market_id:
-                    continue
+        except Exception as e:
+            print(f"Error fetching order book from direct API: {e}")
+            return None
+            
+    @staticmethod
+    def fetch_order_book_from_clob(token_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch order book data directly from the CLOB API.
+        
+        Args:
+            token_id: The token ID
+            
+        Returns:
+            Dictionary of order book data or None if request fails
+        """
+        try:
+            # Initialize CLOB client
+            client = ClobClient(host=CLOB_API_HOST, chain_id=137)
+            
+            # Create BookParams with token ID
+            params = [BookParams(token_id=token_id)]
+            
+            # Fetch order books using the get_order_books method
+            order_books = client.get_order_books(params=params)
+            
+            # Check if we got valid data back
+            if order_books and len(order_books) > 0:
+                order_book = order_books[0]  # Take the first result
+                
+                # Convert the CLOB data format to our standard format
+                buy_orders = []
+                sell_orders = []
+                
+                # Process bids (buy orders)
+                for bid in order_book.bids:
+                    price = float(bid.price)
+                    size = float(bid.size)
                     
-                if question not in market_question_map:
-                    market_question_map[question] = {
-                        "market_id": market_id,
-                        "outcomes": []
-                    }
+                    if price > 0 and size > 0:
+                        buy_orders.append({
+                            "price": price * 100,  # Convert to percentage
+                            "size": size,
+                            "total": (price * size)  # Total in dollars
+                        })
                 
-                # Add the outcome if it's not already in the list
-                outcome = {
-                    "value": item.get("outcome", ""),
-                    "token_id": item.get("token_id", ""),
-                    "outcome_id": item.get("outcome_id", "")
+                # Process asks (sell orders)
+                for ask in order_book.asks:
+                    price = float(ask.price)
+                    size = float(ask.size)
+                    
+                    if price > 0 and size > 0:
+                        sell_orders.append({
+                            "price": price * 100,  # Convert to percentage
+                            "size": size,
+                            "total": (price * size)  # Total in dollars
+                        })
+                
+                # Sort orders appropriately
+                buy_orders.sort(key=lambda x: x["price"], reverse=True)
+                sell_orders.sort(key=lambda x: x["price"])
+                
+                return {
+                    "buy_orders": buy_orders,
+                    "sell_orders": sell_orders,
+                    "is_synthetic": False
                 }
+            else:
+                print(f"No order book data returned for token {token_id}")
+                return None
                 
-                if outcome not in market_question_map[question]["outcomes"]:
-                    market_question_map[question]["outcomes"].append(outcome)
+        except Exception as e:
+            print(f"Error fetching from CLOB API: {e}")
+            return None
+    
+    @classmethod
+    def get_order_frames(cls, event_slug=None, thread_id=None):
+        """
+        Get order frames from gamma and clob for a given event.
+        
+        Args:
+            event_slug (str): The event slug. 
+            thread_id (str): Optional thread ID from the URL.
             
-            # Fetch real order book data
-            order_frames = {}
+        Returns:
+            dict: Dictionary mapping market questions to order frames with buy and sell orders
+        """
+        if event_slug is None:
+            print("Error: event_slug must be provided.")
+            return None
             
-            # Process max 5 markets to prevent long execution times
-            market_count = 0
-            max_markets = 5
+        clob_client = cls._get_instance().clob_client
+        
+        # Get market details
+        market_details, event_title = cls.get_market_details_from_gamma(event_slug)
+        
+        if not market_details:
+            print(f"No markets found for event {event_slug}")
+            return None
             
-            for question, market_info in market_question_map.items():
-                # Limit the number of markets processed 
-                market_count += 1
-                if market_count > max_markets:
-                    print(f"Only processing the first {max_markets} markets to prevent long execution times")
-                    break
+        print(f"Found {len(market_details)} markets for event: {event_title}")
+        
+        # Build dictionary that maps market questions to IDs
+        market_question_map = {}
+        token_data = {}
+        
+        # Group by question to collect YES and NO outcomes
+        questions_map = {}
+        for detail in market_details:
+            question = detail.get("question", "Unknown Question")
+            market_id = detail.get("market_id", "")
+            outcome = detail.get("outcome", "")
+            token_id = detail.get("token_id", "")
+            
+            if question not in questions_map:
+                questions_map[question] = {
+                    "market_id": market_id,
+                    "outcomes": []
+                }
+            
+            questions_map[question]["outcomes"].append({
+                "name": outcome,
+                "token_id": token_id
+            })
+        
+        # Map the YES and NO outcomes for each question
+        for question, data in questions_map.items():
+            market_id = data["market_id"]
+            yes_token_id = None
+            no_token_id = None
+            
+            # Find YES and NO token IDs
+            for outcome in data["outcomes"]:
+                if outcome["name"].upper() == "YES":
+                    yes_token_id = outcome["token_id"]
+                    print(f"DEBUG: Paired YES outcome: {outcome}")
+                elif outcome["name"].upper() == "NO":
+                    no_token_id = outcome["token_id"]
+                    print(f"DEBUG: Paired NO outcome: {outcome}")
+            
+            if yes_token_id and no_token_id:
+                market_question_map[question] = market_id
+                token_data[market_id] = {
+                    "yes_token_id": yes_token_id,
+                    "no_token_id": no_token_id
+                }
+        
+        # Build order frames
+        order_frames = {}
+        
+        for question, market_id in market_question_map.items():
+            tokens = token_data.get(market_id, {})
+            yes_token_id = tokens.get("yes_token_id")
+            no_token_id = tokens.get("no_token_id")
+            
+            # Try multiple methods to get real order book data
+            real_order_data = None
+            
+            # Method 1: Try fetching directly from CLOB API using get_order_books
+            try:
+                print(f"Attempting to fetch real order book data for market: {question}")
+                order_book_data = cls.fetch_order_book_from_clob(yes_token_id)
                 
-                market_id = market_info.get("market_id")
-                
-                if not market_id:
-                    print(f"No market ID found for question: {question}")
-                    continue
-                
-                # Fetch real order book data
-                print(f"Fetching real order book data for {question} (Market ID: {market_id})")
-                
-                # Make the API request with retry mechanism
-                max_retries = 3
-                real_order_data = None
-                
-                for attempt in range(max_retries):
-                    try:
-                        api_url = f"{POLYMARKET_ORDER_BOOK_API}?marketId={market_id}"
-                        response = requests.get(api_url, timeout=15)
-                        
-                        if response.status_code == 200:
-                            order_data = response.json()
-                            
-                            # Process buy orders
-                            buy_orders = []
-                            for order in order_data.get('buyOrders', []):
-                                price = float(order.get('price', 0))
-                                size = float(order.get('size', 0))
-                                buy_orders.append({
-                                    "price": price,
-                                    "size": size,
-                                    "total": (price * size) / 100  # Convert to dollars
-                                })
-                            
-                            # Process sell orders
-                            sell_orders = []
-                            for order in order_data.get('sellOrders', []):
-                                price = float(order.get('price', 0))
-                                size = float(order.get('size', 0))
-                                sell_orders.append({
-                                    "price": price,
-                                    "size": size,
-                                    "total": (price * size) / 100  # Convert to dollars
-                                })
-                            
-                            # Sort orders
-                            buy_orders = sorted(buy_orders, key=lambda x: x['price'], reverse=True)
-                            sell_orders = sorted(sell_orders, key=lambda x: x['price'])
-                            
-                            # Only consider this successful if we got some orders
-                            if buy_orders or sell_orders:
-                                real_order_data = {
-                                    "buy_orders": buy_orders,
-                                    "sell_orders": sell_orders,
-                                    "market_id": market_id,
-                                    "is_synthetic": False
-                                }
-                                print(f"Successfully fetched real order book data with {len(buy_orders)} buy orders and {len(sell_orders)} sell orders")
-                                break  # Exit retry loop on success
-                            else:
-                                print(f"Got empty order book data. Retrying ({attempt+1}/{max_retries})")
-                                if attempt < max_retries - 1:
-                                    time.sleep(1)  # Wait before retrying
-                        else:
-                            print(f"API request failed with status {response.status_code}, attempt {attempt+1}/{max_retries}")
-                            if attempt < max_retries - 1:
-                                time.sleep(1)  # Wait before retrying
-                                
-                    except Exception as e:
-                        print(f"Error fetching order book for {question}: {e}")
-                        if attempt < max_retries - 1:
-                            time.sleep(1)  # Wait before retrying
-                
-                # If we couldn't get real data, look for token IDs and generate synthetic data as a fallback
-                if not real_order_data:
-                    yes_outcome = next((o for o in market_info.get("outcomes", []) if o.get("value", "").lower() == "yes"), None)
+                if order_book_data and order_book_data.get("buy_orders") and order_book_data.get("sell_orders"):
+                    real_order_data = {
+                        "buy_orders": order_book_data["buy_orders"],
+                        "sell_orders": order_book_data["sell_orders"],
+                        "market_id": market_id,
+                        "is_synthetic": False
+                    }
+                    print(f"✅ Successfully retrieved real order book data for market: {question}")
+            except Exception as e:
+                print(f"Error fetching order book using CLOB API for {question}: {e}")
+            
+            # Method 2: Try fetching from Polymarket API directly
+            if not real_order_data and market_id:
+                try:
+                    print(f"Attempting to fetch order book from direct API for market: {question}")
+                    order_book_data = cls.get_order_book_from_direct_api(market_id)
                     
-                    if yes_outcome and yes_outcome.get("token_id"):
-                        yes_token_id = yes_outcome.get("token_id")
-                        print(f"Using synthetic order data for {question}")
-                        
-                        # Get the price from CLOB API for synthetic data
-                        prices = cls.get_market_prices_from_clob([yes_token_id])
-                        yes_price = prices.get(yes_token_id, 0.5) if prices else 0.5
-                        
-                        # Create synthetic data based on the current price
+                    if order_book_data:
+                        # Extract and format buy and sell orders
                         buy_orders = []
                         sell_orders = []
                         
-                        # Generate buy orders (slightly below the midpoint price)
-                        for i in range(5):
-                            price_discount = (i + 1) * 0.5  # Increasing discount
-                            buy_price = max(1.0, yes_price * 100 - price_discount)
-                            size = 100 / (i + 1)  # Decreasing size
+                        # Process bids from API response
+                        for bid in order_book_data.get("bids", []):
+                            price = float(bid.get("price", 0))
+                            size = float(bid.get("size", 0))
+                            
                             buy_orders.append({
-                                "price": round(buy_price, 1),
-                                "size": round(size, 2),
-                                "total": round((size * buy_price) / 100, 2)  # Total in dollars
+                                "price": price * 100,  # Convert to percentage points
+                                "size": size,
+                                "total": price * size
                             })
                         
-                        # Generate sell orders (slightly above the midpoint price)
-                        for i in range(5):
-                            price_premium = (i + 1) * 0.5  # Increasing premium
-                            sell_price = min(99.0, yes_price * 100 + price_premium)
-                            size = 100 / (i + 1)  # Decreasing size
+                        # Process asks from API response
+                        for ask in order_book_data.get("asks", []):
+                            price = float(ask.get("price", 0))
+                            size = float(ask.get("size", 0))
+                            
                             sell_orders.append({
-                                "price": round(sell_price, 1),
-                                "size": round(size, 2),
-                                "total": round((size * sell_price) / 100, 2)  # Total in dollars
+                                "price": price * 100,  # Convert to percentage points
+                                "size": size,
+                                "total": price * size
                             })
                         
-                        order_frames[question] = {
-                            "buy_orders": buy_orders,
-                            "sell_orders": sell_orders,
-                            "market_id": market_id,
-                            "is_synthetic": True
-                        }
-                    else:
-                        print(f"Skipping question '{question}' - no YES outcome token ID found")
-                        continue
-                else:
-                    # Use real order book data
-                    order_frames[question] = real_order_data
+                        if buy_orders or sell_orders:
+                            real_order_data = {
+                                "buy_orders": buy_orders,
+                                "sell_orders": sell_orders,
+                                "market_id": market_id,
+                                "is_synthetic": False
+                            }
+                            print(f"✅ Successfully retrieved real order book data from direct API for market: {question}")
+                except Exception as e:
+                    print(f"Error fetching order book from direct API for {question}: {e}")
             
-            if order_frames:
-                print(f"Successfully processed order frames for {len(order_frames)} markets")
-                return order_frames
-            else:
-                print("No order frames could be generated or fetched")
-                return None
+            # Method 3: Try the alternate Polymarket order book API
+            if not real_order_data and market_id:
+                try:
+                    print(f"Attempting to fetch from alternate order book API for market: {question}")
+                    alt_api_url = f"{POLYMARKET_ORDER_BOOK_API}?marketId={market_id}"
+                    
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                        "Accept": "application/json",
+                        "Referer": "https://polymarket.com/"
+                    }
+                    
+                    response = requests.get(alt_api_url, headers=headers, timeout=10)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        buy_orders = []
+                        for order in data.get("buyOrders", []):
+                            price = float(order.get("price", 0))
+                            size = float(order.get("size", 0))
+                            
+                            if price > 0 and size > 0:
+                                buy_orders.append({
+                                    "price": price * 100,  # Convert to percentage
+                                    "size": size,
+                                    "total": price * size
+                                })
+                        
+                        sell_orders = []
+                        for order in data.get("sellOrders", []):
+                            price = float(order.get("price", 0))
+                            size = float(order.get("size", 0))
+                            
+                            if price > 0 and size > 0:
+                                sell_orders.append({
+                                    "price": price * 100,  # Convert to percentage
+                                    "size": size,
+                                    "total": price * size
+                                })
+                        
+                        if buy_orders or sell_orders:
+                            real_order_data = {
+                                "buy_orders": buy_orders,
+                                "sell_orders": sell_orders,
+                                "market_id": market_id,
+                                "is_synthetic": False
+                            }
+                            print(f"✅ Successfully retrieved real order book data from alternate API for market: {question}")
+                except Exception as e:
+                    print(f"Error fetching from alternate order book API for {question}: {e}")
             
-        except Exception as e:
-            print(f"An error occurred processing order frames: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+            # If all methods failed, skip this market
+            if not real_order_data:
+                print(f"❌ Could not fetch real order book data for market: {question}")
+                continue
+            
+            # Add to order frames
+            order_frames[question] = real_order_data
+            
+        return order_frames
     
     @classmethod
     def get_event_data(cls, event_url: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
@@ -503,4 +615,81 @@ class PolymarketAPIClient:
             if "percentage" not in detail and "probability" in detail:
                 detail["percentage"] = float(detail["probability"]) * 100
                         
-        return market_details, event_title 
+        return market_details, event_title
+
+    @classmethod
+    def get_conditions_and_outcomes(cls):
+        return cls._get_instance().conditions_and_outcomes
+
+    @classmethod
+    def get_midpoint(cls, market_id, yes_token_id, no_token_id):
+        """
+        Get the midpoint price for a market based on YES and NO token IDs.
+        
+        Args:
+            market_id (str): The market ID
+            yes_token_id (str): The YES token ID
+            no_token_id (str): The NO token ID
+            
+        Returns:
+            float: The midpoint price (0-1)
+        """
+        try:
+            clob_client = cls._get_instance().clob_client
+            
+            # Create BookParams for both YES and NO tokens
+            params = [
+                BookParams(token_id=yes_token_id),
+                BookParams(token_id=no_token_id)
+            ]
+            
+            # Fetch midpoints for both tokens in one call
+            try:
+                midpoints_response = clob_client.get_midpoints(params=params)
+                
+                # Extract YES midpoint
+                if yes_token_id in midpoints_response:
+                    yes_midpoint_str = midpoints_response.get(yes_token_id, "0.5")
+                    
+                    # Convert to float
+                    try:
+                        yes_midpoint = float(yes_midpoint_str)
+                        return yes_midpoint
+                    except (ValueError, TypeError):
+                        print(f"Warning: Could not parse midpoint '{yes_midpoint_str}' for token_id {yes_token_id}")
+                else:
+                    print(f"No midpoint returned for YES token {yes_token_id}")
+                
+                return 0.5  # Default if midpoint can't be determined
+                
+            except Exception as e:
+                print(f"Error getting midpoints from CLOB API for market {market_id}: {e}")
+                return 0.5
+                
+        except Exception as e:
+            print(f"Error in get_midpoint: {e}")
+            return 0.5
+
+    @classmethod
+    def get_midpoints(cls, markets_data):
+        """
+        Get midpoint prices for multiple markets
+        
+        Args:
+            markets_data (dict): Dictionary mapping market_id to token information
+                Format: {market_id: {"yes_token_id": str, "no_token_id": str}}
+                
+        Returns:
+            dict: Dictionary mapping market_id to midpoint price
+        """
+        midpoint_prices = {}
+        
+        for market_id, token_data in markets_data.items():
+            yes_token_id = token_data.get("yes_token_id")
+            no_token_id = token_data.get("no_token_id")
+            
+            if yes_token_id and no_token_id:
+                midpoint = cls.get_midpoint(market_id, yes_token_id, no_token_id)
+                midpoint_prices[market_id] = midpoint
+        
+        return midpoint_prices 

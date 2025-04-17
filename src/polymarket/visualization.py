@@ -225,6 +225,15 @@ class Visualization:
         else:
             # Default if no percentages
             ax.set_ylim(bottom=-10, top=100)
+            
+        # Safely set the container heights if they exist
+        try:
+            if ax.containers and len(ax.containers) > 0 and len(ax.containers[0]) > 0:
+                # No need to set y-axis limits here since we already did it above
+                pass
+        except (IndexError, ValueError):
+            # If there's an error with containers, we've already set default limits above
+            pass
         
         # Format y-axis as percentage
         ax.yaxis.set_major_formatter(mtick.PercentFormatter())
@@ -531,6 +540,9 @@ class Visualization:
             if y_values:
                 max_y = max(y_values)
                 ax.set_ylim(0, max_y * 1.2)  # Add 20% margin
+            else:
+                # Set default y-limits if no data
+                ax.set_ylim(0, 10)
             
             # Format price axis as currency
             ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:.1f}¢'))

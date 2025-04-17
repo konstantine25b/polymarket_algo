@@ -43,7 +43,7 @@ python3 -m src.polymarket.main --order-frames --detailed-orders
 python3 -m src.polymarket.main --save-data
 
 # Compare with previous data
-python3 -m src.polymarket.main --save-data --compare
+python3 -m src.polymarket.main --save-data --compare --generate-plot
 
 # List stored events
 python3 -m src.polymarket.main --list-events

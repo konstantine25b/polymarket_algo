@@ -1,0 +1,223 @@
+{
+  "event_slug": "elon-musk-of-tweets-april-11-18-628",
+  "event_title": "Elon Musk # of tweets April 11-18?",
+  "timestamp": "2025-04-17T18:00:36.996572",
+  "market_data": [
+    {
+      "question": "Will Elon tweet less than 100 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "38086917376661271303400373517121315552440608305190324336862735377292244726779",
+      "market_id": "536410"
+    },
+    {
+      "question": "Will Elon tweet less than 100 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "99452616369996101152177953461987491032435863963587804713678009597703906312271",
+      "market_id": "536410"
+    },
+    {
+      "question": "Will Elon tweet 100\u2013124 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "20019995819827149561994301560369937275924252818548765455094468255753191514947",
+      "market_id": "536411"
+    },
+    {
+      "question": "Will Elon tweet 100\u2013124 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "112122194593786256704466772550224324175581438655824083750963950218463006357884",
+      "market_id": "536411"
+    },
+    {
+      "question": "Will Elon tweet 125\u2013149 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "48170813129103914691585718340175196394022330176959850970396976486196602194916",
+      "market_id": "536412",
+      "price": 0.044,
+      "percentage": 4.3999999999999995
+    },
+    {
+      "question": "Will Elon tweet 125\u2013149 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "31785104814985143600749606205335973477558637362629128855498345363548931733781",
+      "market_id": "536412",
+      "price": 0.956,
+      "percentage": 95.6
+    },
+    {
+      "question": "Will Elon tweet 150\u2013174 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "88470658142605082988344441311671539891221623532373045736072779869068579927137",
+      "market_id": "536413",
+      "price": 0.611,
+      "percentage": 61.1
+    },
+    {
+      "question": "Will Elon tweet 150\u2013174 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "110633768677320021127580793156153248423698912319401488111221810906606267673644",
+      "market_id": "536413",
+      "price": 0.389,
+      "percentage": 38.9
+    },
+    {
+      "question": "Will Elon tweet 175\u2013199 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "62472657058181542653976756644640129396712701446558237023012283006159610989560",
+      "market_id": "536414",
+      "price": 0.315,
+      "percentage": 31.5
+    },
+    {
+      "question": "Will Elon tweet 175\u2013199 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "35144321434070934134935832941997082504245535455210194615412918003233815869394",
+      "market_id": "536414",
+      "price": 0.685,
+      "percentage": 68.5
+    },
+    {
+      "question": "Will Elon tweet 200\u2013224 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "36516624702615491853409771828964743634628107551145742241390424763167490803821",
+      "market_id": "536415",
+      "price": 0.034,
+      "percentage": 3.4000000000000004
+    },
+    {
+      "question": "Will Elon tweet 200\u2013224 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "39059417501763672334827439009773652104250166037963526545876049569231593303933",
+      "market_id": "536415",
+      "price": 0.966,
+      "percentage": 96.6
+    },
+    {
+      "question": "Will Elon tweet 225\u2013249 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "115555709214818817854776890148721563881197392554171769977286924192895069803370",
+      "market_id": "536416",
+      "price": 0.0025,
+      "percentage": 0.25
+    },
+    {
+      "question": "Will Elon tweet 225\u2013249 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "77796073146142168365944754931156482060281889986796734823067630322493765355488",
+      "market_id": "536416",
+      "price": 0.9975,
+      "percentage": 99.75
+    },
+    {
+      "question": "Will Elon tweet 250\u2013274 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "6322711529799222582506711521773427249776751622085840799856329567480248326932",
+      "market_id": "536417",
+      "price": 0.0015,
+      "percentage": 0.15
+    },
+    {
+      "question": "Will Elon tweet 250\u2013274 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "4884448405158808465676287874602767994275062711907345147135077238197183386888",
+      "market_id": "536417",
+      "price": 0.9985,
+      "percentage": 99.85000000000001
+    },
+    {
+      "question": "Will Elon tweet 275\u2013299 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "20970450658688684003980541827315466127719636655927134203479705991174211270783",
+      "market_id": "536418",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 275\u2013299 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "86982067778871419276093071421792649301706664730121950897746854707562243447255",
+      "market_id": "536418",
+      "price": 0.9995,
+      "percentage": 99.95
+    },
+    {
+      "question": "Will Elon tweet 300\u2013324 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "11684415730904555143196658577685566010931118621467813944176097580034672746591",
+      "market_id": "536419",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 300\u2013324 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "51471404560130673288238763910645337353662313047371280798515707016728130455623",
+      "market_id": "536419",
+      "price": 0.9995,
+      "percentage": 99.95
+    },
+    {
+      "question": "Will Elon tweet 325\u2013349 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "48915667988507469768966258765341380084840387837779654969210311664587452398994",
+      "market_id": "536420",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 325\u2013349 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "160029610383742638567954214180184756715326092208529123985324134591409004744",
+      "market_id": "536420",
+      "price": 0.9995,
+      "percentage": 99.95
+    },
+    {
+      "question": "Will Elon tweet 350\u2013374 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "26877007388293894644563426688931455993290104543478403890796344142663839569037",
+      "market_id": "536421",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 350\u2013374 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "63427050980826505848474918719138262394785763726665646904115876312461094071272",
+      "market_id": "536421",
+      "price": 0.9995,
+      "percentage": 99.95
+    },
+    {
+      "question": "Will Elon tweet 375\u2013399 times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "114729824141041402829409536719215253608040537681545558553949595639390815209590",
+      "market_id": "536422",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 375\u2013399 times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "54801429803234296098062926952478641403603141222318252494838016020059773685080",
+      "market_id": "536422",
+      "price": 0.9995,
+      "percentage": 99.95
+    },
+    {
+      "question": "Will Elon tweet 400 or more times April 11\u201318?",
+      "outcome": "Yes",
+      "token_id": "30298517922538650428934163059265440710434057927088667406826011424834178527568",
+      "market_id": "536423",
+      "price": 0.0005,
+      "percentage": 0.05
+    },
+    {
+      "question": "Will Elon tweet 400 or more times April 11\u201318?",
+      "outcome": "No",
+      "token_id": "103235486414734868494079785239099188039070803898702957244893746680282608796893",
+      "market_id": "536423",
+      "price": 0.9995,
+      "percentage": 99.95
+    }
+  ]
+}
