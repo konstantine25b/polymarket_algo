@@ -145,6 +145,40 @@ The visualization shows the probability for each market outcome as a bar chart:
 
 For comparison plots (--compare), you'll see both current and previous probabilities side by side.
 
+### Visualizing Probability Distributions
+
+```bash
+# Generate a visualization of the current probabilities
+python3 -m src.polymarket.main --generate-plot
+```
+
+### Using the Tweet Count Frames Function
+
+The module provides a function to get the standard tweet count frames used in Polymarket tweet count markets:
+
+```python
+# Import the PolymarketAPIClient class
+from src.polymarket.api_client import PolymarketAPIClient
+
+# Get the tweet count frames
+frames = PolymarketAPIClient.get_tweet_count_frames()
+
+# Print all available frames
+print(frames)
+# Output: ['0-60', '61-87', '88-113', '114-140', '141-167', ...]
+
+# Use frames in your analysis
+for frame in frames:
+    print(f"Analyzing tweet count range: {frame}")
+    # Your analysis code here
+```
+
+This function is useful for:
+- Getting standard tweet count ranges for Polymarket markets
+- Creating prediction models based on these standardized ranges
+- Formatting your data to match Polymarket's standard frames
+- Analyzing historical data against these common ranges
+
 ## Output Files
 
 When using various save options, the analyzer produces the following outputs:

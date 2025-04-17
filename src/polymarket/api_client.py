@@ -8,6 +8,8 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 import time
 import random
+import os
+import glob
 
 # --- Configuration ---
 GAMMA_API_HOST = "https://gamma-api.polymarket.com"
@@ -692,4 +694,149 @@ class PolymarketAPIClient:
                 midpoint = cls.get_midpoint(market_id, yes_token_id, no_token_id)
                 midpoint_prices[market_id] = midpoint
         
-        return midpoint_prices 
+        return midpoint_prices
+
+    @classmethod
+    def get_tweet_count_frames(cls) -> list[str]:
+        """
+        Returns count frames of tweets as an array of ranges.
+        
+        Dynamically extracts the tweet count frames from saved Polymarket data
+        or by fetching from the Polymarket API if no saved data is available.
+        
+        Returns:
+            list[str]: An array of tweet count ranges formatted as strings (e.g., ["125-149", "150-174", ...])
+        """
+        frames = []
+        
+        # Pattern to extract tweet count ranges from market questions
+        tweet_range_pattern = r'Will Elon tweet (.*?) times'
+        less_than_pattern = r'Will Elon tweet less than (\d+) times'
+        more_than_pattern = r'Will Elon tweet (\d+) or more times'
+        
+        # Try to find the most recent Elon tweet market data in the saved files
+        data_dir = os.path.join("src", "polymarket", "data", "json")
+        elon_files = glob.glob(os.path.join(data_dir, "elon-musk-of-tweets-*.json"))
+        
+        if elon_files:
+            # Sort by modification time (newest first)
+            newest_file = max(elon_files, key=os.path.getmtime)
+            
+            try:
+                with open(newest_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Extract frames from market questions
+                for market in data.get('market_data', []):
+                    question = market.get('question', '')
+                    
+                    # Skip Yes/No answers
+                    if market.get('outcome') in ['Yes', 'No']:
+                        continue
+                        
+                    # Try to match "less than X" pattern
+                    less_than_match = re.search(less_than_pattern, question)
+                    if less_than_match:
+                        frames.append(f"less than {less_than_match.group(1)}")
+                        continue
+                        
+                    # Try to match "X or more" pattern
+                    more_than_match = re.search(more_than_pattern, question)
+                    if more_than_match:
+                        frames.append(f"{more_than_match.group(1)} or more")
+                        continue
+                    
+                    # Try to match normal ranges
+                    range_match = re.search(tweet_range_pattern, question)
+                    if range_match:
+                        frame = range_match.group(1)
+                        frames.append(frame)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error reading market data file: {e}")
+        
+        # If no frames found from files, try fetching from API
+        if not frames:
+            try:
+                # Try to get frames from active Elon tweet markets
+                event_url = "https://polymarket.com/event/elon-musk-of-tweets-april-11-18-628"
+                event_slug = cls.extract_slug_from_url(event_url)
+                thread_id = cls.extract_tid_from_url(event_url)
+                
+                if event_slug:
+                    market_details, _ = cls.get_market_details_from_polymarket_api(event_slug, thread_id)
+                    
+                    if not market_details:
+                        market_details, _ = cls.get_market_details_from_gamma(event_slug)
+                    
+                    if market_details:
+                        for market in market_details:
+                            question = market.get('question', '')
+                            
+                            # Ignore Yes/No
+                            if 'Will Elon tweet' not in question:
+                                continue
+                                
+                            # Try to match "less than X" pattern
+                            less_than_match = re.search(less_than_pattern, question)
+                            if less_than_match:
+                                frames.append(f"less than {less_than_match.group(1)}")
+                                continue
+                                
+                            # Try to match "X or more" pattern
+                            more_than_match = re.search(more_than_pattern, question)
+                            if more_than_match:
+                                frames.append(f"{more_than_match.group(1)} or more")
+                                continue
+                            
+                            # Try to match normal ranges  
+                            range_match = re.search(tweet_range_pattern, question)
+                            if range_match:
+                                frame = range_match.group(1)
+                                frames.append(frame)
+            except Exception as e:
+                print(f"Error fetching market data from API: {e}")
+        
+        # Remove duplicates and sort
+        frames = list(set(frames))
+        
+        # Sort the frames in a logical order
+        def frame_sort_key(frame):
+            if frame.startswith("less than"):
+                # Sort "less than X" frames first
+                return (0, int(frame.split()[-1]))
+            elif frame.endswith("or more"):
+                # Sort "X or more" frames last
+                return (2, int(frame.split()[0]))
+            else:
+                # Sort normal ranges by their lower bound
+                try:
+                    # Handle both en-dash and regular hyphen
+                    frame_text = frame.replace("–", "-")
+                    lower = int(frame_text.split('-')[0].strip())
+                    return (1, lower)
+                except (ValueError, IndexError):
+                    return (3, 0)  # Unknown format, sort at the end
+                
+        frames.sort(key=frame_sort_key)
+        
+        # If still no frames found, use default frames
+        if not frames:
+            frames = [
+                "less than 100",
+                "100-124", 
+                "125-149", 
+                "150-174", 
+                "175-199", 
+                "200-224", 
+                "225-249", 
+                "250-274", 
+                "275-299", 
+                "300-324", 
+                "325-349", 
+                "350-374", 
+                "375-399", 
+                "400 or more"
+            ]
+            print("No frames found from data sources, using default frames")
+        
+        return frames 

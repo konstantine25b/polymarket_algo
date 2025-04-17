@@ -152,3 +152,76 @@ best_ask = min([o.get("price", 0) for o in formatted.get("sell_orders", [])]) if
 spread = best_ask - best_bid if best_bid > 0 and best_ask < 100 else 0
 print(f"Spread: {spread:.2f}%")
 ```
+
+# LARK Polymarket Algo
+
+This repository contains algorithms and tools for analyzing and predicting Polymarket events, with a focus on Elon Musk's tweet patterns.
+
+## Features
+
+- Historical tweet data analysis tools
+- Prediction algorithms for future tweet counts
+- Polymarket event data fetching and visualization
+- Order book analysis
+
+## Modules
+
+### Polymarket Module
+
+For details on using the Polymarket module, see [src/polymarket/Readme.md](src/polymarket/Readme.md)
+
+### Tweet Count Frame Probability Prediction
+
+The repository includes a tool that combines the Polymarket count frames with tweet prediction models to generate probabilities for each frame. This is particularly useful for predicting which bracket of tweet counts is most likely for upcoming Polymarket events.
+
+To use the tweet count frame probability predictor:
+
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Run with default settings (uses April 11-18, 2025 timeframe)
+python -m src.polymarket_tweet_predictor
+
+# Run with custom date range
+python -m src.polymarket_tweet_predictor --start "2025-04-11 12:00:00" --end "2025-04-18 12:00:00"
+
+# Use custom data file and disable trend adjustment
+python -m src.polymarket_tweet_predictor --file /path/to/tweets.csv --no-trend
+
+# Increase simulation accuracy
+python -m src.polymarket_tweet_predictor --sims 5000
+```
+
+The output includes:
+
+- The most likely tweet count frames with probabilities
+- Detailed breakdowns across all possible frames
+- Insight into the distribution of possible outcomes
+
+### Elon Tweet Predictor
+
+For details on using the Elon Tweet Predictor, see [src/algos/elon_tweet_predictor/README.md](src/algos/elon_tweet_predictor/README.md)
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd polymarket_algo
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the terms of the MIT license.
