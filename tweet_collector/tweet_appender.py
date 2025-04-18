@@ -15,6 +15,24 @@ class TweetAppender:
             print(f"Creating new file: {self.csv_file}")
             with open(self.csv_file, 'w', encoding='utf-8') as f:
                 f.write("id,text,created_at\n")
+        else:
+            # If file exists, ensure all existing entries have quotes
+            self.fix_existing_quotes()
+
+    def fix_existing_quotes(self):
+        """Ensure all existing entries have quotes around text"""
+        try:
+            # Read the existing CSV
+            df = pd.read_csv(self.csv_file)
+            
+            # Add quotes to text if they don't exist
+            df['text'] = df['text'].apply(lambda x: f'"{x}"' if not x.startswith('"') else x)
+            
+            # Save back to CSV
+            df.to_csv(self.csv_file, index=False)
+            print("✅ Fixed quotes in existing entries")
+        except Exception as e:
+            print(f"Error fixing existing quotes: {str(e)}")
 
     def append_tweets(self, tweets):
         """ONLY append new tweets to elonmusk_reformatted.csv"""
@@ -30,8 +48,10 @@ class TweetAppender:
             with open(self.csv_file, 'a', encoding='utf-8') as f:
                 tweets_added = 0
                 for tweet in sorted_tweets:
-                    # Clean the text for CSV format
-                    safe_text = tweet['text'].replace(',', ' ').replace('\n', ' ')
+                    # Clean the text for CSV format and add quotes
+                    safe_text = tweet['text'].replace('\n', ' ')
+                    if not safe_text.startswith('"'):
+                        safe_text = f'"{safe_text}"'
                     
                     # Create the CSV line
                     line = f"{tweet['id']},{safe_text},{tweet['created_at']}\n"
