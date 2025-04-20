@@ -21,6 +21,7 @@ POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-a
 # Data Paths
 DATA_DIR = Path("src/polymarket/data")
 PLOTS_DIR = Path("src/polymarket/plots")
+PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')

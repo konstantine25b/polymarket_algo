@@ -34,7 +34,8 @@ from src.constants import (
     POLYMARKET_START_TIME,
     POLYMARKET_END_TIME,
     POLYMARKET_TIMEZONE,
-    TWEET_COUNT_FRAMES
+    TWEET_COUNT_FRAMES,
+    PREDICTOR_PLOTS_DIR
 )
 
 def get_current_et_time():
@@ -310,8 +311,35 @@ def analyze_tweet_patterns(df):
     
     return overall_avg, recent_avg
 
-def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
-    """Predict probabilities for tweet count frames with robust timezone handling"""
+def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH, 
+                                start_date_str=None, end_date_str=None, 
+                                data_file=None, use_trend=True, 
+                                num_simulations=5000, current_tweet_count=None,
+                                override_auto_count=False):
+    """
+    Predict probabilities for tweet count frames with robust timezone handling
+    
+    Args:
+        data_path: Path to the tweet data CSV file (default path used if not provided)
+        start_date_str: Start date/time string in format 'YYYY-MM-DD HH:MM:SS' (ET timezone)
+        end_date_str: End date/time string in format 'YYYY-MM-DD HH:MM:SS' (ET timezone)
+        data_file: Alternative path to tweet data (overrides data_path if provided)
+        use_trend: Whether to use trend adjustment in predictions
+        num_simulations: Number of Monte Carlo simulations to run
+        current_tweet_count: Manual override for current tweet count
+        override_auto_count: Whether to use the provided current_tweet_count instead of auto-counting
+        
+    Returns:
+        Dictionary mapping tweet count frames to probabilities
+    """
+    # Use data_file parameter if provided (for backward compatibility)
+    if data_file is not None:
+        data_path = data_file
+        
+    # Use provided date strings if available, otherwise use constants
+    start_time = start_date_str if start_date_str is not None else POLYMARKET_START_TIME
+    end_time = end_date_str if end_date_str is not None else POLYMARKET_END_TIME
+    
     # Load and preprocess tweet data
     print(f"Loading data from: {data_path}")
     try:
@@ -352,23 +380,25 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
             
         # Auto-count tweets in the Polymarket timeframe
         try:
-            polymarket_start = ET_TIMEZONE.localize(datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S"), is_dst=None)
+            # Use the provided start_time value
+            polymarket_start = ET_TIMEZONE.localize(datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S"), is_dst=None)
         except pytz.exceptions.AmbiguousTimeError:
-            print(f"Warning: Start time {POLYMARKET_START_TIME} is ambiguous (during DST transition). Using DST=True.")
-            polymarket_start = ET_TIMEZONE.localize(datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S"), is_dst=True)
+            print(f"Warning: Start time {start_time} is ambiguous (during DST transition). Using DST=True.")
+            polymarket_start = ET_TIMEZONE.localize(datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S"), is_dst=True)
         except pytz.exceptions.NonExistentTimeError:
-            print(f"Warning: Start time {POLYMARKET_START_TIME} is non-existent (during DST transition). Adjusting forward 1 hour.")
-            nonexistent_dt = datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S")
+            print(f"Warning: Start time {start_time} is non-existent (during DST transition). Adjusting forward 1 hour.")
+            nonexistent_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
             polymarket_start = ET_TIMEZONE.localize(nonexistent_dt + timedelta(hours=1))
             
         try:
-            polymarket_end = ET_TIMEZONE.localize(datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S"), is_dst=None)
+            # Use the provided end_time value
+            polymarket_end = ET_TIMEZONE.localize(datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S"), is_dst=None)
         except pytz.exceptions.AmbiguousTimeError:
-            print(f"Warning: End time {POLYMARKET_END_TIME} is ambiguous (during DST transition). Using DST=True.")
-            polymarket_end = ET_TIMEZONE.localize(datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S"), is_dst=True)
+            print(f"Warning: End time {end_time} is ambiguous (during DST transition). Using DST=True.")
+            polymarket_end = ET_TIMEZONE.localize(datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S"), is_dst=True)
         except pytz.exceptions.NonExistentTimeError:
-            print(f"Warning: End time {POLYMARKET_END_TIME} is non-existent (during DST transition). Adjusting forward 1 hour.")
-            nonexistent_dt = datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S")
+            print(f"Warning: End time {end_time} is non-existent (during DST transition). Adjusting forward 1 hour.")
+            nonexistent_dt = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
             polymarket_end = ET_TIMEZONE.localize(nonexistent_dt + timedelta(hours=1))
             
         now = datetime.now(ET_TIMEZONE)
@@ -383,9 +413,15 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
             
             # Count tweets so far (comparing timezone-aware datetimes)
             tweets_so_far = df[(df['created_at_dt'] >= polymarket_start) & (df['created_at_dt'] <= now)]
-            tweet_count = len(tweets_so_far)
+            auto_tweet_count = len(tweets_so_far)
             
-            print(f"Using current tweet count of {tweet_count} tweets")
+            # Use the manual override if provided and override flag is set
+            if override_auto_count and current_tweet_count is not None:
+                tweet_count = current_tweet_count
+                print(f"Using manually specified tweet count: {tweet_count} (auto-count: {auto_tweet_count})")
+            else:
+                tweet_count = auto_tweet_count
+                print(f"Using current tweet count of {tweet_count} tweets")
             
             # Add historical context by preparing the data for time series analysis
             # Convert created_at_dt to date for daily aggregation
@@ -427,8 +463,14 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                 trend_14d = rate_14d / historical_avg if historical_avg > 0 else 1.0
                 trend_30d = rate_30d / historical_avg if historical_avg > 0 else 1.0
                 
-                # Use an ensemble of trend indicators with more weight on recent trends
-                weighted_trend = (trend_7d * 0.6) + (trend_14d * 0.3) + (trend_30d * 0.1)
+                # Calculate spread for Monte Carlo simulation
+                if use_trend:
+                    weighted_trend = (trend_7d * 0.6) + (trend_14d * 0.3) + (trend_30d * 0.1)
+                    print(f"Weighted trend factor: {weighted_trend:.2f}")
+                else:
+                    # Disable trend adjustment if requested
+                    weighted_trend = 1.0
+                    print("Trend adjustment disabled by user")
                 
                 print("\n--- Advanced Prediction Analysis ---")
                 print(f"Prediction window (ET): {polymarket_start} to {polymarket_end} ({(polymarket_end - polymarket_start).total_seconds() / (24 * 3600):.1f} days)")
@@ -436,7 +478,6 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                 print(f"Historical daily average: {historical_avg:.1f} tweets per day")
                 print(f"Recent rates: 7-day: {rate_7d:.1f}, 14-day: {rate_14d:.1f}, 30-day: {rate_30d:.1f} tweets/day")
                 print(f"Trend factors: 7-day: {trend_7d:.2f}, 14-day: {trend_14d:.2f}, 30-day: {trend_30d:.2f}")
-                print(f"Weighted trend factor: {weighted_trend:.2f}")
                 
                 # Analyze hourly and day-of-week patterns
                 df['hour'] = df['created_at_dt'].dt.hour
@@ -484,7 +525,11 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                 weekday_adjusted_prediction = tweet_count + (current_rate * remaining_days * weekday_adjustment)
                 
                 # 4. Combined model (ensemble)
-                ensemble_prediction = tweet_count + (current_rate * remaining_days * weighted_trend * weekday_adjustment)
+                if use_trend:
+                    ensemble_prediction = tweet_count + (current_rate * remaining_days * weighted_trend * weekday_adjustment)
+                else:
+                    # Skip trend factor if trend adjustment is disabled
+                    ensemble_prediction = tweet_count + (current_rate * remaining_days * weekday_adjustment)
                 
                 # Safety check: predictions can never be less than current count
                 base_prediction = max(tweet_count, base_prediction)
@@ -520,9 +565,10 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                 remaining_vol = std_dev * (remaining_days**0.5)
                 print(f"Using standard deviation of {remaining_vol:.1f} for remaining period simulation")
                 
-                # Run Monte Carlo simulation (5000 samples for better accuracy)
+                # Run Monte Carlo simulation (using user-specified number of simulations)
                 np.random.seed(42)  # For reproducibility
-                simulations = np.random.normal(final_prediction, remaining_vol, 5000)
+                print(f"Running Monte Carlo simulation with {num_simulations} iterations...")
+                simulations = np.random.normal(final_prediction, remaining_vol, num_simulations)
                 
                 # Enforce the constraint that predictions cannot be less than current count
                 simulations = np.maximum(simulations, tweet_count)
@@ -596,7 +642,12 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                     
                     # Save the plot
                     plt.tight_layout()
-                    plot_path = os.path.join(os.path.dirname(data_path), 'tweet_prediction.png')
+                    
+                    # Create the plots directory if it doesn't exist
+                    os.makedirs(PREDICTOR_PLOTS_DIR, exist_ok=True)
+                    
+                    # Save to the predictor plots directory
+                    plot_path = os.path.join(PREDICTOR_PLOTS_DIR, 'tweet_prediction.png')
                     plt.savefig(plot_path)
                     plt.close()
                     print(f"\nVisualization saved to: {plot_path}")

@@ -80,6 +80,7 @@ Thumbs.db
 # Specific plot directories
 src/polymarket/plots/
 src/polymarket/plots/order_books/
+src/polymarket_predictor/plots/
 src/graphs/
 # Visualization outputs
 *_probabilities.png
