@@ -14,12 +14,15 @@ from src.polymarket.api_client import PolymarketAPIClient
 from src.polymarket.data_storage import DataStorage
 from src.polymarket.visualization import Visualization
 
-# Default Polymarket event URL
-DEFAULT_URL = "https://polymarket.com/event/elon-musk-of-tweets-april-11-18-628?tid=1744890836764"
+# Import constants from global constants file
+from src.constants import POLYMARKET_ELON_TWEETS_URL, DATA_DIR, PLOTS_DIR
 
-# Data output paths
-DATA_DIR = Path("src/polymarket/data")
-PLOTS_DIR = Path("src/polymarket/plots")
+# Default Polymarket event URL
+DEFAULT_URL = POLYMARKET_ELON_TWEETS_URL
+
+# Convert Path objects from constants to local variables
+DATA_DIR = Path(DATA_DIR)
+PLOTS_DIR = Path(PLOTS_DIR)
 
 def setup_output_directories():
     """Set up necessary directories for data and visualization output."""

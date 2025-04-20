@@ -6,9 +6,8 @@ import json
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
-# --- Configuration ---
-GAMMA_API_HOST = "https://gamma-api.polymarket.com"
-CLOB_API_HOST = "https://clob.polymarket.com"
+# Import constants from global constants file
+from src.constants import GAMMA_API_HOST, CLOB_API_HOST
 
 def extract_slug_from_url(url: str) -> str | None:
     """Extracts the event slug from a Polymarket event URL."""

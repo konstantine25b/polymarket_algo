@@ -7,9 +7,8 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
-# --- Configuration ---
-CLOB_API_HOST = "https://clob.polymarket.com"
-POLYMARKET_API_HOST = "https://polymarket.com/api"
+# Import constants from global constants file
+from src.constants import CLOB_API_HOST, POLYMARKET_API_HOST
 
 class ClobUtils:
     """Utility functions for working with the Polymarket CLOB API."""

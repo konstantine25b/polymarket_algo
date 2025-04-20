@@ -22,17 +22,20 @@ from src.algos.elon_tweet_predictor.pattern_analyzer import TweetPatternAnalyzer
 from src.algos.elon_tweet_predictor.predictor import TweetPredictor
 from src.utils.file_utils import get_data_path
 
-# Constants
-ET_TIMEZONE = pytz.timezone('US/Eastern')
-API_ENDPOINT = "https://clob.polymarket.com/"
-MARKET_ID = "0x3e69ba4320546e712a7b094341f52b69c45c6352"
-MARKET_HASH = "will-elon-musk-tweet-over-100-times-april-11-18"
-EVENT_HASH = "elon-musk-of-tweets-april-1118"
-FULL_EVENT_HASH = "elon-musk-of-tweets-april-1118"
-DEFAULT_DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "elonmusk_reformatted.csv")
-POLYMARKET_START_TIME = "2025-04-11 12:00:00"
-POLYMARKET_END_TIME = "2025-04-18 12:00:00"
-POLYMARKET_TIMEZONE = ET_TIMEZONE  # Eastern Time
+# Import constants from global constants file
+from src.constants import (
+    ET_TIMEZONE,
+    CLOB_API_HOST as API_ENDPOINT,
+    MARKET_ID,
+    MARKET_HASH,
+    EVENT_HASH,
+    FULL_EVENT_HASH,
+    DEFAULT_DATA_PATH,
+    POLYMARKET_START_TIME,
+    POLYMARKET_END_TIME,
+    POLYMARKET_TIMEZONE,
+    TWEET_COUNT_FRAMES
+)
 
 def get_current_et_time():
     """
@@ -524,23 +527,8 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH):
                 # Enforce the constraint that predictions cannot be less than current count
                 simulations = np.maximum(simulations, tweet_count)
                 
-                # Define the count frames from Polymarket
-                count_frames = [
-                    {"name": "less than 100", "min": 0, "max": 99},
-                    {"name": "100–124", "min": 100, "max": 124},
-                    {"name": "125–149", "min": 125, "max": 149},
-                    {"name": "150–174", "min": 150, "max": 174},
-                    {"name": "175–199", "min": 175, "max": 199},
-                    {"name": "200–224", "min": 200, "max": 224},
-                    {"name": "225–249", "min": 225, "max": 249},
-                    {"name": "250–274", "min": 250, "max": 274},
-                    {"name": "275–299", "min": 275, "max": 299},
-                    {"name": "300–324", "min": 300, "max": 324},
-                    {"name": "325–349", "min": 325, "max": 349},
-                    {"name": "350–374", "min": 350, "max": 374},
-                    {"name": "375–399", "min": 375, "max": 399},
-                    {"name": "400 or more", "min": 400, "max": float('inf')}
-                ]
+                # Use the count frames from the constants
+                count_frames = TWEET_COUNT_FRAMES
                 
                 # Calculate probabilities for each frame
                 frame_probabilities = {}

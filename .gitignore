@@ -68,3 +68,21 @@ Thumbs.db
 
 # If you have a local configuration file that shouldn't be tracked
 # config.ini
+
+# Plot files and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.eps
+# Specific plot directories
+src/polymarket/plots/
+src/polymarket/plots/order_books/
+src/graphs/
+# Visualization outputs
+*_probabilities.png
+*_comparison.png
+*_orderbook_*.png
+tweet_prediction.png

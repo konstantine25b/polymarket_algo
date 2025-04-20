@@ -7,6 +7,7 @@ This allows the module to be run using "python -m src.polymarket_predictor"
 import sys
 import argparse
 from .tweet_predictor import predict_tweet_frame_probabilities, verify_tweet_count
+from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
 
 def main():
     parser = argparse.ArgumentParser(description='Predict Elon Musk tweet count frame probabilities')
@@ -24,9 +25,9 @@ def main():
     
     # For the specific Polymarket timeframe mentioned in the request
     if not args.start and not args.end:
-        print("Using Polymarket's specified timeframe: April 11, 2025, 12:00 PM ET to April 18, 2025, 12:00 PM ET")
-        args.start = "2025-04-11 12:00:00"  # 12:00 PM ET
-        args.end = "2025-04-18 12:00:00"    # 12:00 PM ET
+        print(f"Using Polymarket's specified timeframe: {POLYMARKET_START_TIME} to {POLYMARKET_END_TIME} (ET)")
+        args.start = POLYMARKET_START_TIME
+        args.end = POLYMARKET_END_TIME
     
     # If verify-count flag is set, only verify the count and exit
     if args.verify_count:

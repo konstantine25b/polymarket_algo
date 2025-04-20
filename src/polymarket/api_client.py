@@ -11,11 +11,13 @@ import random
 import os
 import glob
 
-# --- Configuration ---
-GAMMA_API_HOST = "https://gamma-api.polymarket.com"
-CLOB_API_HOST = "https://clob.polymarket.com"
-POLYMARKET_API_HOST = "https://polymarket.com/api"
-POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books" # Updated endpoint
+# Import constants from global constants file
+from src.constants import (
+    GAMMA_API_HOST,
+    CLOB_API_HOST,
+    POLYMARKET_API_HOST,
+    POLYMARKET_ORDER_BOOK_API
+)
 
 class PolymarketAPIClient:
     """Client for interacting with Polymarket APIs."""

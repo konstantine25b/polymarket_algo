@@ -1,0 +1,60 @@
+"""
+Global constants for the Polymarket Algo project.
+Contains configuration values, API endpoints, and default values.
+"""
+
+import os
+import pytz
+from datetime import datetime
+from pathlib import Path
+
+# Polymarket API Endpoints
+GAMMA_API_HOST = "https://gamma-api.polymarket.com"
+CLOB_API_HOST = "https://clob.polymarket.com"
+POLYMARKET_API_HOST = "https://polymarket.com/api"
+POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
+
+# Polymarket Event URLs
+# Current Elon Musk tweets event
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-april-18-25?tid=1745165575043"
+
+# Data Paths
+DATA_DIR = Path("src/polymarket/data")
+PLOTS_DIR = Path("src/polymarket/plots")
+
+# Tweet Predictor Constants
+ET_TIMEZONE = pytz.timezone('US/Eastern')
+MARKET_ID = "0x3e69ba4320546e712a7b094341f52b69c45c6352"
+MARKET_HASH = "will-elon-musk-tweet-over-100-times-april-18-25"
+EVENT_HASH = "elon-musk-of-tweets-april-18-25"
+FULL_EVENT_HASH = "elon-musk-of-tweets-april-18-25"
+
+# Default data path for tweet analysis
+DEFAULT_DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 
+    "data", 
+    "elonmusk_reformatted.csv"
+)
+
+# Polymarket event timeframe (Eastern Time)
+POLYMARKET_START_TIME = "2025-04-18 12:00:00"
+POLYMARKET_END_TIME = "2025-04-25 12:00:00"
+POLYMARKET_TIMEZONE = ET_TIMEZONE
+
+# Define standard tweet count frames used by Polymarket
+TWEET_COUNT_FRAMES = [
+    {"name": "less than 100", "min": 0, "max": 99},
+    {"name": "100–124", "min": 100, "max": 124},
+    {"name": "125–149", "min": 125, "max": 149},
+    {"name": "150–174", "min": 150, "max": 174},
+    {"name": "175–199", "min": 175, "max": 199},
+    {"name": "200–224", "min": 200, "max": 224},
+    {"name": "225–249", "min": 225, "max": 249},
+    {"name": "250–274", "min": 250, "max": 274},
+    {"name": "275–299", "min": 275, "max": 299},
+    {"name": "300–324", "min": 300, "max": 324},
+    {"name": "325–349", "min": 325, "max": 349},
+    {"name": "350–374", "min": 350, "max": 374},
+    {"name": "375–399", "min": 375, "max": 399},
+    {"name": "400 or more", "min": 400, "max": float('inf')}
+] 
