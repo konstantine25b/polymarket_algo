@@ -1,154 +1,163 @@
-# Polymarket Algorithmic Analysis
+# Tweet Collector Module
 
-A collection of algorithms and tools for analyzing Elon Musk's tweeting patterns and related markets.
+A Python-based system for collecting and storing Elon Musk's tweets using the Apify API.
 
-## Setup
+## Overview
 
-```bash
-# Set up virtual environment
-source venv/bin/activate
+This module consists of three main components that work together to:
+1. Fetch tweets from Elon Musk's Twitter account
+2. Process and format the tweets
+3. Store them in a CSV file
+4. Run on a scheduled basis (every 2 minutes)
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## Core Files
 
-## Available Modules
+### 1. `init__.py`
+This file makes the tweet_collector directory a Python package and defines what can be imported from it. It:
+- Imports and exposes the main classes from each component
+- Defines what's available when you import the package
+- Contains:
+  ```python
+  from .tweet_fetcher import TestTweetScraper
+  from .tweet_appender import TweetAppender
+  from .tweet_scheduler import TweetScheduler
 
-### 1. Data Formatting
+  __all__ = ['TestTweetScraper', 'TweetAppender', 'TweetScheduler']
+  ```
 
-Prepares tweet data for analysis:
+### 2. `run_tweet_collector.py`
+This is the main entry point script that:
+- Sets up the correct Python path
+- Imports and runs the TweetScheduler
+- Makes it easy to run the entire system with one command
+- Contains:
+  ```python
+  import os
+  import sys
+  project_root = os.path.dirname(os.path.abspath(__file__))
+  sys.path.append(project_root)
+  from src.tweet_collector.tweet_scheduler import TweetScheduler
+  ```
 
-```bash
-# Format raw tweet data
-python3 src/formating_tweet_data/fixDates.py
+## Components
 
-# Aggregate tweets by day
-python3 src/formating_tweet_data/formatByDay.py
-```
+### 1. Tweet Fetcher (`tweet_fetcher.py`)
 
-### 2. Prediction Algorithms
+The `TestTweetScraper` class handles fetching tweets from the Apify API.
 
-Various algorithms for predicting Elon Musk's tweeting patterns:
+#### Key Functions:
+- `__init__()`: Initializes the scraper with API credentials
+- `fetch_tweets()`: 
+  - Starts a new Apify task run
+  - Waits for completion
+  - Retrieves the tweets
+- `process_tweets(tweets)`: 
+  - Formats tweet data
+  - Removes duplicates
+  - Converts timestamps
+- `save_tweets(new_tweets)`: Passes tweets to the appender
 
-See `src/algos/README.md` for details on available prediction algorithms.
+### 2. Tweet Appender (`tweet_appender.py`)
 
-### 3. Polymarket Analysis
+The `TweetAppender` class manages the CSV file storage.
 
-Tools for analyzing Polymarket data related to Elon Musk's tweeting:
+#### Key Functions:
+- `__init__()`: 
+  - Sets up the CSV file path
+  - Creates file if it doesn't exist
+  - Ensures proper formatting
+- `fix_existing_quotes()`: Ensures all text entries have proper quotes
+- `append_tweets(tweets)`: 
+  - Sorts tweets by time
+  - Appends new tweets to CSV
+  - Handles text formatting
 
-```bash
-# Get current timeframes and odds from Polymarket
-python3 -m src.polymarket.main
+### 3. Tweet Scheduler (`tweet_scheduler.py`)
 
-# Generate visualization plots
-python3 -m src.polymarket.main --generate-plot
+The `TweetScheduler` class coordinates the entire process.
 
-# Fetch and display order book data
-python3 -m src.polymarket.main --order-frames
-```
+#### Key Functions:
+- `__init__()`: Initializes scraper and appender
+- `run()`: 
+  - Runs the collection process every 2 minutes
+  - Handles errors and retries
+  - Provides logging
 
-#### Polymarket Data Analyzer CLI Options
+## How to Run
 
-```
---url URL             URL of the Polymarket event
---save-data           Save data to JSON and CSV files
---generate-plot       Generate visualization plots for market probabilities
---order-frames        Fetch and display order book frames
---detailed-orders     Show detailed buy and sell orders (requires --order-frames)
---save-orders         Save order book data to JSON (requires --order-frames)
---visualize-orders    Generate visualizations of order books (requires --order-frames)
---compare             Compare with previous data (requires --save-data)
---list-events         List all previously stored events
-```
+### Option 1: Using the Run Script (Recommended)
 
-Example with custom URL:
+1. Navigate to the project root directory:
+   ```
+   C:\Users\99557\OneDrive\Desktop\polymarket_algo
+   ```
 
-```bash
-python3 -m src.polymarket.main --url "https://polymarket.com/event/your-event-slug" --generate-plot
-```
+2. Run the script:
+   ```
+   python run_tweet_collector.py
+   ```
 
-### 4. Order Book Analysis and CLOB API
+### Option 2: Running Individual Components
 
-Advanced utilities for working with Polymarket's Central Limit Order Book (CLOB) API:
+1. To run just the fetcher:
+   ```python
+   from tweet_collector.tweet_fetcher import TestTweetScraper
+   scraper = TestTweetScraper()
+   tweets = scraper.fetch_tweets()
+   ```
 
-```bash
-# Scan for markets with rewards
-python3 -m src.polymarket.market_scanner --rewarded --verbose
+2. To run just the appender:
+   ```python
+   from tweet_collector.tweet_appender import TweetAppender
+   appender = TweetAppender()
+   appender.append_tweets(tweets)
+   ```
 
-# Find the most liquid markets
-python3 -m src.polymarket.market_scanner --liquid --top 20
-
-# Analyze a specific market by condition ID
-python3 -m src.polymarket.market_scanner --market "your-condition-id" --save
-```
-
-#### Market Scanner CLI Options
-
-```
---rewarded       Scan for markets with rewards
---liquid         Find most liquid markets
---market ID      Analyze a specific market by condition ID
---top N          Number of top markets to return (default: 10)
---verbose        Print detailed information
---save           Save analysis results to a file
-```
-
-For detailed information on using the CLOB API, see `src/polymarket/CLOB_API_GUIDE.md`.
-
-### 5. Order Book Analysis Library
-
-The `OrderBookAnalyzer` class provides comprehensive analysis of Polymarket order books:
-
-```bash
-# Run the analyzer on a specific event
-python3 -m src.polymarket.order_book_analysis --slug "your-event-slug" --visualize
-```
-
-Features include:
-
-- Liquidity metrics calculation
-- Price manipulation detection
-- Order book depth visualization
-- Historical comparison
-- Market anomaly detection
+3. To run the scheduler:
+   ```python
+   from tweet_collector.tweet_scheduler import TweetScheduler
+   scheduler = TweetScheduler()
+   scheduler.run()
+   ```
 
 ## Output
 
-Results from the Polymarket analysis are saved in:
+### 1. CSV File
+- Location: `src/data/elonmusk_reformatted.csv`
+- Format: `id,text,created_at`
+- Updates: New tweets are appended every 2 minutes
 
-- Market data: `src/polymarket/data/{json|csv}`
-- Order book data: `src/polymarket/data/order_books`
-- Visualizations: `src/polymarket/plots`
-- Market analysis: `src/polymarket/data/analysis`
+### 2. Log File
+- Location: `src/tweet_collector/tweet_collector.log`
+- Contains: Timestamps, status updates, and error messages
 
-## Advanced API Usage
+## Requirements
 
-The project includes comprehensive utilities for working with Polymarket's APIs:
+- Python 3.7+
+- Required packages:
+  - requests
+  - pandas
+  - Valid Apify API credentials
 
-1. **Main API Client**: `PolymarketAPIClient` class for fetching market data
-2. **CLOB Utilities**: `ClobUtils` class for working with the CLOB API
-3. **Order Book Analysis**: `OrderBookAnalyzer` class for analyzing order books
-4. **Market Scanner**: Command-line utility for scanning markets
+## Error Handling
 
-For programmatic access to the CLOB API:
+The system includes comprehensive error handling:
+- API connection failures
+- File access issues
+- Data formatting errors
+- Network problems
 
-```python
-from src.polymarket.clob_utils import ClobUtils
+All errors are logged and the system attempts to recover automatically.
 
-# Initialize the client
-clob = ClobUtils()
+## Monitoring
 
-# Get all markets with rewards
-rewarded_markets = clob.fetch_all_rewarded_markets()
+You can monitor the system through:
+1. Console output (real-time updates)
+2. Log file (`tweet_collector.log`)
+3. CSV file (verify new tweets are being added)
 
-# Get order book for a specific token
-token_id = "your-token-id"
-order_book = clob.get_order_book(token_id)
-formatted = clob.format_order_book(order_book)
+## Stopping the Service
 
-# Print the bid-ask spread
-best_bid = max([o.get("price", 0) for o in formatted.get("buy_orders", [])]) if formatted.get("buy_orders") else 0
-best_ask = min([o.get("price", 0) for o in formatted.get("sell_orders", [])]) if formatted.get("sell_orders") else 100
-spread = best_ask - best_bid if best_bid > 0 and best_ask < 100 else 0
-print(f"Spread: {spread:.2f}%")
-```
+To stop the tweet collector:
+1. If running in IDE: Click the "Stop" button
+2. If running in terminal: Press Ctrl+C 
