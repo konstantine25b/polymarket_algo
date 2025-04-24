@@ -61,6 +61,19 @@ Thumbs.db
 *.swp
 *.pyc
 
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+
 # Project specific - adjust as needed
 # If you have a specific data or results directory that shouldn't be tracked
 # data/
