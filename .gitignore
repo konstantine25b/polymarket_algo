@@ -87,3 +87,4 @@ src/graphs/
 *_comparison.png
 *_orderbook_*.png
 tweet_prediction.png
+venv/
