@@ -203,6 +203,38 @@ The output includes:
 
 For details on using the Elon Tweet Predictor, see [src/algos/elon_tweet_predictor/README.md](src/algos/elon_tweet_predictor/README.md)
 
+### Elon Musk Tweet Fetcher
+
+The Elon Musk Tweet Fetcher allows you to fetch tweets from Elon Musk's Twitter account using the Apify Twitter scraper API.
+
+#### Fetching Tweets
+
+To fetch the latest tweets from Elon Musk and add them to the database:
+
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Fetch 40 tweets using the client method and add to database
+python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --add-to-db
+```
+
+#### Cost Information
+
+- Fetching up to 40 tweets costs approximately 3.2 cents per request using the Apify API
+- The `--use-client` flag ensures better reliability and faster processing
+- For more details on the Tweet Fetcher, see [src/apify/README.md](src/apify/README.md)
+
+#### Additional Options
+
+```bash
+# Get tweets since the latest one in the database
+python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --latest --add-to-db
+
+# Debug mode (prints more details and doesn't save to database)
+python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --debug
+```
+
 ## Installation
 
 ```bash

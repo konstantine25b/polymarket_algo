@@ -58,4 +58,32 @@ TWEET_COUNT_FRAMES = [
     {"name": "350–374", "min": 350, "max": 374},
     {"name": "375–399", "min": 375, "max": 399},
     {"name": "400 or more", "min": 400, "max": float('inf')}
-] 
+]
+
+# Apify Constants
+APIFY_TOKEN = "apify_api_e6Vimb3keKr5cNn5Ac6WolYLDJdSYb0DKdym"
+APIFY_TWITTER_ACTOR_TASK_ID = "nfp1fpt5gUlBwPcor"  # Using the known working actor directly 
+
+# Tweet Getter Constants
+DEFAULT_TWITTER_HANDLE = "elonmusk"
+DEFAULT_MAX_TWEETS = 100
+DEFAULT_CLI_MAX_TWEETS = 20  # Lower default for command line interface
+DEFAULT_TWEETS_CSV_FILE = "src/data/elonmusk_reformatted.csv"
+DEFAULT_OUTPUT_DIR = "src/data"
+DEFAULT_FORMAT_STYLE = "georgia"  # Options: "georgia" for YYYY:MM:DD:HH:MM:SS, "edt" for EDT with AM/PM
+
+# API Request Parameters
+MAX_REQUEST_RETRIES = 5
+MAX_EXHAUSTIVE_ATTEMPTS = 3
+DEFAULT_TWEET_REQUEST_MULTIPLIER = 3  # For tweetsDesired, resultsLimit, etc.
+
+# Format Templates
+GEORGIA_TIMESTAMP_FORMAT = "%Y:%m:%d:%H:%M:%S"
+EDT_TIMESTAMP_FORMAT = "%Y-%m-%d %I:%M:%S %p EDT"
+
+# Tweet Fetching Cost Information
+TWEET_FETCHING_COST = {
+    "40_tweets": 3.2,  # Cost in cents for fetching up to 40 tweets
+    "100_tweets": 5.0,  # Cost in cents for fetching up to 100 tweets
+    "1000_tweets": 30.0  # Cost in cents for fetching up to 1000 tweets
+} 

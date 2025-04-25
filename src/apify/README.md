@@ -1,145 +1,161 @@
 # Elon Musk Tweet Fetcher
 
-A robust tool for automatically fetching and archiving tweets from Elon Musk's Twitter account.
+A simple tool for fetching tweets from Elon Musk's Twitter account.
 
 ## Overview
 
-This module continuously collects tweets from Elon Musk's Twitter account and stores them in a standardized format. It features:
+This module provides a simple and efficient way to fetch tweets from Elon Musk's Twitter account and save them in a standardized format. It uses the Apify API to scrape Twitter data.
 
-- Automatic Twitter API integration through Apify
-- Scheduled fetching at configurable intervals
-- Timestamp standardization to Georgia timezone (UTC+4)
-- Duplicate tweet detection and filtering
-- Chronological sorting of tweets
-- CSV-based storage with proper text encoding
+## Components
 
-## Features
+### TweetGetter Class
 
-- **Automatic scheduling**: Runs at configurable intervals (default: every 5 minutes) to fetch new tweets
-- **Timezone handling**: Standardizes all timestamps to Georgia time (UTC+4)
-- **Robust error handling**: Gracefully handles API failures and network issues
-- **CSV cleaning**: Automatically fixes and standardizes existing CSV data
-- **Duplicate prevention**: Ensures each tweet is only stored once
-- **Date normalization**: Handles various timestamp formats from Twitter's API
-- **Sorting**: Keeps tweets in chronological order (oldest first, newest last)
-- **Debug logging**: Detailed output for monitoring and troubleshooting
-- **Command-line options**: Configure refresh interval, number of tweets, and one-time runs
+The `TweetGetter` class provides a simple interface to fetch tweets:
 
-## Command-Line Usage
+- **File location:** `src/apify/models/tweet_getter.py`
+- **Purpose:** Fetch tweets from a Twitter user (default: Elon Musk)
+- **Features:**
+  - Fetch tweets from any Twitter handle (default: elonmusk)
+  - Fetch tweets starting from a specific tweet ID
+  - Store tweets in a CSV file
+  - Handle timestamp conversions and formatting
+  - Remove duplicates
+  - Debug mode for development
+  - Add to database functionality
+
+### Utility Functions
+
+The `timestamp_handler` module contains utility functions for handling timestamps:
+
+- **File location:** `src/apify/utils/timestamp_handler.py`
+- **Purpose:** Convert and format timestamps from various formats
+- **Features:**
+  - Convert various timestamp formats to unix timestamps
+  - Format timestamps in human-readable format with AM/PM in Eastern Time
+  - Get current timestamp
+  - Check if a timestamp is within a range
+
+## Usage
+
+### Command Line
+
+You can use the included script to fetch tweets from Elon Musk. The recommended way to run the script is using Python's module notation:
 
 ```bash
-# Run with default settings (5-minute refresh interval, fetch 5 tweets per request)
-python src/apify/tweetfetcher.py
+# Fetch 100 tweets (default)
+python -m src.apify.get_elon_tweets
 
-# Run with a custom refresh interval (e.g. every 15 minutes)
-python src/apify/tweetfetcher.py --interval 15
+# Fetch 20 tweets
+python -m src.apify.get_elon_tweets --max-tweets 20
 
-# Run with a custom number of tweets to fetch per request
-python src/apify/tweetfetcher.py --max-tweets 10
+# Fetch tweets starting from a specific tweet ID
+python -m src.apify.get_elon_tweets --since-id 1915647254519795869
 
-# Run once and exit (don't keep running on schedule)
-python src/apify/tweetfetcher.py --one-time
+# Enable debug mode (prints detailed info and doesn't save to CSV)
+python -m src.apify.get_elon_tweets --debug
 
-# Combine options (fetch 20 tweets every 30 minutes)
-python src/apify/tweetfetcher.py --interval 30 --max-tweets 20
+# Specify a custom output file
+python -m src.apify.get_elon_tweets --output path/to/output.csv
 
-# Run with Python 3.13 specifically
-C:/Users/99557/AppData/Local/Programs/Python/Python313/python.exe src/apify/tweetfetcher.py --interval 10
+# Add tweets to the database (in Georgia timestamp format)
+python -m src.apify.get_elon_tweets --add-to-db
+
+# Use EDT timestamp format (YYYY-MM-DD HH:MM:SS AM/PM EDT)
+python -m src.apify.get_elon_tweets --format edt
+
+# Automatically use the latest tweet ID from the database for this run
+python -m src.apify.get_elon_tweets --latest
+
+# Always automatically use the latest tweet ID (persistent setting)
+python -m src.apify.get_elon_tweets --auto-since-id
+
+# Combine multiple options
+python -m src.apify.get_elon_tweets --max-tweets 50 --add-to-db --latest
+
+# best here
+python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --debug --add-to-db
+
 ```
+### Command Line Options
 
-## Command-Line Options
+- `--max-tweets`, `-m`: Maximum number of tweets to fetch (default: 100)
+- `--since-id`, `-s`: Tweet ID to start fetching from (e.g., "1915647254519795869")
+- `--output`, `-o`: Output CSV file path (default: src/data/elonmusk_reformatted.csv)
+- `--debug`, `-d`: Print debug information and do not store tweets
+- `--add-to-db`, `-a`: Add tweets to the database in Georgia timestamp format
+- `--format`, `-f`: Timestamp format to use (choices: 'georgia', 'edt', default: 'georgia')
+- `--latest`, `-l`: Automatically use the latest tweet ID from the database for this run only
+- `--auto-since-id`: Always automatically use the latest tweet ID from the database (works across runs)
 
-- `--interval`, `-i`: Refresh interval in minutes (default: 5)
-- `--max-tweets`, `-m`: Maximum number of tweets to fetch per request (default: 5)
-- `--one-time`, `-o`: Run once and exit (don't keep running on schedule)
+### Automatically Fetching New Tweets
 
-## Configuration Options
+The tool offers two convenient ways to automatically fetch only new tweets:
 
-At the top of the script, you can customize these variables:
+1. **For a single run** - Use the `--latest` flag to automatically detect and use the latest tweet ID from your existing database just for this run.
 
-- `APIFY_TOKEN`: Your Apify API token
-- `ACTOR_TASK_ID`: The Apify actor task ID for Twitter scraping
-- `CSV_FILE`: Path to the CSV file where tweets will be stored
+   ```bash
+   python -m src.apify.get_elon_tweets --latest
+   ```
 
-## Timezone Handling
+2. **For persistent configuration** - Use the `--auto-since-id` flag to always use the latest tweet ID from the database for all runs (unless overridden with `--since-id`).
 
-All timestamps are converted to Georgia timezone (UTC+4) to ensure consistency. The script:
+   ```bash
+   python -m src.apify.get_elon_tweets --auto-since-id
+   ```
 
-1. Parses various timestamp formats from Twitter's API
-2. Normalizes and converts them to Georgia time
-3. Stores timestamps in a standardized format: "YYYY:MM:DD:HH:MM:SS"
+> **Note:** When using the automatic latest tweet ID functionality, make sure to set an appropriate `--max-tweets` value. If the value is too low (e.g., less than 100), you might miss some tweets because the tool can only fetch a limited number of tweets in a single run. The default is 100, which should be sufficient for most cases, but you can increase it if the user tweets frequently.
 
-## Programmatic Usage
+This makes it easy to keep your tweet database up-to-date by only fetching new tweets that have appeared since your last update.
 
-You can also import and use the functions in your Python code:
+### Timestamp Formats
+
+The script supports two timestamp formats:
+
+- **Georgia Format (default)**: `YYYY:MM:DD:HH:MM:SS` (e.g., "2025:04:25:02:49:05")
+- **EDT Format**: `YYYY-MM-DD HH:MM:SS AM/PM EDT` (e.g., "2025-04-25 02:49:05 AM EDT")
+
+### Programmatic Usage
+
+You can also use the `TweetGetter` class in your code:
 
 ```python
-from src.apify.tweetfetcher import fetch_new_tweets, clean_existing_csv
+from src.apify.models.tweet_getter import TweetGetter
 
-# Clean and normalize an existing CSV file
-clean_existing_csv()
+# Create a TweetGetter instance
+getter = TweetGetter(
+    twitter_handle="elonmusk",     # Default: elonmusk
+    max_tweets=100,                # Default: 100
+    since_id="1915647254519795869", # Optional: start from a specific tweet ID
+    csv_file="path/to/output.csv", # Default: src/data/elonmusk_reformatted.csv
+    debug=True,                    # Optional: enable debug mode
+    format_style="georgia"         # Optional: timestamp format ('georgia' or 'edt')
+)
 
-# Fetch new tweets one time
-fetch_new_tweets()
+# Fetch and save tweets
+df = getter.fetch_and_save_tweets()
 
-# To run continuously with scheduling, use the main loop:
-import schedule
-import time
-
-# Set up the schedule
-schedule.every(5).minutes.do(fetch_new_tweets)
-
-# Run the scheduling loop
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+# Or add tweets to the database
+num_added = getter.add_to_database()
 ```
 
-## Output
+## Output Format
 
-The script produces:
+The tweets are saved in a CSV file with the following columns:
 
-1. **Console output** with detailed information about:
-   - Fetch operations and timing
-   - Number of tweets fetched and saved
-   - Tweet structure samples for debugging
-   - Timestamp conversion details
-   - Error messages and warnings
+- `id`: Twitter's unique tweet ID
+- `text`: The full text content of the tweet (wrapped in triple quotes)
+- `created_at`: Timestamp in the specified format
 
-2. **CSV file** with the following columns:
-   - `id`: Twitter's unique tweet ID
-   - `text`: The full text content of the tweet
-   - `created_at`: Standardized timestamp in "YYYY:MM:DD:HH:MM:SS" format
-
-## CSV File Structure
-
-The tweets are stored in a CSV file with this format:
+Georgia Format Example:
 
 ```
-id,text,created_at
-1913827557314617480,"""RT @ElonClipsX: Kevin O'Leary: The government drips with fat. Let Elon do his thing – there's nobody like him.  "I'm okay with [Elon going…""",2025:04:20:01:30:21
-1913829481040560546,"""RT @Tesla: ❤️""",2025:04:20:01:38:00
+"id","text","created_at"
+"1915659312464339287",""""RT @naval: Peace is not when nothing bothersome happens, peace is when nothing bothers you."""","2025:04:25:02:49:05"
 ```
 
-Note that tweet text is wrapped in triple quotes to handle embedded quote characters.
+EDT Format Example:
 
-## Key Functions
-
-- `fix_timestamp()`: Normalizes various Twitter timestamp formats
-- `clean_existing_csv()`: Cleans and sorts an existing CSV file
-- `fetch_new_tweets()`: Fetches new tweets from Elon's account
-
-## Requirements
-
-This module requires:
-
-- Python 3.6+
-- pandas
-- pytz
-- requests
-- schedule
-- re (standard library)
-- csv (standard library)
-- os (standard library)
-- time (standard library)
-- datetime (standard library) 
+```
+"id","text","created_at"
+"1915659312464339287",""""RT @naval: Peace is not when nothing bothersome happens, peace is when nothing bothers you."""","2025-04-25 02:49:05 AM EDT"
+```
