@@ -257,3 +257,46 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the terms of the MIT license.
+
+## Automated Scheduler
+
+This project includes an automated scheduler that can periodically fetch tweets and run predictions at configurable intervals.
+
+### Running the Scheduler
+
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Run with default settings (every 20 minutes)
+python -m src.scheduler
+
+# Run with custom interval (every 5 minutes)
+python -m src.scheduler --interval 5
+
+# Only fetch tweets, don't run predictions
+python -m src.scheduler --tweets-only
+
+# Only run predictions, don't fetch tweets
+python -m src.scheduler --predictions-only
+
+# Run jobs once and exit (don't keep running)
+python -m src.scheduler --run-once
+```
+
+### Running as a Background Service
+
+Use the provided shell scripts to run the scheduler as a background service:
+
+```bash
+# Start the scheduler with default settings
+./src/scheduler/run_scheduler.sh
+
+# Start with custom settings
+./src/scheduler/run_scheduler.sh --interval 15 --max-tweets 50 --quiet
+
+# Stop the scheduler
+./src/scheduler/stop_scheduler.sh
+```
+
+For more details, see the [Scheduler README](src/scheduler/README.md).
