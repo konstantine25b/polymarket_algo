@@ -10,7 +10,8 @@ from ..utils.timestamp_handler import (
     format_timestamp_edt,
     get_current_timestamp,
     EDT_TZ,
-    GEORGIA_TZ
+    GEORGIA_TZ,
+    ET_TZ
 )
 from src.constants import (
     APIFY_TOKEN, 
@@ -161,6 +162,7 @@ class TweetGetter:
     def fix_timestamp(self, timestamp_str):
         """
         Fix timestamp format according to the selected format style.
+        Both formats use Eastern Time (ET) but with different display styles.
         
         Args:
             timestamp_str: Timestamp string from Twitter
@@ -175,8 +177,8 @@ class TweetGetter:
             unix_ts = convert_to_unix_timestamp(timestamp_str)
             
             if self.format_style == "georgia":
-                # Format in Georgia timezone with YYYY:MM:DD:HH:MM:SS format
-                dt = datetime.fromtimestamp(unix_ts, GEORGIA_TZ)
+                # Format in Eastern Time with YYYY:MM:DD:HH:MM:SS format
+                dt = datetime.fromtimestamp(unix_ts, ET_TZ)
                 return dt.strftime(GEORGIA_TIMESTAMP_FORMAT)
             else:
                 # Format in EDT with AM/PM
@@ -853,15 +855,14 @@ class TweetGetter:
             for idx, row in updated_df.iterrows():
                 if ':' not in row['created_at'] or row['created_at'].count(':') < 3:
                     try:
-                        # Convert to Georgia format
+                        # Convert to 'georgia' format (using ET timezone)
                         if 'EDT' in row['created_at']:
                             # Parse EDT format first
                             date_part = row['created_at'].replace(' EDT', '')
                             dt = datetime.strptime(date_part, '%Y-%m-%d %I:%M:%S %p')
-                            dt = dt.replace(tzinfo=EDT_TZ)
-                            # Convert to Georgia timezone
-                            dt = dt.astimezone(GEORGIA_TZ)
-                            updated_df.at[idx, 'created_at'] = dt.strftime("%Y:%m:%d:%H:%M:%S")
+                            dt = dt.replace(tzinfo=ET_TZ)
+                            # Keep in ET timezone but format differently
+                            updated_df.at[idx, 'created_at'] = dt.strftime(GEORGIA_TIMESTAMP_FORMAT)
                     except Exception as e:
                         if self.debug:
                             print(f"Error converting timestamp {row['created_at']}: {e}")

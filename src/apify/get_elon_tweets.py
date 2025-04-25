@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--add-to-db', '-a', action='store_true',
                       help='Add new tweets to the database in the Georgia timestamp format')
     parser.add_argument('--format', '-f', type=str, choices=['georgia', 'edt'], default='georgia',
-                      help='Timestamp format (default: georgia for YYYY:MM:DD:HH:MM:SS)')
+                      help='Timestamp format (both use Eastern Time - georgia: YYYY:MM:DD:HH:MM:SS, edt: YYYY-MM-DD HH:MM:SS AM/PM EDT)')
     parser.add_argument('--latest', '-l', action='store_true',
                       help='Automatically use the latest tweet ID from the database')
     parser.add_argument('--auto-since-id', action='store_true',

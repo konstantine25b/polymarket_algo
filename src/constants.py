@@ -16,7 +16,7 @@ POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
 
 # Polymarket Event URLs
 # Current Elon Musk tweets event
-POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-april-18-25?tid=1745165575043"
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-april-25-may-2?tid=1745606279244"
 
 # Data Paths
 DATA_DIR = Path("src/polymarket/data")
@@ -25,10 +25,10 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
-MARKET_ID = "0x3e69ba4320546e712a7b094341f52b69c45c6352"
-MARKET_HASH = "will-elon-musk-tweet-over-100-times-april-18-25"
-EVENT_HASH = "elon-musk-of-tweets-april-18-25"
-FULL_EVENT_HASH = "elon-musk-of-tweets-april-18-25"
+MARKET_ID = "0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00"
+MARKET_HASH = "will-elon-musk-tweet-over-100-times-april-25-may-2"
+EVENT_HASH = "elon-musk-of-tweets-april-25-may-2"
+FULL_EVENT_HASH = "elon-musk-of-tweets-april-25-may-2"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
@@ -38,8 +38,8 @@ DEFAULT_DATA_PATH = os.path.join(
 )
 
 # Polymarket event timeframe (Eastern Time)
-POLYMARKET_START_TIME = "2025-04-18 12:00:00"
-POLYMARKET_END_TIME = "2025-04-25 12:00:00"
+POLYMARKET_START_TIME = "2025-04-25 12:00:00"
+POLYMARKET_END_TIME = "2025-05-02 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket
@@ -86,4 +86,12 @@ TWEET_FETCHING_COST = {
     "40_tweets": 3.2,  # Cost in cents for fetching up to 40 tweets
     "100_tweets": 5.0,  # Cost in cents for fetching up to 100 tweets
     "1000_tweets": 30.0  # Cost in cents for fetching up to 1000 tweets
+}
+
+# CSV Header Mapping 
+CSV_HEADER_MAP = {
+    "id_str": "id",
+    "tweet_id": "id",
+    "tweet_text": "text",
+    "tweet_created_at": "created_at"
 } 

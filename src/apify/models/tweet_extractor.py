@@ -7,7 +7,8 @@ from ..utils.timestamp_handler import (
     format_timestamp_edt,
     get_current_timestamp,
     EDT_TZ,
-    GEORGIA_TZ
+    GEORGIA_TZ,
+    ET_TZ
 )
 from src.constants import (
     DEFAULT_TWITTER_HANDLE,
@@ -61,6 +62,7 @@ class TweetExtractor:
     def fix_timestamp(self, timestamp_str):
         """
         Fix timestamp format according to the selected format style.
+        Both formats use Eastern Time (ET) but with different display styles.
         
         Args:
             timestamp_str: Original timestamp string
@@ -75,8 +77,8 @@ class TweetExtractor:
             unix_ts = convert_to_unix_timestamp(timestamp_str)
             
             if self.format_style == "georgia":
-                # Format in Georgia timezone with YYYY:MM:DD:HH:MM:SS format
-                dt = datetime.fromtimestamp(unix_ts, GEORGIA_TZ)
+                # Format in Eastern Time with YYYY:MM:DD:HH:MM:SS format
+                dt = datetime.fromtimestamp(unix_ts, ET_TZ)
                 return dt.strftime(GEORGIA_TIMESTAMP_FORMAT)
             else:
                 # Format in EDT with AM/PM

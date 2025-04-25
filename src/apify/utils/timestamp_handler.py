@@ -2,10 +2,11 @@ import time
 from datetime import datetime, timezone, timedelta
 import pytz
 
-# Constants - using Eastern Time instead of Georgia
+# Constants - using Eastern Time (ET) for all timezone operations
 EDT_TZ = pytz.timezone('US/Eastern')
-# Keep Georgia timezone constant for backward compatibility
-GEORGIA_TZ = pytz.timezone('Asia/Tbilisi')
+ET_TZ = pytz.timezone('US/Eastern')  # Main ET timezone reference
+# Keep Georgia timezone constant as alias to ET for backward compatibility
+GEORGIA_TZ = pytz.timezone('US/Eastern')  # Now also points to US/Eastern
 
 def convert_to_unix_timestamp(timestamp):
     """
@@ -65,12 +66,12 @@ def get_current_timestamp():
 
 def get_current_time_edt():
     """Get current time in Eastern timezone (HH:MM:SS AM/PM)"""
-    now = datetime.now(EDT_TZ)
+    now = datetime.now(ET_TZ)
     return now.strftime("%I:%M:%S %p")
 
 def get_current_time_georgia():
-    """Get current time in Georgia timezone (HH:MM:SS)"""
-    now = datetime.now(GEORGIA_TZ)
+    """Get current time in Eastern timezone (HH:MM:SS) - legacy name kept for compatibility"""
+    now = datetime.now(ET_TZ)
     return now.strftime("%H:%M:%S")
 
 def format_timestamp(timestamp, fmt="%Y-%m-%d %I:%M:%S %p", timezone_name="US/Eastern"):
@@ -114,7 +115,7 @@ def format_timestamp_edt(timestamp):
     Returns:
         str: EDT timestamp with AM/PM in format YYYY-MM-DD HH:MM:SS AM/PM EDT
     """
-    dt = datetime.fromtimestamp(timestamp, EDT_TZ)
+    dt = datetime.fromtimestamp(timestamp, ET_TZ)
     formatted = dt.strftime("%Y-%m-%d %I:%M:%S %p EDT")
     return formatted
 

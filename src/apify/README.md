@@ -76,6 +76,7 @@ python -m src.apify.get_elon_tweets --max-tweets 50 --add-to-db --latest
 python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --debug --add-to-db
 
 ```
+
 ### Command Line Options
 
 - `--max-tweets`, `-m`: Maximum number of tweets to fetch (default: 100)
@@ -109,10 +110,12 @@ This makes it easy to keep your tweet database up-to-date by only fetching new t
 
 ### Timestamp Formats
 
-The script supports two timestamp formats:
+The script supports two timestamp formats, both using Eastern Time (ET):
 
-- **Georgia Format (default)**: `YYYY:MM:DD:HH:MM:SS` (e.g., "2025:04:25:02:49:05")
+- **Georgia Format (default)**: `YYYY:MM:DD:HH:MM:SS` in Eastern Time (e.g., "2025:04:25:02:49:05")
 - **EDT Format**: `YYYY-MM-DD HH:MM:SS AM/PM EDT` (e.g., "2025-04-25 02:49:05 AM EDT")
+
+The name "Georgia" format is kept for backward compatibility, but both formats now use the Eastern Time (ET) timezone.
 
 ### Programmatic Usage
 
