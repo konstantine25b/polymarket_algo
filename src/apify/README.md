@@ -87,6 +87,95 @@ python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --debug --add-t
 - `--format`, `-f`: Timestamp format to use (choices: 'georgia', 'edt', default: 'georgia')
 - `--latest`, `-l`: Automatically use the latest tweet ID from the database for this run only
 - `--auto-since-id`: Always automatically use the latest tweet ID from the database (works across runs)
+- `--exhaustive`, `-e`: Use exhaustive fetching to ensure all available tweets are captured
+- `--max-attempts`: Maximum number of API calls when using exhaustive mode (default: 3)
+- `--use-max-id`, `-u`: Use max_id approach for pagination (fetches older tweets)
+- `--use-client`, `-c`: Use the Apify client library instead of direct API calls
+- `--incremental`, `-i`: Use incremental batch size to ensure no gaps between database and new tweets
+- `--initial-batch`: Initial batch size for incremental fetching (default: 40)
+- `--max-batch`: Maximum batch size for incremental fetching (default: 200)
+- `--batch-increment`: How much to increase batch size in each incremental attempt (default: 20)
+- `--incremental-attempts`: Maximum number of attempts for incremental fetching (default: 5)
+
+### Advanced Fetching Strategies
+
+The tool implements several sophisticated fetching strategies to ensure reliable and complete tweet collection:
+
+#### 1. Client-based Fetching
+
+Uses the official Apify client library instead of direct API calls for better reliability and performance:
+
+```bash
+python -m src.apify.get_elon_tweets --use-client --max-tweets 40
+```
+
+This method often provides more reliable results and better handles API pagination.
+
+#### 2. Incremental Fetching
+
+A sophisticated strategy designed to avoid gaps between your existing database and newly fetched tweets:
+
+```bash
+python -m src.apify.get_elon_tweets --use-client --add-to-db --incremental
+```
+
+Here's how it works:
+
+- Starts with a small batch size (default: 40 tweets)
+- Checks if this batch overlaps with your existing database (finding the latest tweet from your DB)
+- If not found, gradually increases the batch size and tries again
+- Continues until either:
+  - The latest database tweet is found (ensuring continuity)
+  - Maximum batch size is reached (default: 200 tweets)
+  - Maximum attempts are exhausted (default: 5 attempts)
+
+This approach is especially useful for:
+
+- Ensuring no gaps in your tweet timeline
+- Minimizing API calls when there are few new tweets
+- Handling situations where many tweets were posted between runs
+
+You can customize the parameters:
+
+```bash
+python -m src.apify.get_elon_tweets --use-client --add-to-db --incremental \
+  --initial-batch 60 --max-batch 300 --batch-increment 30 --incremental-attempts 7
+```
+
+#### 3. Exhaustive Fetching
+
+Makes multiple API calls to ensure all available tweets within your constraints are captured:
+
+```bash
+python -m src.apify.get_elon_tweets --exhaustive --max-attempts 5
+```
+
+This is useful when you need to be certain you're not missing tweets due to API limitations.
+
+#### 4. Max ID Approach
+
+Uses Twitter's max_id pagination approach to fetch older tweets:
+
+```bash
+python -m src.apify.get_elon_tweets --use-max-id
+```
+
+This is helpful when you specifically want to collect historical tweets rather than the most recent ones.
+
+#### Recommended Strategy for Most Use Cases
+
+For general-purpose tweet collection with maximum reliability, we recommend:
+
+```bash
+python -m src.apify.get_elon_tweets --max-tweets 40 --use-client --add-to-db --incremental
+```
+
+This combination:
+
+- Uses the reliable client library
+- Automatically adds tweets to your database
+- Uses incremental fetching to avoid gaps
+- Limits to 40 tweets per request to control costs
 
 ### Automatically Fetching New Tweets
 
@@ -139,6 +228,14 @@ df = getter.fetch_and_save_tweets()
 
 # Or add tweets to the database
 num_added = getter.add_to_database()
+
+# Use incremental fetching
+num_added = getter.add_to_database_client_incremental(
+    initial_batch_size=40,
+    max_batch_size=200,
+    increment=20,
+    max_attempts=5
+)
 ```
 
 ## Output Format

@@ -776,6 +776,127 @@ class TweetGetter:
         
         return num_added
     
+    def add_to_database_client_incremental(self, use_latest_id=False, initial_batch_size=40, max_batch_size=200, increment=20, max_attempts=5):
+        """
+        Fetch tweets using the Apify client with incremental batch size increases to ensure 
+        we capture tweets that might be in a gap between DB and latest tweets.
+        
+        If the initial batch doesn't contain the latest tweet from the database, it increases
+        the batch size and tries again, continuing until we either find the latest DB tweet,
+        reach max_batch_size, or exhaust max_attempts.
+        
+        Args:
+            use_latest_id: Whether to automatically use the latest tweet ID from the CSV file
+            initial_batch_size: Initial number of tweets to fetch (default: 40)
+            max_batch_size: Maximum number of tweets to fetch in a single request (default: 200)
+            increment: How much to increase the batch size on each attempt (default: 20)
+            max_attempts: Maximum number of attempts to make (default: 5)
+            
+        Returns:
+            int: Number of new tweets added to the database
+        """
+        print(f"Fetching tweets from @{self.twitter_handle} to add to database using incremental fetching...")
+        
+        # Get the latest tweet ID from the database
+        latest_db_id = self.get_latest_tweet_id()
+        if not latest_db_id:
+            print("No tweets found in database. Will use regular fetching.")
+            return self.add_to_database_client(use_latest_id)
+        
+        print(f"Latest tweet ID in database: {latest_db_id}")
+        
+        # Save the original max_tweets value to restore it later
+        original_max_tweets = self.max_tweets
+        
+        # Set format to Georgia style for database storage
+        old_style = self.format_style
+        self.format_style = "georgia"
+        
+        # Try multiple batch sizes until we find the latest DB tweet or exhaust attempts
+        current_batch_size = initial_batch_size
+        attempts = 0
+        db_tweet_found = False
+        all_fetched_tweets = pd.DataFrame()
+        
+        while attempts < max_attempts and current_batch_size <= max_batch_size and not db_tweet_found:
+            attempts += 1
+            
+            print(f"\nAttempt {attempts}/{max_attempts}: Fetching {current_batch_size} tweets...")
+            
+            # Set the batch size for this attempt
+            self.max_tweets = current_batch_size
+            
+            # Get tweets
+            new_tweets = self.get_tweets_via_client()
+            
+            if new_tweets.empty:
+                print("No tweets found in this batch.")
+                current_batch_size += increment
+                continue
+                
+            # Check if the latest DB tweet is in this batch
+            db_tweet_found = latest_db_id in new_tweets['id'].values
+            
+            if db_tweet_found:
+                print(f"✓ Found latest database tweet (ID: {latest_db_id}) in batch of {len(new_tweets)} tweets.")
+                all_fetched_tweets = new_tweets
+                break
+            else:
+                print(f"✗ Latest database tweet not found in batch of {len(new_tweets)} tweets.")
+                
+                # Keep the tweets for this batch but increase batch size for next attempt
+                all_fetched_tweets = new_tweets
+                current_batch_size += increment
+                
+                # Extra logging to help debug
+                if len(new_tweets) > 0:
+                    print(f"Oldest tweet in batch: {new_tweets['id'].iloc[-1]}")
+                    print(f"Newest tweet in batch: {new_tweets['id'].iloc[0]}")
+                
+        # Restore the original max_tweets value
+        self.max_tweets = original_max_tweets
+        
+        # Restore original format style
+        self.format_style = old_style
+        
+        if not db_tweet_found and attempts >= max_attempts:
+            print(f"\nWarning: Could not find latest database tweet after {max_attempts} attempts.")
+            print("There may be a gap between the database and newly fetched tweets.")
+            print("No tweets will be added to avoid potential duplicates or missing tweets.")
+            return 0
+        
+        if not db_tweet_found and current_batch_size > max_batch_size:
+            print(f"\nWarning: Reached maximum batch size of {max_batch_size} tweets.")
+            print("There may be a gap between the database and newly fetched tweets.")
+            print("No tweets will be added to avoid potential duplicates or missing tweets.")
+            return 0
+        
+        if all_fetched_tweets.empty:
+            print("No tweets found to add to the database.")
+            return 0
+            
+        # Save only tweets newer than the latest DB tweet
+        if db_tweet_found:
+            # Find the index of the latest DB tweet
+            db_tweet_idx = all_fetched_tweets[all_fetched_tweets['id'] == latest_db_id].index[0]
+            
+            # Keep only tweets newer than the latest DB tweet
+            new_tweets_to_add = all_fetched_tweets.iloc[:db_tweet_idx]
+            
+            if new_tweets_to_add.empty:
+                print("No new tweets to add to the database.")
+                return 0
+                
+            print(f"Found {len(new_tweets_to_add)} new tweets to add to the database.")
+            
+            # Save tweets to the database
+            num_added = self.save_tweets(new_tweets_to_add)
+            return num_added
+        else:
+            # If we somehow got here without finding the DB tweet, don't add anything
+            print("No tweets will be added to avoid potential duplicates or missing tweets.")
+            return 0
+    
     def save_tweets(self, tweets, file_name=None):
         """
         Save tweets to a CSV file, handling duplicates and proper formatting.

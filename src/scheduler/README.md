@@ -13,6 +13,7 @@ This module provides an automated scheduler that periodically:
 
 - **Configurable interval**: Set how often to run the process (default: 20 minutes)
 - **Selective execution**: Run only tweet fetching or only predictions
+- **Smart incremental fetching**: Uses advanced incremental fetching strategy by default to ensure continuous tweet collection
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
@@ -47,6 +48,12 @@ python -m src.scheduler --no-debug
 # Run in quiet mode with less output
 python -m src.scheduler --quiet
 
+# Customize incremental fetching parameters
+python -m src.scheduler --initial-batch 60 --max-batch 300
+
+# Disable incremental fetching (not recommended)
+python -m src.scheduler --no-incremental
+
 # Combine multiple options
 python -m src.scheduler --interval 15 --max-tweets 50 --quiet
 ```
@@ -60,6 +67,28 @@ python -m src.scheduler --interval 15 --max-tweets 50 --quiet
 - `--no-debug`: Disable debug mode for tweet fetching
 - `--run-once`: Run jobs once and exit
 - `--quiet`: Reduce output verbosity
+- `--no-incremental`: Disable incremental fetching (not recommended)
+- `--initial-batch`: Initial batch size for incremental fetching (default: 40)
+- `--max-batch`: Maximum batch size for incremental fetching (default: 200)
+
+## Smart Incremental Fetching
+
+The scheduler now uses an intelligent incremental fetching strategy by default, which:
+
+1. Starts with a small batch size (default: 40 tweets)
+2. Checks if this batch overlaps with your existing database
+3. If not found, gradually increases the batch size and tries again
+4. Ensures no gaps in your tweet timeline
+
+This approach provides several benefits:
+
+- Ensures continuous, gap-free tweet collection
+- Minimizes API costs by adapting to the actual number of new tweets
+- Handles cases where many tweets are posted between scheduled runs
+- Automatically adjusts batch sizes to maintain data continuity
+
+You can customize the incremental fetching parameters using the `--initial-batch` and
+`--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
 
 ## Logs
 

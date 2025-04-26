@@ -33,6 +33,9 @@ TWEETS_ONLY=""
 PREDICTIONS_ONLY=""
 RUN_ONCE=""
 NO_DEBUG=""
+NO_INCREMENTAL=""
+INITIAL_BATCH=""
+MAX_BATCH=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -64,6 +67,18 @@ while [[ $# -gt 0 ]]; do
             NO_DEBUG="--no-debug"
             shift
             ;;
+        --no-incremental)
+            NO_INCREMENTAL="--no-incremental"
+            shift
+            ;;
+        --initial-batch)
+            INITIAL_BATCH="--initial-batch $2"
+            shift 2
+            ;;
+        --max-batch)
+            MAX_BATCH="--max-batch $2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -72,7 +87,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Build the command
-CMD="python -m src.scheduler --interval $INTERVAL --max-tweets $MAX_TWEETS $QUIET $TWEETS_ONLY $PREDICTIONS_ONLY $RUN_ONCE $NO_DEBUG"
+CMD="python -m src.scheduler --interval $INTERVAL --max-tweets $MAX_TWEETS $QUIET $TWEETS_ONLY $PREDICTIONS_ONLY $RUN_ONCE $NO_DEBUG $NO_INCREMENTAL $INITIAL_BATCH $MAX_BATCH"
 
 # Run the scheduler in the background
 echo "Starting tweet scheduler with command: $CMD"

@@ -17,6 +17,9 @@ Options:
     --no-debug             Disable debug mode for tweet fetching
     --run-once             Run jobs once and exit
     --quiet                Reduce output verbosity
+    --no-incremental       Disable incremental fetching (not recommended)
+    --initial-batch N      Initial batch size for incremental fetching (default: 40)
+    --max-batch N          Maximum batch size for incremental fetching (default: 200)
 """
 
 import argparse
@@ -58,12 +61,19 @@ def setup_argparse():
                         help='Run jobs once and exit')
     parser.add_argument('--quiet', action='store_true',
                         help='Reduce output verbosity')
+    parser.add_argument('--no-incremental', action='store_true',
+                        help='Disable incremental fetching (not recommended)')
+    parser.add_argument('--initial-batch', type=int, default=40,
+                        help='Initial batch size for incremental fetching (default: 40)')
+    parser.add_argument('--max-batch', type=int, default=200,
+                        help='Maximum batch size for incremental fetching (default: 200)')
     return parser.parse_args()
 
-def fetch_tweets(max_tweets=40, debug=True, quiet=False):
+def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
     """Fetch tweets and store them in the database."""
     logger.info(f"Starting tweet fetching job at {datetime.datetime.now()}")
     
+    # Base command with the recommended configuration
     cmd = [
         sys.executable, "-m", "src.apify.get_elon_tweets",
         "--max-tweets", str(max_tweets),
@@ -73,6 +83,17 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False):
     
     if debug:
         cmd.append("--debug")
+    
+    # Use incremental fetching by default (unless explicitly disabled)
+    if use_incremental:
+        cmd.append("--incremental")
+        cmd.extend(["--initial-batch", str(initial_batch)])
+        cmd.extend(["--max-batch", str(max_batch)])
+        cmd.extend(["--batch-increment", "20"])  # Use default increment
+        cmd.extend(["--incremental-attempts", "3"])  # Reasonable default
+        logger.info("Using incremental fetching for reliable tweet collection")
+    else:
+        logger.warning("Incremental fetching is disabled - this may result in gaps in the tweet timeline")
     
     try:
         if quiet:
@@ -132,7 +153,10 @@ def run_scheduled_jobs(args):
         tweets_success = fetch_tweets(
             max_tweets=args.max_tweets,
             debug=not args.no_debug,
-            quiet=args.quiet
+            quiet=args.quiet,
+            use_incremental=not args.no_incremental,
+            initial_batch=args.initial_batch,
+            max_batch=args.max_batch
         )
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)

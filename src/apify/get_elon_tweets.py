@@ -51,6 +51,16 @@ def parse_args():
                       help='Use max_id approach for pagination (fetches older tweets)')
     parser.add_argument('--use-client', '-c', action='store_true',
                       help='Use the Apify client library instead of direct API calls')
+    parser.add_argument('--incremental', '-i', action='store_true',
+                      help='Use incremental batch size to ensure no gaps between database and new tweets')
+    parser.add_argument('--initial-batch', type=int, default=40,
+                      help='Initial batch size for incremental fetching (default: 40)')
+    parser.add_argument('--max-batch', type=int, default=200,
+                      help='Maximum batch size for incremental fetching (default: 200)')
+    parser.add_argument('--batch-increment', type=int, default=20,
+                      help='How much to increase batch size in each incremental attempt (default: 20)')
+    parser.add_argument('--incremental-attempts', type=int, default=5,
+                      help='Maximum number of attempts for incremental fetching (default: 5)')
     return parser.parse_args()
 
 def main():
@@ -81,6 +91,9 @@ def main():
         print("Debug mode enabled - tweets will not be saved")
     if args.add_to_db:
         print("Add-to-DB mode enabled - tweets will be added to the database in Georgia format")
+    if args.incremental:
+        print("Incremental mode enabled - will increase batch size if needed to avoid gaps")
+        print(f"Initial batch: {args.initial_batch}, Max batch: {args.max_batch}, Increment: {args.batch_increment}")
     
     # Create TweetGetter instance with explicit max_tweets enforcement
     getter = TweetGetter(
@@ -96,12 +109,26 @@ def main():
     # If using client approach, handle it specially
     if args.use_client:
         if args.add_to_db:
-            # Add to database using client approach
-            num_added = getter.add_to_database_client(use_latest_id=args.latest)
-            if num_added > 0:
-                print("Successfully added {} new tweets to the database using Apify client.".format(num_added))
+            if args.incremental:
+                # Use the new incremental method
+                num_added = getter.add_to_database_client_incremental(
+                    use_latest_id=args.latest,
+                    initial_batch_size=args.initial_batch,
+                    max_batch_size=args.max_batch,
+                    increment=args.batch_increment,
+                    max_attempts=args.incremental_attempts
+                )
+                if num_added > 0:
+                    print("Successfully added {} new tweets to the database using incremental fetching.".format(num_added))
+                else:
+                    print("No new tweets were added to the database.")
             else:
-                print("No new tweets were added to the database.")
+                # Add to database using client approach (regular method)
+                num_added = getter.add_to_database_client(use_latest_id=args.latest)
+                if num_added > 0:
+                    print("Successfully added {} new tweets to the database using Apify client.".format(num_added))
+                else:
+                    print("No new tweets were added to the database.")
                 
             # Load the database to get the total number of tweets
             if os.path.exists(csv_file):
