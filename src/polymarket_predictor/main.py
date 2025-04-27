@@ -32,6 +32,10 @@ from src.polymarket_predictor.visualization import (
 from src.polymarket_predictor.enhanced_prediction import (
     predict_with_enhanced_algorithm
 )
+# Import Prophet prediction module
+from src.polymarket_predictor.prophet_prediction import (
+    predict_with_prophet
+)
 
 # Import constants
 from src.constants import (
@@ -51,7 +55,8 @@ def predict_tweet_frame_probabilities(
     num_simulations=5000, 
     current_tweet_count=None,
     override_auto_count=False,
-    use_enhanced_algorithm=True  # New parameter to use enhanced algorithm
+    use_enhanced_algorithm=True,  # New parameter to use enhanced algorithm
+    use_prophet_algorithm=False   # New parameter to use Prophet algorithm
 ) -> Optional[Dict[str, float]]:
     """
     Predict probabilities for tweet count frames with robust timezone handling
@@ -66,6 +71,7 @@ def predict_tweet_frame_probabilities(
         current_tweet_count: Manual override for current tweet count
         override_auto_count: Whether to use the provided current_tweet_count instead of auto-counting
         use_enhanced_algorithm: Whether to use the enhanced prediction algorithm
+        use_prophet_algorithm: Whether to use the Prophet-based prediction algorithm
         
     Returns:
         Dictionary mapping tweet count frames to probabilities
@@ -142,6 +148,72 @@ def predict_tweet_frame_probabilities(
         tweets_so_far = df[(df['created_at_dt'] >= polymarket_start) & (df['created_at_dt'] <= now)]
         tweet_count = len(tweets_so_far)
         print(f"Using current tweet count of {tweet_count} tweets")
+    
+    # Use Prophet algorithm if specified
+    if use_prophet_algorithm:
+        print("\nUsing Prophet-based prediction algorithm...")
+        
+        # Run Prophet prediction
+        prophet_results = predict_with_prophet(
+            df=df,
+            polymarket_start=polymarket_start,
+            polymarket_end=polymarket_end,
+            count_frames=count_frames,
+            current_tweet_count=tweet_count,
+            num_simulations=num_simulations
+        )
+        
+        # Check if there was an error
+        if 'error' in prophet_results:
+            print(f"Error in Prophet prediction: {prophet_results['error']}")
+            # Fall back to enhanced algorithm
+            print("Falling back to enhanced algorithm...")
+            use_enhanced_algorithm = True
+            use_prophet_algorithm = False
+        else:
+            # Print prediction information
+            print("\n--- Prophet Prediction Results ---")
+            print(f"Expected final count: {prophet_results['expected_count']:.1f} tweets")
+            print(f"95% confidence interval: {prophet_results['confidence_interval'][0]:.1f} to {prophet_results['confidence_interval'][1]:.1f} tweets")
+            
+            # Print predicted probabilities
+            frame_probabilities = prophet_results['frame_probabilities']
+            print(f"\nPredicted probabilities for tweet count frames ({polymarket_start} to {polymarket_end}, ET timezone):")
+            
+            # Order frames by the predefined order
+            ordered_frames = []
+            for frame in count_frames:
+                ordered_frames.append((frame["name"], frame_probabilities[frame["name"]]))
+            
+            for frame_name, probability in ordered_frames:
+                print(f"{frame_name}: {probability:.1f}%")
+            
+            # Present top 3 most likely outcomes
+            print("\nTop 3 most likely outcomes:")
+            sorted_by_prob = sorted(frame_probabilities.items(), key=lambda x: x[1], reverse=True)
+            for i, (frame_name, probability) in enumerate(sorted_by_prob[:3]):
+                if probability > 0:
+                    print(f"{i+1}. {frame_name}: {probability:.1f}%")
+            
+            # Generate visualizations
+            plot_monte_carlo_simulation(
+                prophet_results['simulations'], 
+                tweet_count, 
+                prophet_results['expected_count'], 
+                prophet_results['confidence_interval'], 
+                count_frames, 
+                frame_probabilities
+            )
+            
+            plot_historical_trends(
+                df,
+                polymarket_start,
+                polymarket_end,
+                tweet_count,
+                prophet_results['expected_count']
+            )
+            
+            return frame_probabilities
     
     # Use enhanced algorithm if specified
     if use_enhanced_algorithm:
@@ -321,6 +393,7 @@ def main():
     parser.add_argument('--simulations', type=int, default=10000, help='Number of Monte Carlo simulations')
     parser.add_argument('--count', type=int, help='Override current tweet count')
     parser.add_argument('--classic', action='store_true', help='Use classic algorithm instead of enhanced')
+    parser.add_argument('--prophet', action='store_true', help='Use Prophet-based algorithm for prediction')
     
     args = parser.parse_args()
     
@@ -339,7 +412,8 @@ def main():
             num_simulations=args.simulations,
             current_tweet_count=args.count,
             override_auto_count=args.count is not None,
-            use_enhanced_algorithm=not args.classic
+            use_enhanced_algorithm=not args.classic and not args.prophet,
+            use_prophet_algorithm=args.prophet
         )
 
 if __name__ == "__main__":

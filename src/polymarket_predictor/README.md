@@ -13,6 +13,7 @@ The package has been refactored into a modular design for better maintainability
 - `simulation.py`: Monte Carlo simulation and probability calculation
 - `visualization.py`: Plotting and visualization
 - `enhanced_prediction.py`: Advanced prediction algorithm with improved statistical modeling
+- `prophet_prediction.py`: Time series forecasting using Facebook Prophet
 - `main.py`: Command-line interface and orchestration
 
 ## Enhanced Prediction Algorithm
@@ -27,6 +28,18 @@ The enhanced prediction algorithm significantly improves accuracy through severa
 - **Hourly Patterns**: Considers time-of-day patterns in tweet frequency
 - **Robust Statistics**: Filters out extreme outliers for more stable variance estimation
 
+## Prophet-Based Prediction Algorithm
+
+The Prophet-based prediction algorithm leverages Facebook's Prophet library for time series forecasting with these benefits:
+
+- **Advanced Time Series Modeling**: Automatically decomposes time series into trend, seasonality, and holiday components
+- **Robust Handling of Seasonality**: Captures daily, weekly, and other periodic patterns in tweeting behavior
+- **Automatic Changepoint Detection**: Identifies trend shifts and adjusts forecasts accordingly
+- **Uncertainty Quantification**: Provides robust confidence intervals for predictions
+- **Non-Linear Growth Modeling**: Adapts to changing growth rates and saturation effects in tweeting patterns
+- **Handles Missing Data**: Robust to gaps and irregular data points in the tweet history
+- **Specialized for Social Media Data**: Well-suited for the bursty, non-stationary nature of social media activity
+
 ## Usage
 
 ### From Command Line
@@ -37,6 +50,9 @@ python -m src.polymarket_predictor
 
 # Use classic algorithm instead of enhanced
 python -m src.polymarket_predictor --classic
+
+# Use Prophet-based algorithm for time series forecasting
+python -m src.polymarket_predictor --prophet
 
 # Override current tweet count
 python -m src.polymarket_predictor --count 75
@@ -68,7 +84,14 @@ probabilities = predict_tweet_frame_probabilities(
     num_simulations=10000,
     current_tweet_count=75,  # Override auto-count
     override_auto_count=True,
-    use_enhanced_algorithm=True  # Use enhanced algorithm (default)
+    use_enhanced_algorithm=True,  # Use enhanced algorithm
+    use_prophet_algorithm=False   # Don't use Prophet algorithm
+)
+
+# Using Prophet-based prediction
+prophet_probabilities = predict_tweet_frame_probabilities(
+    data_path="path/to/tweets.csv",
+    use_prophet_algorithm=True
 )
 
 # Process results
@@ -79,6 +102,7 @@ for frame, probability in probabilities.items():
 ## Features
 
 - **Enhanced Statistical Model**: Negative Binomial distribution better fits tweet count data
+- **Time Series Forecasting**: Prophet-based algorithm for handling complex patterns and seasonality
 - **Automatic Anomaly Detection**: Identifies patterns that could affect predictions
 - **Advanced Trend Analysis**: Captures acceleration in tweeting rates
 - **Robust Timezone Handling**: All dates and times use Eastern Time (ET) for Polymarket compatibility
@@ -96,3 +120,4 @@ for frame, probability in probabilities.items():
 - seaborn
 - pytz
 - requests
+- prophet
