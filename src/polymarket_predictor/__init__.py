@@ -1,7 +1,15 @@
 """
-Polymarket Tweet Predictor - Tools for predicting and analyzing tweet counts for Polymarket events.
+Polymarket Predictor module for tweet prediction.
+
+This module provides tools to predict tweet counts for Polymarket events.
 """
 
-from .tweet_predictor import predict_tweet_frame_probabilities, verify_tweet_count
+from src.polymarket_predictor.main import (
+    predict_tweet_frame_probabilities, 
+    main
+)
 
-__all__ = ['predict_tweet_frame_probabilities', 'verify_tweet_count'] 
+__all__ = [
+    'predict_tweet_frame_probabilities',
+    'main'
+] 
