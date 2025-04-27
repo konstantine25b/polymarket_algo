@@ -20,6 +20,7 @@ Options:
     --no-incremental       Disable incremental fetching (not recommended)
     --initial-batch N      Initial batch size for incremental fetching (default: 40)
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
+    --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
 """
 
 import argparse
@@ -67,6 +68,8 @@ def setup_argparse():
                         help='Initial batch size for incremental fetching (default: 40)')
     parser.add_argument('--max-batch', type=int, default=200,
                         help='Maximum batch size for incremental fetching (default: 200)')
+    parser.add_argument('--no-prophet', action='store_true',
+                        help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -114,11 +117,21 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, i
     
     return process.returncode == 0
 
-def run_prediction(quiet=False):
-    """Run the Polymarket predictor to update predictions."""
+def run_prediction(quiet=False, use_prophet=True):
+    """Run the Polymarket predictor to update predictions.
+    
+    Args:
+        quiet: Whether to suppress output
+        use_prophet: Whether to use the Prophet algorithm (default: True)
+    """
     logger.info(f"Starting prediction job at {datetime.datetime.now()}")
     
     cmd = [sys.executable, "-m", "src.polymarket_predictor"]
+    
+    # Use Prophet algorithm by default
+    if use_prophet:
+        cmd.append("--prophet")
+        logger.info("Using Prophet-based prediction algorithm")
     
     try:
         if quiet:
@@ -161,7 +174,10 @@ def run_scheduled_jobs(args):
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
-        prediction_success = run_prediction(quiet=args.quiet)
+        prediction_success = run_prediction(
+            quiet=args.quiet,
+            use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
+        )
     
     return tweets_success and prediction_success
 
@@ -180,6 +196,12 @@ def main():
         logger.info("Configured to run tweet fetching only")
     elif args.predictions_only:
         logger.info("Configured to run predictions only")
+    
+    # Log which prediction algorithm will be used
+    if not args.tweets_only and not args.no_prophet:
+        logger.info("Using Prophet-based prediction algorithm (--no-prophet to disable)")
+    elif not args.tweets_only:
+        logger.info("Using standard prediction algorithm")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")
