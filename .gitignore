@@ -77,15 +77,22 @@ Thumbs.db
 *.svg
 *.pdf
 *.eps
+
 # Specific plot directories
 src/polymarket/plots/
-src/polymarket/plots/order_books/
+src/polymarket/plots/order_book/
 src/polymarket_predictor/plots/
 src/graphs/
+
 # Visualization outputs
 *_probabilities.png
 *_comparison.png
 *_orderbook_*.png
 tweet_prediction.png
 venv/
+
+# Polymarket Order Book data
+src/polymarket/data/
+src/polymarket/data/order_book/
+src/polymarket/data/order_book/json/
 
