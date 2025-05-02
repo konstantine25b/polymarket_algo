@@ -96,3 +96,59 @@ src/polymarket/data/
 src/polymarket/data/order_book/
 src/polymarket/data/order_book/json/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environment
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+*.log
+*.csv
+*.json
+
+# Bidding decision output directory - exclude all generated files
+src/bidding_decision/output/
+src/bidding_decision/stats/output/
+src/bidding_decision/stats/output/viz/
+
+# Keep .gitkeep files to ensure directory structure is preserved
+!src/bidding_decision/output/.gitkeep
+!src/bidding_decision/stats/output/.gitkeep
+!src/bidding_decision/stats/output/viz/.gitkeep
+
