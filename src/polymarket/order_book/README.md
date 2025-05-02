@@ -9,6 +9,7 @@ This module fetches and analyzes Polymarket order book data, focusing on Elon Mu
 - Generates visualizations of order book depth
 - Stores historical order book data
 - Displays market status and probabilities in terminal
+- Shows token IDs for easy market trading integration
 
 ## Usage
 
@@ -56,6 +57,12 @@ python -m src.polymarket.order_book.show_market_status --visualize
 # Fetch fresh data and display current market percentages
 python -m src.polymarket.order_book.show_market_status --refresh
 
+# Show token IDs for each market outcome
+python -m src.polymarket.order_book.show_market_status --token-ids
+
+# Quick view with token IDs for easy trading
+python -m src.polymarket.order_book.show_market_status --quick --refresh --token-ids
+
 # Continuously update market data every 5 minutes in quick mode
 python -m src.polymarket.order_book.show_market_status --refresh --interval 300 --quick
 
@@ -92,6 +99,13 @@ The market status display shows:
 
 **Visualization** adds an ASCII bar chart of the probabilities.
 
+**Token IDs Mode** shows token IDs for each market outcome:
+
+- Displays token IDs at the bottom of the market status output
+- Use these IDs directly with the Polymarket trading API or the bidding module
+- Ideal for automated trading strategies
+- Combine with `--quick --refresh` flags for a streamlined trading view
+
 ## Data Format
 
 The order book data is stored in JSON format with the following structure:
@@ -103,6 +117,7 @@ The order book data is stored in JSON format with the following structure:
   "questions": {
     "Will Elon tweet 100-124 times?": {
       "market_id": "0x123...",
+      "token_id": "71321045679252212594626385532706912750332728571942532289631379312455583992563",
       "buy_orders": [
         {"price": 25.5, "size": 100.0, "total": 25.5},
         ...
@@ -116,4 +131,30 @@ The order book data is stored in JSON format with the following structure:
     ...
   }
 }
+```
+
+## Trading Integration
+
+The order book module now includes token IDs for easy integration with Polymarket trading functionality. To trade directly based on market data:
+
+1. Display market data with token IDs: `python -m src.polymarket.order_book.show_market_status --quick --refresh --token-ids`
+2. Find the token ID for your desired market
+3. Use the bidding module to place orders:
+
+```python
+from src.polymarket.bidding.buy.market_order import place_market_buy_order
+from py_clob_client.clob_types import OrderType
+
+# Place a market buy order using the token ID
+response = place_market_buy_order(
+    token_id="71321045679252212594626385532706912750332728571942532289631379312455583992563",
+    amount_usd=10.0,
+    order_type=OrderType.FOK
+)
+```
+
+Alternatively, use the market buy CLI for command-line trading:
+
+```bash
+python -m src.scripts.market_buy.py --token-id 71321045679252212594626385532706912750332728571942532289631379312455583992563 --amount 10.0
 ```

@@ -81,6 +81,25 @@ def fetch_elon_order_book(visualize=False, output_file=None):
     
     logger.info(f"Using event slug: {event_slug}")
     
+    # First get market details to extract token IDs
+    market_details, _ = PolymarketAPIClient.get_market_details_from_gamma(event_slug)
+    token_id_map = {}
+    
+    if market_details:
+        # Create a mapping of question to token_id
+        for market in market_details:
+            question = market.get("question", "")
+            token_id = market.get("token_id", "")
+            outcome = market.get("outcome", "")
+            market_id = market.get("market_id", "")
+            
+            # For YES outcomes, store the token ID
+            if outcome.upper() == "YES":
+                token_id_map[question] = {
+                    "token_id": token_id,
+                    "market_id": market_id
+                }
+    
     # Attempt to get order frames from the API
     start_time = time.time()
     order_frames = PolymarketAPIClient.get_order_frames(event_slug=event_slug)
@@ -91,6 +110,20 @@ def fetch_elon_order_book(visualize=False, output_file=None):
         return None
     
     logger.info(f"Successfully fetched order book data for {len(order_frames)} markets in {fetch_time:.2f} seconds")
+    
+    # Add token IDs to the order frames
+    for question, order_data in order_frames.items():
+        # Try to match with our token ID map
+        if question in token_id_map:
+            order_data["token_id"] = token_id_map[question]["token_id"]
+            order_data["market_id"] = token_id_map[question]["market_id"]
+        else:
+            # Try to match by finding a key that contains this question (partial match)
+            for map_question, id_data in token_id_map.items():
+                if question in map_question or map_question in question:
+                    order_data["token_id"] = id_data["token_id"]
+                    order_data["market_id"] = id_data["market_id"]
+                    break
     
     # Infer event title from first question
     if order_frames:

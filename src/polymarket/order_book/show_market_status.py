@@ -104,7 +104,7 @@ def calculate_market_stats(order_book_data: Dict[str, Any]) -> Dict[str, Any]:
         best_ask = min([order.get('price', 0) for order in sell_orders]) if sell_orders else 100
         spread = best_ask - best_bid if (buy_orders and sell_orders) else None
         
-        # Store the stats
+        # Store the stats, including token_id if available
         market_stats[question] = {
             'midpoint': midpoint,
             'best_bid': best_bid,
@@ -112,7 +112,9 @@ def calculate_market_stats(order_book_data: Dict[str, Any]) -> Dict[str, Any]:
             'spread': spread,
             'bid_liquidity': total_bid_size,
             'ask_liquidity': total_ask_size,
-            'total_liquidity': total_liquidity
+            'total_liquidity': total_liquidity,
+            'token_id': market_data.get('token_id', None),  # Include token_id if available
+            'market_id': market_data.get('market_id', None)  # Include market_id if available
         }
     
     return {
@@ -155,7 +157,7 @@ def extract_range_value(question: str) -> Tuple[float, float]:
     # Fallback to 0, 0 if we can't parse
     return 0, 0
 
-def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: bool = False, all_data: bool = False, elapsed_time: float = None) -> None:
+def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: bool = False, all_data: bool = False, elapsed_time: float = None, show_token_ids: bool = False) -> None:
     """
     Display the market status in the terminal.
     
@@ -165,6 +167,7 @@ def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: b
         quick: Whether to show minimal information (just main table)
         all_data: Whether to show all available data including extra stats
         elapsed_time: Time taken to fetch and process data (if available)
+        show_token_ids: Whether to show token IDs for each market
     """
     event_title = stats.get('event_title', 'Unknown Event')
     timestamp = stats.get('timestamp', 'Unknown Time')
@@ -208,11 +211,13 @@ def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: b
             best_ask = stats.get('best_ask', 0)
             spread = stats.get('spread', None)
             liquidity = stats.get('total_liquidity', 0)
+            token_id = stats.get('token_id', "N/A")
             current_probs[display_name] = midpoint
             
             # Show header only before first item
             if not header_printed:
-                print("\nRANGE                   PROB      BID      ASK    SPREAD   LIQUIDITY")
+                header = "\nRANGE                   PROB      BID      ASK    SPREAD   LIQUIDITY"
+                print(header)
                 header_printed = True
                 
             # Make the display name shorter by removing the date part if it exists
@@ -239,6 +244,15 @@ def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: b
         print(f"\nMost likely: {likely_range} ({likely_market[3].get('midpoint', 0):.1f}%)")
         print(f"Expected tweets: {expected_value:.1f}")
         print(f"Total market liquidity: {total_market_liquidity:.2f}")
+        
+        # Display token IDs if requested
+        if show_token_ids:
+            print("\nToken IDs:")
+            for _, _, display_name, stats in sorted_markets:
+                short_name = display_name.split('April')[0].strip() if 'April' in display_name else display_name
+                short_name = short_name.replace('times', '').strip()
+                token_id = stats.get('token_id', "N/A")
+                print(f"{short_name:<20}: {token_id}")
     else:
         # Standard mode - full header
         if not quick:
@@ -302,6 +316,15 @@ def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: b
                     print(f" Tightest spread: {tightest[0]} ({tightest[1].get('spread', 0):.1f}%)")
             
             print("=" * 80 + "\n")
+        
+        # Display token IDs if requested
+        if show_token_ids:
+            print("\nToken IDs:")
+            for _, _, display_name, stats in sorted_markets:
+                short_name = display_name.split('April')[0].strip() if 'April' in display_name else display_name
+                short_name = short_name.replace('times', '').strip()
+                token_id = stats.get('token_id', "N/A")
+                print(f"{short_name:<20}: {token_id}")
 
 def calculate_expected_value(sorted_markets: List[Tuple]) -> float:
     """Calculate the expected value from the market probabilities."""
@@ -346,7 +369,7 @@ def visualize_terminal_chart(stats: Dict[str, Any]) -> None:
 
 def show_market_status(refresh: bool = False, interval: int = 0, 
                      quick: bool = False, all_data: bool = False, 
-                     visualize: bool = False) -> None:
+                     visualize: bool = False, show_token_ids: bool = False) -> None:
     """
     Display current market status from the most recent order book data.
     
@@ -356,6 +379,7 @@ def show_market_status(refresh: bool = False, interval: int = 0,
         quick: If True, show minimal information for faster viewing
         all_data: If True, show all available data including extra stats
         visualize: If True, include terminal-based visualization
+        show_token_ids: If True, show token IDs for each market
     """
     # Start timing the operation
     start_time = time.time()
@@ -419,7 +443,8 @@ def show_market_status(refresh: bool = False, interval: int = 0,
             try:
                 while True:
                     # Display the stats (refresh flag controls whether to clear the screen)
-                    display_market_status(stats, refresh=refresh, quick=quick, all_data=all_data, elapsed_time=elapsed_time)
+                    display_market_status(stats, refresh=refresh, quick=quick, all_data=all_data, 
+                                         elapsed_time=elapsed_time, show_token_ids=show_token_ids)
                     
                     # Show visualization if requested
                     if visualize:
@@ -453,7 +478,8 @@ def show_market_status(refresh: bool = False, interval: int = 0,
                 print("\nExiting market status view.")
         else:
             # Display the stats once
-            display_market_status(stats, refresh=refresh, quick=quick, all_data=all_data, elapsed_time=elapsed_time)
+            display_market_status(stats, refresh=refresh, quick=quick, all_data=all_data, 
+                                 elapsed_time=elapsed_time, show_token_ids=show_token_ids)
             
             # Show visualization if requested
             if visualize:
@@ -496,6 +522,11 @@ def main():
         action="store_true",
         help="Include simple terminal-based visualization of market probabilities"
     )
+    parser.add_argument(
+        "--token-ids",
+        action="store_true",
+        help="Display token IDs for each market"
+    )
     args = parser.parse_args()
     
     show_market_status(
@@ -503,7 +534,8 @@ def main():
         interval=args.interval,
         quick=args.quick,
         all_data=args.all,
-        visualize=args.visualize
+        visualize=args.visualize,
+        show_token_ids=args.token_ids
     )
 
 if __name__ == "__main__":
