@@ -30,7 +30,7 @@ WALLET_PRIVATE_KEY=your_private_key_here
 ### Python API
 
 ```python
-from src.polymarket.bidding import check_wallet_balance
+from src.polymarket.balance import check_wallet_balance
 
 # Check balance using wallet address from .env
 balance_info = check_wallet_balance()
@@ -47,16 +47,16 @@ For a simple check of your wallet balance (using the address in `.env`):
 
 ```bash
 # Use the wallet.py script directly
-python -m src.polymarket.bidding.wallet
+python -m src.polymarket.balance.wallet
 
 # Use the CLI tool with more options
-python -m src.polymarket.bidding.balance_cli
+python -m src.polymarket.balance.balance_cli
 
 # Check a different wallet address
-python -m src.polymarket.bidding.balance_cli --wallet 0xYourWalletAddress
+python -m src.polymarket.balance.balance_cli --wallet 0xYourWalletAddress
 
 # Get JSON output
-python -m src.polymarket.bidding.balance_cli --json
+python -m src.polymarket.balance.balance_cli --json
 ```
 
 ## How It Works
