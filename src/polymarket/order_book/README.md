@@ -10,6 +10,7 @@ This module fetches and analyzes Polymarket order book data, focusing on Elon Mu
 - Stores historical order book data
 - Displays market status and probabilities in terminal
 - Shows token IDs for easy market trading integration
+- Returns market data in JSON format for programmatic use
 
 ## Usage
 
@@ -68,6 +69,39 @@ python -m src.polymarket.order_book.show_market_status --refresh --interval 300 
 
 # Full featured dashboard with all data, visualization, and auto-refresh
 python -m src.polymarket.order_book.show_market_status --refresh --interval 60 --all --visualize
+
+# Output market data in JSON format
+python -m src.polymarket.order_book.show_market_status --json
+
+# Output fresh market data in JSON format
+python -m src.polymarket.order_book.show_market_status --refresh --json
+```
+
+### Using the JSON Output Programmatically
+
+You can now directly access the market data in your Python code:
+
+```python
+from src.polymarket.order_book.show_market_status import get_market_data_json
+
+# Get fresh market data
+market_data = get_market_data_json(refresh=True)
+
+# Access market probabilities
+for range_name, details in market_data["markets"].items():
+    print(f"{range_name}: {details['probability']}%")
+
+# Access token IDs
+for range_name, details in market_data["markets"].items():
+    print(f"{range_name} token ID: {details['token_id']}")
+
+# Get the expected value and most likely outcome
+expected_value = market_data["summary"]["expected_value"]
+most_likely = market_data["summary"]["most_likely"]["range"]
+most_likely_prob = market_data["summary"]["most_likely"]["probability"]
+
+print(f"Expected tweets: {expected_value}")
+print(f"Most likely outcome: {most_likely} ({most_likely_prob}%)")
 ```
 
 The market status display shows:
@@ -106,6 +140,13 @@ The market status display shows:
 - Ideal for automated trading strategies
 - Combine with `--quick --refresh` flags for a streamlined trading view
 
+**JSON Mode** returns structured data in JSON format:
+
+- Returns all market data in a structured JSON format
+- Includes probabilities, bids, asks, spreads, liquidity and token IDs
+- Includes summary information (expected value, most likely outcome)
+- Ideal for programmatic integration with other tools
+
 ## Data Format
 
 The order book data is stored in JSON format with the following structure:
@@ -129,6 +170,41 @@ The order book data is stored in JSON format with the following structure:
       "is_synthetic": false
     },
     ...
+  }
+}
+```
+
+## JSON Return Format
+
+The `get_market_data_json()` function returns data in the following format:
+
+```json
+{
+  "timestamp": "2023-05-15T12:34:56Z",
+  "event_title": "Elon Musk Tweet Count (May 15-22)",
+  "ranges": ["150–174", "175–199", "200–224"],
+  "markets": {
+    "150–174": {
+      "probability": 87.0,
+      "bid": 86.0,
+      "ask": 88.0,
+      "spread": 2.0,
+      "bid_liquidity": 25000.0,
+      "ask_liquidity": 25583.13,
+      "liquidity": 50583.13,
+      "token_id": "87484005561240668293386668024570478793193107613520178167348753968163790506784",
+      "market_id": "0x123...",
+      "original_question": "Will Elon tweet 150–174 times?"
+    },
+    ...
+  },
+  "summary": {
+    "expected_value": 165.0,
+    "total_liquidity": 128335.66,
+    "most_likely": {
+      "range": "150–174",
+      "probability": 87.0
+    }
   }
 }
 ```

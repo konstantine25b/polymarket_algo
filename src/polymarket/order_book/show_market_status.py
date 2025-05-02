@@ -157,6 +157,156 @@ def extract_range_value(question: str) -> Tuple[float, float]:
     # Fallback to 0, 0 if we can't parse
     return 0, 0
 
+def get_market_data_json(refresh: bool = True) -> Dict[str, Any]:
+    """
+    Get the current market status data in JSON format.
+    
+    This function runs the same process as show_market_status with --quick --refresh --token-ids
+    but instead of displaying the data, it returns it as a structured JSON object.
+    
+    Args:
+        refresh: If True, fetch fresh data from Polymarket, otherwise use cached data
+        
+    Returns:
+        Dict[str, Any]: A dictionary containing structured market data with the following keys:
+            - timestamp: ISO format timestamp
+            - event_title: Title of the event
+            - ranges: List of range names
+            - markets: Dictionary mapping range names to market data
+                - probability: Midpoint probability (%)
+                - bid: Best bid price (%)
+                - ask: Best ask price (%)
+                - spread: Spread between best bid and ask (%)
+                - liquidity: Total liquidity
+                - token_id: Token ID for trading
+    """
+    # Temporarily suppress output
+    original_stdout = sys.stdout
+    sys.stdout = open(os.devnull, 'w')
+    
+    # Set logging to critical to suppress most logs
+    original_level = logger.level
+    logger.setLevel(logging.CRITICAL)
+    logging.getLogger().setLevel(logging.CRITICAL)
+    
+    try:
+        if refresh:
+            # Fetch fresh order book data with minimal output
+            output_path = fetch_elon_order_book()
+            if not output_path:
+                logger.error("Failed to fetch fresh order book data.")
+                return {"error": "Failed to fetch fresh order book data"}
+            file_path = output_path
+        else:
+            # Find the most recent order book file
+            file_path = find_latest_order_book_file()
+            if not file_path:
+                logger.warning("No order book data found. Fetching fresh data...")
+                output_path = fetch_elon_order_book()
+                if not output_path:
+                    logger.error("Failed to fetch order book data.")
+                    return {"error": "Failed to fetch order book data"}
+                file_path = output_path
+        
+        # Load the order book data
+        order_book_data = load_order_book_data(file_path)
+        
+        # Extract event title
+        event_title = order_book_data.get('event_title', 'Unknown Event')
+        
+        # Calculate stats
+        stats = calculate_market_stats(order_book_data)
+        
+        # Process the data into a more convenient format
+        ranges = []
+        market_data = {}
+        
+        # Sort markets based on their range
+        sorted_markets_for_calculation = []  # This will be used for expected value calculation
+        sorted_markets_for_display = []      # This will be used for display formatting
+        
+        for question, question_stats in stats.get('markets', {}).items():
+            lower, upper = extract_range_value(question)
+            display_name = question.replace('Will Elon tweet ', '').strip()
+            
+            # Make the display name shorter by removing the date part if it exists
+            short_name = display_name.split('April')[0].strip() if 'April' in display_name else display_name
+            short_name = short_name.replace('times', '').strip()
+            
+            # Add to display list with 5 elements
+            sorted_markets_for_display.append((lower, upper, short_name, question_stats, question))
+            
+            # Add to calculation list with 4 elements (matching the expected format for calculate_expected_value)
+            sorted_markets_for_calculation.append((lower, upper, short_name, question_stats))
+        
+        # Sort both lists
+        sorted_markets_for_display.sort(key=lambda x: x[0])
+        sorted_markets_for_calculation.sort(key=lambda x: x[0])
+        
+        # Calculate total market liquidity and expected value
+        total_market_liquidity = sum(m[3].get('total_liquidity', 0) for m in sorted_markets_for_calculation)
+        expected_value = calculate_expected_value(sorted_markets_for_calculation)
+        
+        # Process sorted markets into our return format
+        for lower, upper, display_name, stats, original_question in sorted_markets_for_display:
+            ranges.append(display_name)
+            
+            # Extract and clean the token_id 
+            token_id = stats.get('token_id', "N/A")
+            # Ensure token ID is a clean string without newlines or extra spaces
+            if isinstance(token_id, str):
+                token_id = token_id.strip()
+            
+            market_data[display_name] = {
+                "probability": round(stats.get('midpoint', 0), 2),
+                "bid": round(stats.get('best_bid', 0), 2),
+                "ask": round(stats.get('best_ask', 0), 2),
+                "spread": round(stats.get('spread', 0) if stats.get('spread') is not None else 0, 2),
+                "bid_liquidity": round(stats.get('bid_liquidity', 0), 2),
+                "ask_liquidity": round(stats.get('ask_liquidity', 0), 2),
+                "liquidity": round(stats.get('total_liquidity', 0), 2),
+                "token_id": token_id,
+                "market_id": stats.get('market_id', None),
+                "original_question": original_question
+            }
+        
+        # Find most likely outcome
+        if sorted_markets_for_calculation:
+            likely_market = max(sorted_markets_for_calculation, key=lambda x: x[3].get('midpoint', 0))
+            most_likely = {
+                "range": likely_market[2],
+                "probability": round(likely_market[3].get('midpoint', 0), 2)
+            }
+        else:
+            most_likely = {
+                "range": "Unknown",
+                "probability": 0
+            }
+        
+        # Create the final structured data
+        result = {
+            "timestamp": datetime.now().isoformat(),
+            "event_title": event_title,
+            "ranges": ranges,
+            "markets": market_data,
+            "summary": {
+                "expected_value": round(expected_value, 2),
+                "total_liquidity": round(total_market_liquidity, 2),
+                "most_likely": most_likely
+            }
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting market data: {e}")
+        return {"error": str(e)}
+    finally:
+        # Always restore logging level and stdout
+        logger.setLevel(original_level)
+        logging.getLogger().setLevel(original_level)
+        sys.stdout = original_stdout
+
 def display_market_status(stats: Dict[str, Any], refresh: bool = False, quick: bool = False, all_data: bool = False, elapsed_time: float = None, show_token_ids: bool = False) -> None:
     """
     Display the market status in the terminal.
@@ -527,16 +677,56 @@ def main():
         action="store_true",
         help="Display token IDs for each market"
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output data in JSON format instead of displaying in terminal"
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        help="Save the JSON output to specified file instead of printing to console"
+    )
     args = parser.parse_args()
     
-    show_market_status(
-        refresh=args.refresh, 
-        interval=args.interval,
-        quick=args.quick,
-        all_data=args.all,
-        visualize=args.visualize,
-        show_token_ids=args.token_ids
-    )
+    # If JSON output is requested, get the data and print it
+    if args.json:
+        market_data = get_market_data_json(refresh=args.refresh)
+        
+        # If output file is specified, save to file
+        if args.output:
+            try:
+                with open(args.output, 'w') as f:
+                    json.dump(market_data, f, indent=2, ensure_ascii=False)
+                print(f"Market data saved to {args.output}")
+            except Exception as e:
+                print(f"Error saving to file: {e}")
+                # Fallback to printing
+                print(json.dumps(market_data, indent=2, ensure_ascii=False))
+        else:
+            # Print with settings to avoid truncation and handle Unicode characters
+            try:
+                # Try to import the rich library for better JSON formatting
+                from rich.console import Console
+                from rich.json import JSON
+                
+                console = Console()
+                # Parse and then render to ensure proper formatting
+                json_str = json.dumps(market_data, ensure_ascii=False)
+                console.print(JSON.from_json(json_str))
+            except ImportError:
+                # Fallback to standard JSON printing if rich is not available
+                print(json.dumps(market_data, indent=2, ensure_ascii=False))
+    else:
+        # Otherwise show the market status in the terminal
+        show_market_status(
+            refresh=args.refresh, 
+            interval=args.interval,
+            quick=args.quick,
+            all_data=args.all,
+            visualize=args.visualize,
+            show_token_ids=args.token_ids
+        )
 
 if __name__ == "__main__":
     main() 
