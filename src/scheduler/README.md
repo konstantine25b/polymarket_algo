@@ -8,6 +8,7 @@ This module provides an automated scheduler that periodically:
 
 1. Fetches Elon Musk's tweets and stores them in the database
 2. Runs the Polymarket predictor to update predictions
+3. Runs the Market Prediction Comparison Tool to identify trading opportunities
 
 ## Features
 
@@ -17,6 +18,9 @@ This module provides an automated scheduler that periodically:
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
+- **Market comparison**: Compares prediction data against actual Polymarket order book data
+- **Trading opportunities**: Identifies potential trading opportunities with customizable threshold
+- **Enhanced visualization**: Optional detailed dashboard showing multiple comparison charts
 
 ## Command-Line Usage
 
@@ -54,8 +58,17 @@ python -m src.scheduler --initial-batch 60 --max-batch 300
 # Disable incremental fetching (not recommended)
 python -m src.scheduler --no-incremental
 
+# Don't run the market comparison after predictions
+python -m src.scheduler --no-stats
+
+# Set a minimum threshold for trading opportunities (e.g., 3%)
+python -m src.scheduler --threshold 3.0
+
+# Use enhanced visualization for market comparison
+python -m src.scheduler --enhanced-viz
+
 # Combine multiple options
-python -m src.scheduler --interval 15 --max-tweets 50 --quiet
+python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --enhanced-viz
 ```
 
 ## Command-Line Options
@@ -70,6 +83,10 @@ python -m src.scheduler --interval 15 --max-tweets 50 --quiet
 - `--no-incremental`: Disable incremental fetching (not recommended)
 - `--initial-batch`: Initial batch size for incremental fetching (default: 40)
 - `--max-batch`: Maximum batch size for incremental fetching (default: 200)
+- `--no-prophet`: Disable Prophet algorithm for predictions (use standard algorithm instead)
+- `--no-stats`: Don't run the market comparison after predictions
+- `--threshold`: Minimum opportunity percentage for trading recommendations (default: 0.0)
+- `--enhanced-viz`: Generate enhanced visualization dashboard with detailed charts
 
 ## Smart Incremental Fetching
 
@@ -90,6 +107,46 @@ This approach provides several benefits:
 You can customize the incremental fetching parameters using the `--initial-batch` and
 `--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
 
+## Market Prediction Comparison
+
+After running predictions, the scheduler automatically executes the Market Prediction Comparison Tool, which:
+
+1. Compares Prophet model predictions with actual Polymarket order book data
+2. Calculates differences between predicted and actual market prices
+3. Identifies potential trading opportunities based on these differences
+4. Generates visualizations comparing predictions with market data
+5. Provides specific trading recommendations with prices
+
+Example output:
+
+```
+Comparison Table:
+           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Difference (%)  Opportunity (%)  Adj. Opportunity (0.0%)
+        150–174          95.58       89.50    89.00    90.00           5.58            5.58                     5.58
+        175–199           3.65        9.50     9.00    10.00          -6.35            6.35                     6.35
+        200–224           0.48        0.15     0.00     0.50          -0.02            0.02                     0.02
+        225–249           0.14        0.00     0.00     0.50          -0.36            0.36                     0.36
+...
+
+Best Trading Opportunity:
+Range: 175–199
+Prediction: 3.65%
+Market: 9.5%
+Bid: 9.0%
+Ask: 10.0%
+Difference: -6.35%
+Opportunity: 6.35%
+Adjusted Opportunity: 6.35%
+Recommendation: SELL 175–199 at 9.0% (prediction: 3.65%)
+Edge: 6.35% after 0.0% threshold
+```
+
+To customize the market comparison:
+
+- `--threshold`: Set the minimum opportunity percentage (default: 0.0%, shows all opportunities)
+- `--enhanced-viz`: Generate a comprehensive dashboard with multiple charts
+- `--no-stats`: Skip the market comparison entirely
+
 ## Logs
 
 The scheduler writes logs to both the console and a log file:
@@ -108,7 +165,7 @@ nohup python -m src.scheduler > /dev/null 2>&1 &
 Or with custom options:
 
 ```bash
-nohup python -m src.scheduler --interval 10 --quiet > /dev/null 2>&1 &
+nohup python -m src.scheduler --interval 10 --quiet --threshold 3.0 > /dev/null 2>&1 &
 ```
 
 To stop the scheduler running in the background:
@@ -123,11 +180,12 @@ kill <process_id>
 
 ## Implementation Details
 
-The scheduler uses Python's `subprocess` module to run the tweet fetching and prediction scripts as separate processes. This ensures that any failures in one process don't affect the other.
+The scheduler uses Python's `subprocess` module to run the tweet fetching, prediction, and market comparison scripts as separate processes. This ensures that any failures in one process don't affect the others.
 
-Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise).
+Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise). If the prediction process succeeds, the market comparison is then executed.
 
 ## Related Modules
 
 - **src.apify.get_elon_tweets**: Module for fetching tweets
 - **src.polymarket_predictor**: Module for running predictions
+- **src.bidding_decision.stats**: Module for comparing predictions with market data

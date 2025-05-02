@@ -5,6 +5,7 @@ Scheduler for automating tweet fetching and prediction tasks.
 This module provides functionality to periodically:
 1. Fetch Elon Musk's tweets and store them in the database
 2. Run the Polymarket predictor to update predictions
+3. Run the bidding decision stats to compare predictions with market data
 
 Usage:
     python -m src.scheduler.scheduler [options]
@@ -21,6 +22,9 @@ Options:
     --initial-batch N      Initial batch size for incremental fetching (default: 40)
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
+    --no-stats             Don't run the bidding decision stats comparison
+    --threshold FLOAT      Minimum opportunity percentage to include in results (default: 0.0)
+    --enhanced-viz         Generate enhanced visualization with stats
 """
 
 import argparse
@@ -70,6 +74,12 @@ def setup_argparse():
                         help='Maximum batch size for incremental fetching (default: 200)')
     parser.add_argument('--no-prophet', action='store_true',
                         help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
+    parser.add_argument('--no-stats', action='store_true',
+                        help="Don't run the bidding decision stats comparison")
+    parser.add_argument('--threshold', type=float, default=0.0,
+                        help='Minimum opportunity percentage to include in results (default: 0.0)')
+    parser.add_argument('--enhanced-viz', action='store_true',
+                        help='Generate enhanced visualization with stats')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -152,6 +162,58 @@ def run_prediction(quiet=False, use_prophet=True):
     
     return process.returncode == 0
 
+def run_bidding_decision_stats(quiet=False, use_prophet=True, threshold=0.0, enhanced_viz=False):
+    """Run the bidding decision stats to compare predictions with market data.
+    
+    Args:
+        quiet: Whether to suppress output
+        use_prophet: Whether to use the Prophet algorithm
+        threshold: Minimum opportunity percentage to include in results
+        enhanced_viz: Whether to generate enhanced visualization
+    """
+    logger.info(f"Starting bidding decision stats comparison at {datetime.datetime.now()}")
+    
+    # Build the command to run
+    cmd = [sys.executable, "-m", "src.bidding_decision.stats", "--visualize", f"--threshold={threshold}"]
+    
+    # Add enhanced visualization if requested
+    if enhanced_viz:
+        cmd.append("--enhanced-viz")
+    
+    # Use the same Prophet setting as predictions
+    if not use_prophet:
+        cmd.append("--no-prophet")
+    
+    try:
+        if quiet:
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Bidding decision stats failed with error: {process.stderr.decode()}")
+            else:
+                # Print the output even in quiet mode since this is the key result
+                logger.info("Bidding decision stats completed successfully")
+                output = process.stdout.decode()
+                # Extract the key parts of the output (only show the Best Trading Opportunity section if it exists)
+                if "Best Trading Opportunity:" in output:
+                    start_idx = output.find("Comparison Table:")
+                    end_idx = len(output)
+                    if start_idx != -1:
+                        relevant_output = output[start_idx:end_idx]
+                        print("\n" + relevant_output)
+                else:
+                    print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Bidding decision stats failed")
+            else:
+                logger.info("Bidding decision stats completed successfully")
+    except Exception as e:
+        logger.error(f"Error running bidding decision stats: {e}")
+        return False
+    
+    return process.returncode == 0
+
 def run_scheduled_jobs(args):
     """Run the configured jobs based on command-line arguments."""
     tweets_success = True
@@ -175,9 +237,18 @@ def run_scheduled_jobs(args):
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
         prediction_success = run_prediction(
-            quiet=args.quiet,
+            quiet=True,  # Always run prediction quietly since we'll show stats instead
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
         )
+        
+        # Run the bidding decision stats if prediction succeeded and stats not disabled
+        if prediction_success and not args.no_stats:
+            run_bidding_decision_stats(
+                quiet=args.quiet,
+                use_prophet=not args.no_prophet,
+                threshold=args.threshold,
+                enhanced_viz=args.enhanced_viz
+            )
     
     return tweets_success and prediction_success
 
@@ -202,6 +273,12 @@ def main():
         logger.info("Using Prophet-based prediction algorithm (--no-prophet to disable)")
     elif not args.tweets_only:
         logger.info("Using standard prediction algorithm")
+    
+    # Log stats configuration
+    if not args.tweets_only and not args.no_stats:
+        logger.info(f"Will run bidding decision stats with threshold: {args.threshold}%")
+        if args.enhanced_viz:
+            logger.info("Enhanced visualization enabled for bidding decision stats")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")
