@@ -65,7 +65,54 @@ python -m src.polymarket_predictor --data-path path/to/tweets.csv --start-time "
 
 # Advanced options
 python -m src.polymarket_predictor --no-trend --simulations 20000
+
+# Get output in JSON format
+python -m src.polymarket_predictor --prophet --json
+
+# Save JSON output to a file
+python -m src.polymarket_predictor --prophet --json --output prediction_data.json
+
+# Get only JSON output without any logging or additional text
+python -m src.polymarket_predictor --prophet --json --brief
 ```
+
+### JSON Output Format
+
+When using the `--json` flag, the output will be structured as follows:
+
+```json
+{
+  "timestamp": "2025-05-02T09:24:35.530828-04:00",
+  "prediction_type": "prophet",
+  "frame_probabilities": {
+    "less than 100": 0.0,
+    "100–124": 0.0,
+    "125–149": 0.0,
+    "150–174": 95.56,
+    "175–199": 3.66,
+    "200–224": 0.49,
+    "225–249": 0.14,
+    "250–274": 0.09,
+    "275–299": 0.02,
+    "300–324": 0.01,
+    "325–349": 0.0,
+    "350–374": 0.01,
+    "375–399": 0.0,
+    "400 or more": 0.02
+  },
+  "summary": {
+    "most_likely": {
+      "frame": "150–174",
+      "probability": 95.56
+    },
+    "expected_value": 163.48
+  }
+}
+```
+
+The `--brief` flag can be used with `--json` to output only the JSON data without any additional text or logging information, making it ideal for automated scripts and programmatic access.
+
+> **Note:** The JSON output uses proper Unicode characters for range separators (en dashes) rather than ASCII hyphens. When parsing this JSON in your applications, make sure to use a JSON parser that properly handles Unicode characters.
 
 ### As a Library
 
@@ -99,6 +146,23 @@ for frame, probability in probabilities.items():
     print(f"{frame}: {probability:.1f}%")
 ```
 
+## Command-line Options
+
+```
+--verify-count       Verify tweet count in a specific timeframe
+--data-path PATH     Path to tweet data CSV (default: src/data/elonmusk_reformatted.csv)
+--start-time TIME    Start time in format YYYY-MM-DD HH:MM:SS
+--end-time TIME      End time in format YYYY-MM-DD HH:MM:SS
+--no-trend           Disable trend adjustment
+--simulations N      Number of Monte Carlo simulations (default: 10000)
+--count N            Override current tweet count
+--classic            Use classic algorithm instead of enhanced
+--prophet            Use Prophet-based algorithm for prediction
+--json               Output prediction results in JSON format
+--output FILE        Save JSON output to the specified file
+--brief              Output JSON data only without additional text or logging
+```
+
 ## Features
 
 - **Enhanced Statistical Model**: Negative Binomial distribution better fits tweet count data
@@ -109,6 +173,8 @@ for frame, probability in probabilities.items():
 - **Multiple Prediction Models**: Ensemble approach combines different prediction techniques
 - **Visualization Tools**: Generate plots to understand prediction distributions and historical trends
 - **Command-Line Interface**: Easy to use from terminal or scripts
+- **JSON Output**: Export prediction results in structured JSON format for integration with other tools
+- **Brief Mode**: Clean JSON output suitable for automated scripts and API integrations
 
 ## Requirements
 

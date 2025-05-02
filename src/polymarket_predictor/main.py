@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import sys
+import json
 from typing import Dict, List, Tuple, Optional
 
 # Import local modules
@@ -394,8 +396,20 @@ def main():
     parser.add_argument('--count', type=int, help='Override current tweet count')
     parser.add_argument('--classic', action='store_true', help='Use classic algorithm instead of enhanced')
     parser.add_argument('--prophet', action='store_true', help='Use Prophet-based algorithm for prediction')
+    parser.add_argument('--json', action='store_true', help='Output prediction results in JSON format')
+    parser.add_argument('--output', type=str, help='Save JSON output to the specified file')
+    parser.add_argument('--brief', action='store_true', help='Output JSON data only without additional text or logging')
     
     args = parser.parse_args()
+    
+    # Set up brief mode if requested
+    original_stdout = None
+    if args.brief and args.json:
+        # Suppress logging output
+        logging.getLogger().setLevel(logging.ERROR)
+        # Save original stdout and redirect to /dev/null
+        original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
     
     if args.verify_count:
         # Use provided times or defaults
@@ -404,7 +418,7 @@ def main():
         verify_tweet_count(start_time, end_time, args.data_path)
     else:
         # Run prediction with specified parameters
-        predict_tweet_frame_probabilities(
+        result = predict_tweet_frame_probabilities(
             data_path=args.data_path,
             start_date_str=args.start_time,
             end_date_str=args.end_time,
@@ -415,6 +429,96 @@ def main():
             use_enhanced_algorithm=not args.classic and not args.prophet,
             use_prophet_algorithm=args.prophet
         )
+        
+        # Handle JSON output if requested
+        if args.json and result:
+            # Restore stdout if in brief mode
+            if args.brief and original_stdout:
+                sys.stdout = original_stdout
+            
+            # Create a structured JSON object
+            now = datetime.now(ET_TIMEZONE)
+            
+            # Format frame probabilities
+            frame_probs = {}
+            for frame_name, probability in result.items():
+                frame_probs[frame_name] = round(probability, 2)
+            
+            # Find most likely outcome
+            most_likely = max(result.items(), key=lambda x: x[1])
+            
+            # Calculate expected value
+            expected_value = 0
+            total_prob = 0
+            for frame_name, probability in result.items():
+                # Extract numeric range from frame name
+                try:
+                    if "less than" in frame_name.lower():
+                        # Handle "less than X" case
+                        parts = frame_name.lower().split("less than")
+                        upper = float(parts[1].strip().split()[0])
+                        midpoint = upper / 2
+                    elif "or more" in frame_name.lower():
+                        # Handle "X or more" case
+                        parts = frame_name.lower().split("or more")
+                        lower = float(parts[0].strip().split()[-1])
+                        midpoint = lower * 1.2  # Estimate
+                    else:
+                        # Standard range like "150-174"
+                        range_clean = frame_name.replace('–', '-').strip()
+                        if '-' in range_clean:
+                            parts = range_clean.split('-')
+                            if len(parts) == 2:
+                                lower = float(parts[0].strip())
+                                upper = float(parts[1].strip())
+                                midpoint = (lower + upper) / 2
+                            else:
+                                continue
+                        else:
+                            continue
+                    
+                    # Add to expected value
+                    expected_value += midpoint * (probability / 100)
+                    total_prob += probability / 100
+                except (ValueError, IndexError):
+                    pass
+            
+            # Normalize expected value if needed
+            if total_prob > 0:
+                expected_value = expected_value / total_prob
+            
+            json_data = {
+                "timestamp": now.isoformat(),
+                "prediction_type": "prophet" if args.prophet else "enhanced" if not args.classic else "classic",
+                "frame_probabilities": frame_probs,
+                "summary": {
+                    "most_likely": {
+                        "frame": most_likely[0],
+                        "probability": round(most_likely[1], 2)
+                    },
+                    "expected_value": round(expected_value, 2)
+                }
+            }
+            
+            # Output JSON
+            if args.output:
+                try:
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+                    
+                    # Write to file
+                    with open(args.output, 'w') as f:
+                        json.dump(json_data, f, indent=2)
+                    if not args.brief:
+                        print(f"Prediction results saved to {args.output}")
+                except Exception as e:
+                    if not args.brief:
+                        print(f"Error saving to file: {e}")
+                    # Fallback to printing
+                    print(json.dumps(json_data, indent=2, ensure_ascii=False))
+            else:
+                # Print JSON data to console
+                print(json.dumps(json_data, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
     main() 
