@@ -217,12 +217,18 @@ def generate_comparison_table(
         market_ask = market_asks.get(range_name, 0)
         market_bid = market_bids.get(range_name, 0)
         
+        # Calculate spread (gap between ask and bid)
+        spread = market_ask - market_bid if market_ask > 0 and market_bid > 0 else 0
+        
         # Calculate differences using ask price instead of market price
         diff = pred_prob - market_ask
         opportunity = abs(diff)
         
-        # Calculate threshold-adjusted opportunity
-        adjusted_opportunity = max(0, opportunity - threshold)
+        # Calculate spread-adjusted opportunity
+        spread_adj_opportunity = max(0, opportunity - spread)
+        
+        # Calculate fully adjusted opportunity (spread + threshold)
+        fully_adj_opportunity = max(0, opportunity - spread - threshold)
         
         # Skip rows that don't meet the threshold
         if opportunity < threshold and range_name != 'EXPECTED VALUE':
@@ -234,9 +240,11 @@ def generate_comparison_table(
             'Market (%)': market_prob,
             'Bid (%)': market_bid,
             'Ask (%)': market_ask,
+            'Spread (%)': spread,
             'Difference (%)': diff,
             'Opportunity (%)': opportunity,
-            f'Adj. Opportunity ({threshold}%)': adjusted_opportunity
+            'Spread-Adj. Opp. (%)': spread_adj_opportunity,
+            f'Full-Adj. Opp. ({threshold}%)': fully_adj_opportunity
         })
     
     # Create DataFrame
@@ -254,9 +262,11 @@ def generate_comparison_table(
         'Market (%)': market_ev,
         'Bid (%)': None,  # No Bid for expected value
         'Ask (%)': None,  # No Ask for expected value
+        'Spread (%)': None,  # No Spread for expected value
         'Difference (%)': ev_diff,
         'Opportunity (%)': abs(ev_diff),
-        f'Adj. Opportunity ({threshold}%)': max(0, abs(ev_diff) - threshold)
+        'Spread-Adj. Opp. (%)': abs(ev_diff),  # No spread for expected value
+        f'Full-Adj. Opp. ({threshold}%)': max(0, abs(ev_diff) - threshold)
     }])
     
     df = pd.concat([df, summary_row], ignore_index=True)
@@ -311,7 +321,7 @@ def visualize_comparison(
         return
     
     # Create figure with subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 18))
     
     # Plot the comparison
     ranges = plot_df['Range']
@@ -331,32 +341,52 @@ def visualize_comparison(
     ax1.set_xticklabels(ranges, rotation=45, ha='right')
     ax1.legend()
     
-    # Second subplot: Opportunities and Adjusted Opportunities
-    adj_opp_col = f'Adj. Opportunity ({threshold}%)'
+    # Second subplot: Spread visualization
+    bars_spread = ax2.bar(x, plot_df['Spread (%)'], width, label='Bid-Ask Spread')
     
-    # Create grouped bar chart for opportunities
-    bars_opp = ax2.bar(x - width/2, plot_df['Opportunity (%)'], width, label='Opportunity')
-    bars_adj = ax2.bar(x + width/2, plot_df[adj_opp_col], width, label=f'Opportunity - {threshold}%')
-    
-    # Color the bars based on opportunity size
-    for i, (bar, adj_bar) in enumerate(zip(bars_opp, bars_adj)):
-        # Opportunity bars in blue
-        intensity_opp = min(1.0, plot_df['Opportunity (%)'].iloc[i] / plot_df['Opportunity (%)'].max())
-        bar.set_color(plt.cm.Blues(0.5 + intensity_opp/2))
-        
-        # Adjusted opportunity bars in red
-        intensity_adj = min(1.0, plot_df[adj_opp_col].iloc[i] / plot_df[adj_opp_col].max() if plot_df[adj_opp_col].max() > 0 else 0)
-        adj_bar.set_color(plt.cm.Reds(0.5 + intensity_adj/2))
+    # Color the spread bars based on size
+    for i, bar in enumerate(bars_spread):
+        intensity = min(1.0, plot_df['Spread (%)'].iloc[i] / plot_df['Spread (%)'].max() if plot_df['Spread (%)'].max() > 0 else 0)
+        bar.set_color(plt.cm.Oranges(0.5 + intensity/2))
     
     ax2.set_xlabel('Range')
-    ax2.set_ylabel('Opportunity (%)')
-    ax2.set_title(f'Trading Opportunities (Raw and Adjusted with {threshold}% Threshold)')
+    ax2.set_ylabel('Spread (%)')
+    ax2.set_title('Bid-Ask Spread by Range')
     ax2.set_xticks(x)
     ax2.set_xticklabels(ranges, rotation=45, ha='right')
     ax2.legend()
     
-    # Add a 'buy' or 'sell' annotation to the top 3 adjusted opportunities
-    adj_opps = plot_df[adj_opp_col]
+    # Third subplot: Opportunities and Adjusted Opportunities
+    full_adj_opp_col = f'Full-Adj. Opp. ({threshold}%)'
+    
+    # Create grouped bar chart for opportunities
+    bars_opp = ax3.bar(x - width, plot_df['Opportunity (%)'], width, label='Raw Opportunity')
+    bars_spread_adj = ax3.bar(x, plot_df['Spread-Adj. Opp. (%)'], width, label='After Spread')
+    bars_full_adj = ax3.bar(x + width, plot_df[full_adj_opp_col], width, label=f'After Spread + {threshold}%')
+    
+    # Color the bars based on opportunity size
+    for i in range(len(plot_df)):
+        # Raw opportunity bars in blue
+        intensity_opp = min(1.0, plot_df['Opportunity (%)'].iloc[i] / plot_df['Opportunity (%)'].max() if plot_df['Opportunity (%)'].max() > 0 else 0)
+        bars_opp[i].set_color(plt.cm.Blues(0.5 + intensity_opp/2))
+        
+        # Spread-adjusted opportunity bars in green
+        intensity_spread_adj = min(1.0, plot_df['Spread-Adj. Opp. (%)'].iloc[i] / plot_df['Spread-Adj. Opp. (%)'].max() if plot_df['Spread-Adj. Opp. (%)'].max() > 0 else 0)
+        bars_spread_adj[i].set_color(plt.cm.Greens(0.5 + intensity_spread_adj/2))
+        
+        # Fully-adjusted opportunity bars in red
+        intensity_full_adj = min(1.0, plot_df[full_adj_opp_col].iloc[i] / plot_df[full_adj_opp_col].max() if plot_df[full_adj_opp_col].max() > 0 else 0)
+        bars_full_adj[i].set_color(plt.cm.Reds(0.5 + intensity_full_adj/2))
+    
+    ax3.set_xlabel('Range')
+    ax3.set_ylabel('Opportunity (%)')
+    ax3.set_title(f'Trading Opportunities (Raw, Spread-Adjusted, and Fully-Adjusted)')
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(ranges, rotation=45, ha='right')
+    ax3.legend()
+    
+    # Add a 'buy' or 'sell' annotation to the top 3 fully adjusted opportunities
+    adj_opps = plot_df[full_adj_opp_col]
     if adj_opps.max() > 0:  # Only if there are opportunities above threshold
         top_opps = adj_opps.nlargest(3)
         for opp in top_opps:
@@ -368,9 +398,10 @@ def visualize_comparison(
                 position = (idx, opp + 0.5)
                 action = "BUY" if diff > 0 else "SELL"
                 price = row['Ask (%)'] if diff > 0 else row['Bid (%)']
+                spread = row['Spread (%)']
                 
-                ax2.annotate(
-                    f"{action} at {price:.2f}% ({opp:.2f}% edge)",
+                ax3.annotate(
+                    f"{action} at {price:.2f}% (Spread: {spread:.2f}%, Edge: {opp:.2f}%)",
                     position, 
                     xytext=(0, 5),
                     textcoords='offset points',
@@ -439,8 +470,8 @@ def enhanced_visualization(
     
     # 3. Trading Opportunities - Middle Left
     ax3 = fig.add_subplot(gs[1, 0])
-    adj_opp_col = f'Adj. Opportunity ({threshold}%)'
-    _plot_trading_opportunities(ax3, plot_df, adj_opp_col, threshold)
+    full_adj_opp_col = f'Full-Adj. Opp. ({threshold}%)'
+    _plot_trading_opportunities(ax3, plot_df, full_adj_opp_col, threshold)
     
     # 4. Expected Value - Middle Right
     ax4 = fig.add_subplot(gs[1, 1])
@@ -449,7 +480,7 @@ def enhanced_visualization(
     
     # 5. Detailed Recommendations - Bottom Full Width
     ax5 = fig.add_subplot(gs[2, :])
-    _plot_detailed_recommendations(ax5, plot_df, adj_opp_col, threshold)
+    _plot_detailed_recommendations(ax5, plot_df, full_adj_opp_col, threshold)
     
     # Add timestamp and information
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -529,13 +560,13 @@ def _plot_bid_ask_spread(ax, df):
     
     ax.grid(axis='y', linestyle='--', alpha=0.3)
 
-def _plot_trading_opportunities(ax, df, adj_opp_col, threshold):
+def _plot_trading_opportunities(ax, df, full_adj_opp_col, threshold):
     """Plot trading opportunities chart"""
     # Sort by adjusted opportunity
-    sorted_df = df.sort_values(by=adj_opp_col, ascending=False).copy()
+    sorted_df = df.sort_values(by=full_adj_opp_col, ascending=False).copy()
     
     # Only show rows with meaningful opportunities
-    display_df = sorted_df[sorted_df[adj_opp_col] > 0]
+    display_df = sorted_df[sorted_df[full_adj_opp_col] > 0]
     if display_df.empty:
         display_df = sorted_df.head(3)  # Show at least top 3 if none above threshold
     
@@ -546,11 +577,11 @@ def _plot_trading_opportunities(ax, df, adj_opp_col, threshold):
     # Create grouped bar chart for opportunities
     bars_raw = ax.bar(x - width/2, display_df['Opportunity (%)'], width, 
                       label='Raw Opportunity', color='#4285F4', alpha=0.7)
-    bars_adj = ax.bar(x + width/2, display_df[adj_opp_col], width, 
-                      label=f'After {threshold}% Threshold', color='#34A853')
+    bars_spread_adj = ax.bar(x + width/2, display_df[full_adj_opp_col], width, 
+                      label=f'After Spread + {threshold}% Threshold', color='#34A853')
     
     # Add value labels
-    for bars in [bars_raw, bars_adj]:
+    for bars in [bars_raw, bars_spread_adj]:
         for bar in bars:
             height = bar.get_height()
             if height > 0:
@@ -564,7 +595,7 @@ def _plot_trading_opportunities(ax, df, adj_opp_col, threshold):
     
     # Add buy/sell annotations
     for i, (_, row) in enumerate(display_df.iterrows()):
-        if row[adj_opp_col] > 0:
+        if row[full_adj_opp_col] > 0:
             action = "BUY" if row['Difference (%)'] > 0 else "SELL"
             ax.annotate(
                 f"{action}",
@@ -654,10 +685,10 @@ def _plot_expected_value(ax, ev_row, threshold):
             bbox=dict(boxstyle="round,pad=0.3", fc='#FBBC05', ec="none", alpha=0.3)
         )
 
-def _plot_detailed_recommendations(ax, df, adj_opp_col, threshold):
+def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
     """Plot detailed recommendations chart"""
     # Find top opportunities
-    df_filtered = df[df[adj_opp_col] > 0].copy()
+    df_filtered = df[df[full_adj_opp_col] > 0].copy()
     
     if df_filtered.empty:
         ax.text(
@@ -672,7 +703,7 @@ def _plot_detailed_recommendations(ax, df, adj_opp_col, threshold):
         return
     
     # Sort by adjusted opportunity
-    df_sorted = df_filtered.sort_values(by=adj_opp_col, ascending=False)
+    df_sorted = df_filtered.sort_values(by=full_adj_opp_col, ascending=False)
     
     # Take top 5 or all if less
     top_opps = df_sorted.head(5)
@@ -682,29 +713,33 @@ def _plot_detailed_recommendations(ax, df, adj_opp_col, threshold):
     for _, row in top_opps.iterrows():
         action = "BUY" if row['Difference (%)'] > 0 else "SELL"
         price = row['Ask (%)'] if action == "BUY" else row['Bid (%)']
-        edge = row[adj_opp_col]
+        spread = row['Spread (%)']
+        edge = row[full_adj_opp_col]
         pred = row['Prediction (%)']
         market = row['Market (%)']
+        spread_adj = row['Spread-Adj. Opp. (%)']
         
         table_data.append([
             row['Range'],
             action,
             f"{price:.2f}%",
+            f"{spread:.2f}%",  # Added spread column
             f"{pred:.2f}%",
             f"{market:.2f}%",
             f"{row['Difference (%)']:.2f}%",
+            f"{spread_adj:.2f}%",  # Added spread-adjusted column
             f"{edge:.2f}%"
         ])
     
     # Create the table
-    columns = ['Range', 'Action', 'Price', 'Prediction', 'Market', 'Difference', f'Edge ({threshold}%)']
+    columns = ['Range', 'Action', 'Price', 'Spread', 'Prediction', 'Market', 'Difference', 'After Spread', f'Final Edge ({threshold}%)']
     colors = []
     
     for row in table_data:
         if row[1] == "BUY":
-            colors.append(['w', 'w', '#C8E6C9', 'w', 'w', 'w', 'w'])  # Green for BUY
+            colors.append(['w', 'w', '#C8E6C9', '#FFF9C4', 'w', 'w', 'w', '#E3F2FD', 'w'])  # Green for BUY
         else:
-            colors.append(['w', 'w', '#FFCDD2', 'w', 'w', 'w', 'w'])  # Red for SELL
+            colors.append(['w', 'w', '#FFCDD2', '#FFF9C4', 'w', 'w', 'w', '#E3F2FD', 'w'])  # Red for SELL
     
     table = ax.table(
         cellText=table_data,
@@ -727,11 +762,12 @@ def _plot_detailed_recommendations(ax, df, adj_opp_col, threshold):
     top_action = table_data[0][1]
     top_range = table_data[0][0]
     top_price = table_data[0][2]
-    top_edge = table_data[0][6]
+    top_spread = table_data[0][3]
+    top_edge = table_data[0][8]
     
     summary_text = (
         f"Best Opportunity: {top_action} {top_range} at {top_price}\n"
-        f"with {top_edge} edge after {threshold}% threshold"
+        f"with {top_edge} edge (after {top_spread} spread and {threshold}% threshold)"
     )
     
     ax.text(
@@ -806,32 +842,34 @@ def main():
             
             # Find the largest adjusted opportunity
             data_rows = df[df['Range'] != 'EXPECTED VALUE']
-            adj_opp_col = f'Adj. Opportunity ({args.threshold}%)'
+            full_adj_opp_col = f'Full-Adj. Opp. ({args.threshold}%)'
             
             if not data_rows.empty:
                 # Find the index of the max adjusted opportunity
-                max_adj_idx = data_rows[adj_opp_col].idxmax()
+                max_adj_idx = data_rows[full_adj_opp_col].idxmax()
                 max_opp_row = data_rows.loc[max_adj_idx]
                 
                 # Only show if there's a meaningful opportunity
-                if max_opp_row[adj_opp_col] > 0:
+                if max_opp_row[full_adj_opp_col] > 0:
                     print("\nBest Trading Opportunity:")
                     print(f"Range: {max_opp_row['Range']}")
                     print(f"Prediction: {max_opp_row['Prediction (%)']}%")
                     print(f"Market: {max_opp_row['Market (%)']}%")
                     print(f"Bid: {max_opp_row['Bid (%)']}%")
                     print(f"Ask: {max_opp_row['Ask (%)']}%")
+                    print(f"Spread: {max_opp_row['Spread (%)']}%")
                     print(f"Difference: {max_opp_row['Difference (%)']}%")
                     print(f"Opportunity: {max_opp_row['Opportunity (%)']}%")
-                    print(f"Adjusted Opportunity: {max_opp_row[adj_opp_col]}%")
+                    print(f"Spread-Adjusted Opportunity: {max_opp_row['Spread-Adj. Opp. (%)']}%")
+                    print(f"Fully-Adjusted Opportunity: {max_opp_row[full_adj_opp_col]}%")
                     
                     # Trading recommendation with specific price
                     if max_opp_row['Difference (%)'] > 0:
                         print(f"Recommendation: BUY {max_opp_row['Range']} at {max_opp_row['Ask (%)']}% (prediction: {max_opp_row['Prediction (%)']}%)")
-                        print(f"Edge: {max_opp_row[adj_opp_col]}% after {args.threshold}% threshold")
+                        print(f"Edge: {max_opp_row[full_adj_opp_col]}% after spread and {args.threshold}% threshold")
                     else:
                         print(f"Recommendation: SELL {max_opp_row['Range']} at {max_opp_row['Bid (%)']}% (prediction: {max_opp_row['Prediction (%)']}%)")
-                        print(f"Edge: {max_opp_row[adj_opp_col]}% after {args.threshold}% threshold")
+                        print(f"Edge: {max_opp_row[full_adj_opp_col]}% after spread and {args.threshold}% threshold")
                 else:
                     print("\nNo significant trading opportunities found above the threshold.")
                     print(f"Try lowering the threshold (currently set to {args.threshold}%)")

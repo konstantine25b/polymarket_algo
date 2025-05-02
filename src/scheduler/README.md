@@ -21,6 +21,8 @@ This module provides an automated scheduler that periodically:
 - **Market comparison**: Compares prediction data against actual Polymarket order book data
 - **Trading opportunities**: Identifies potential trading opportunities with customizable threshold
 - **Enhanced visualization**: Optional detailed dashboard showing multiple comparison charts
+- **Spread analysis**: Shows bid-ask spreads and calculates spread-adjusted opportunities
+- **Realistic edge calculation**: Accounts for both spread and threshold when evaluating trading opportunities
 
 ## Command-Line Usage
 
@@ -113,19 +115,23 @@ After running predictions, the scheduler automatically executes the Market Predi
 
 1. Compares Prophet model predictions with actual Polymarket order book data
 2. Calculates differences between predicted and actual market prices
-3. Identifies potential trading opportunities based on these differences
-4. Generates visualizations comparing predictions with market data
-5. Provides specific trading recommendations with prices
+3. Measures the bid-ask spread on each market to determine real trading costs
+4. Provides three levels of opportunity calculation:
+   - Raw opportunity (absolute difference between prediction and market)
+   - Spread-adjusted opportunity (raw opportunity minus the bid-ask spread)
+   - Fully-adjusted opportunity (spread-adjusted minus the threshold)
+5. Generates visualizations comparing all metrics
+6. Provides specific trading recommendations with realistic edge calculations
 
 Example output:
 
 ```
 Comparison Table:
-           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Difference (%)  Opportunity (%)  Adj. Opportunity (0.0%)
-        150–174          95.58       89.50    89.00    90.00           5.58            5.58                     5.58
-        175–199           3.65        9.50     9.00    10.00          -6.35            6.35                     6.35
-        200–224           0.48        0.15     0.00     0.50          -0.02            0.02                     0.02
-        225–249           0.14        0.00     0.00     0.50          -0.36            0.36                     0.36
+           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Spread (%)  Difference (%)  Opportunity (%)  Spread-Adj. Opp. (%)  Full-Adj. Opp. (0.0%)
+        150–174          95.58       89.50    89.00    90.00        1.00            5.58            5.58                4.58                  4.58
+        175–199           3.65        9.50     9.00    10.00        1.00           -6.35            6.35                5.35                  5.35
+        200–224           0.48        0.15     0.00     0.50        0.50           -0.02            0.02                0.00                  0.00
+        225–249           0.14        0.00     0.00     0.50        0.50           -0.36            0.36                0.00                  0.00
 ...
 
 Best Trading Opportunity:
@@ -134,12 +140,21 @@ Prediction: 3.65%
 Market: 9.5%
 Bid: 9.0%
 Ask: 10.0%
+Spread: 1.0%
 Difference: -6.35%
 Opportunity: 6.35%
-Adjusted Opportunity: 6.35%
+Spread-Adjusted Opportunity: 5.35%
+Fully-Adjusted Opportunity: 5.35%
 Recommendation: SELL 175–199 at 9.0% (prediction: 3.65%)
-Edge: 6.35% after 0.0% threshold
+Edge: 5.35% after spread and 0.0% threshold
 ```
+
+The spread-adjusted calculations provide a more realistic view of potential profits by accounting for both:
+
+- The bid-ask spread that must be crossed to execute a trade
+- Any minimum threshold for meaningful opportunities you've specified
+
+This helps identify only the most profitable trading opportunities where the edge is large enough to overcome the market spread.
 
 To customize the market comparison:
 
