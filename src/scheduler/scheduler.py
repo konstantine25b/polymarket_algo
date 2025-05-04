@@ -5,7 +5,7 @@ Scheduler for automating tweet fetching and prediction tasks.
 This module provides functionality to periodically:
 1. Fetch Elon Musk's tweets and store them in the database
 2. Run the Polymarket predictor to update predictions
-3. Run the bidding decision stats to compare predictions with market data
+3. Run the bidding decision stats to compare predictions with market data and display token IDs
 
 Usage:
     python -m src.scheduler.scheduler [options]
@@ -25,6 +25,9 @@ Options:
     --no-stats             Don't run the bidding decision stats comparison
     --threshold FLOAT      Minimum opportunity percentage to include in results (default: 0.0)
     --enhanced-viz         Generate enhanced visualization with stats
+
+Notes:
+    Token IDs are displayed by default in the bidding stats output to facilitate trading on Polymarket.
 """
 
 import argparse
@@ -174,7 +177,7 @@ def run_bidding_decision_stats(quiet=False, use_prophet=True, threshold=0.0, enh
     logger.info(f"Starting bidding decision stats comparison at {datetime.datetime.now()}")
     
     # Build the command to run
-    cmd = [sys.executable, "-m", "src.bidding_decision.stats", "--visualize", f"--threshold={threshold}"]
+    cmd = [sys.executable, "-m", "src.bidding_decision.stats", "--visualize", f"--threshold={threshold}", "--show-tokens"]
     
     # Add enhanced visualization if requested
     if enhanced_viz:
@@ -277,6 +280,7 @@ def main():
     # Log stats configuration
     if not args.tweets_only and not args.no_stats:
         logger.info(f"Will run bidding decision stats with threshold: {args.threshold}%")
+        logger.info("Token IDs will be displayed with trading opportunities for easier Polymarket trading")
         if args.enhanced_viz:
             logger.info("Enhanced visualization enabled for bidding decision stats")
     

@@ -203,6 +203,8 @@ def generate_comparison_table(
     market_probs = {}
     market_asks = {}
     market_bids = {}
+    market_token_ids = {}  # Store token IDs
+    market_market_ids = {}  # Store market IDs
     market_ranges = []  # Keep the original order
     
     for range_name, details in market_data.get('markets', {}).items():
@@ -211,6 +213,8 @@ def generate_comparison_table(
         market_probs[norm_name] = details.get('probability', 0)
         market_asks[norm_name] = details.get('ask', 0)
         market_bids[norm_name] = details.get('bid', 0)
+        market_token_ids[norm_name] = details.get('token_id', 'N/A')  # Get token ID
+        market_market_ids[norm_name] = details.get('market_id', 'N/A')  # Get market ID
         if norm_name not in market_ranges:
             market_ranges.append(norm_name)
     
@@ -263,6 +267,8 @@ def generate_comparison_table(
         market_prob = market_probs.get(range_name, 0)
         market_ask = market_asks.get(range_name, 0)
         market_bid = market_bids.get(range_name, 0)
+        token_id = market_token_ids.get(range_name, 'N/A')
+        market_id = market_market_ids.get(range_name, 'N/A')
         
         # Calculate spread (gap between ask and bid)
         spread = market_ask - market_bid if market_ask > 0 and market_bid > 0 else 0
@@ -295,7 +301,9 @@ def generate_comparison_table(
             'Opp (%)': opportunity,
             'Adj-Sp (%)': spread_adj_opportunity,
             f'Adj-Full ({threshold}%)': fully_adj_opportunity,
-            f'Buy-Only ({threshold}%)': buy_only_opportunity
+            f'Buy-Only ({threshold}%)': buy_only_opportunity,
+            'Token ID': token_id,
+            'Market ID': market_id
         })
     
     # Create DataFrame
@@ -318,7 +326,9 @@ def generate_comparison_table(
         'Opp (%)': abs(ev_diff),
         'Adj-Sp (%)': abs(ev_diff),  # No spread for expected value
         f'Adj-Full ({threshold}%)': max(0, abs(ev_diff) - threshold),
-        f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0
+        f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0,
+        'Token ID': None,  # No token ID for expected value
+        'Market ID': None   # No market ID for expected value
     }])
     
     df = pd.concat([df, summary_row], ignore_index=True)
@@ -779,6 +789,11 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
         market = row['Mkt (%)']
         spread_adj = row['Adj-Sp (%)']
         buy_only = row[buy_only_col]
+        token_id = row.get('Token ID', 'N/A')
+        
+        # Truncate token ID if it's too long
+        if token_id and isinstance(token_id, str) and len(token_id) > 10:
+            token_id = token_id[:7] + "..."
         
         table_data.append([
             row['Range'],
@@ -788,20 +803,19 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
             f"{pred:.2f}%",
             f"{market:.2f}%",
             f"{row['Diff (%)']}%",
-            f"{spread_adj:.2f}%",
             f"{edge:.2f}%",
-            f"{buy_only:.2f}%"
+            token_id
         ])
     
     # Create the table
-    columns = ['Range', 'Action', 'Price', 'Spread', 'Pred', 'Mkt', 'Diff', 'Adj-Sp', f'Adj-Full', f'Buy-Only']
+    columns = ['Range', 'Action', 'Price', 'Spread', 'Pred', 'Mkt', 'Diff', f'Adj ({threshold}%)', 'Token ID']
     colors = []
     
     for row in table_data:
         if row[1] == "BUY":
-            colors.append(['w', 'w', '#C8E6C9', '#FFF9C4', 'w', 'w', 'w', '#E3F2FD', 'w', '#FFF3E0'])  # Green for BUY
+            colors.append(['w', 'w', '#C8E6C9', '#FFF9C4', 'w', 'w', 'w', 'w', '#E8F5E9'])  # Green for BUY
         else:
-            colors.append(['w', 'w', '#FFCDD2', '#FFF9C4', 'w', 'w', 'w', '#E3F2FD', 'w', '#FFF3E0'])  # Red for SELL
+            colors.append(['w', 'w', '#FFCDD2', '#FFF9C4', 'w', 'w', 'w', 'w', '#FFEBEE'])  # Red for SELL
     
     table = ax.table(
         cellText=table_data,
@@ -825,11 +839,13 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
     top_range = table_data[0][0]
     top_price = table_data[0][2]
     top_spread = table_data[0][3]
-    top_edge = table_data[0][8]
+    top_edge = table_data[0][7]
+    top_token = table_data[0][8]
     
     summary_text = (
         f"Best Opportunity: {top_action} {top_range} at {top_price}\n"
-        f"with {top_edge} edge (after {top_spread} spread and {threshold}% threshold)"
+        f"with {top_edge} edge (after {top_spread} spread and {threshold}% threshold)\n"
+        f"Token ID: {top_token}"
     )
     
     ax.text(
@@ -876,6 +892,7 @@ def main():
     parser.add_argument('--viz-output', type=str, help='Path to save visualization')
     parser.add_argument('--threshold', type=float, default=0.0, help='Minimum opportunity percentage (0-100) to include in results')
     parser.add_argument('--enhanced-viz', action='store_true', help='Generate enhanced visualization with more details')
+    parser.add_argument('--show-tokens', action='store_true', help='Show token IDs in console output')
     
     args = parser.parse_args()
     
@@ -899,8 +916,18 @@ def main():
         
         # Print the table
         if not df.empty:
+            # Determine which columns to show 
+            display_cols = [col for col in df.columns if col not in ['Token ID', 'Market ID']]
             print("\nComparison Table:")
-            print(df.to_string(index=False))
+            print(df[display_cols].to_string(index=False))
+            
+            # Show token IDs in a cleaner format if requested
+            if args.show_tokens:
+                print("\nToken IDs:")
+                data_rows = df[df['Range'] != 'EXPECTED VALUE']
+                for _, row in data_rows.iterrows():
+                    if 'Token ID' in row and row['Token ID']:
+                        print(f"{row['Range']}: {row['Token ID']}")
             
             # Find the largest adjusted opportunity
             data_rows = df[df['Range'] != 'EXPECTED VALUE']
@@ -926,6 +953,10 @@ def main():
                     print(f"Spread-Adjusted Opportunity: {max_opp_row['Adj-Sp (%)']}%")
                     print(f"Fully-Adjusted Opportunity: {max_opp_row[full_adj_opp_col]}%")
                     print(f"Buy-Only Opportunity: {max_opp_row[buy_only_col]}%")
+                    
+                    # Show token ID for best opportunity
+                    if 'Token ID' in max_opp_row and max_opp_row['Token ID']:
+                        print(f"Token ID: {max_opp_row['Token ID']}")
                     
                     # Trading recommendation with specific price
                     if max_opp_row['Diff (%)'] > 0:
