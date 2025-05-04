@@ -115,7 +115,18 @@ def normalize_range_name(range_name: str) -> str:
     
     # Handle "X or more" format
     if "or more" in name:
-        return "400 or more"  # Common format for both sources
+        if "350 or more" in name or "350 or more" in range_name:
+            return "350 or more"  # Handle the 350 or more case specifically
+        elif "400 or more" in name or "400 or more" in range_name:
+            return "400 or more"  # Common format for both sources
+        else:
+            # Extract the number before "or more"
+            try:
+                num = int(''.join(filter(str.isdigit, name.split("or more")[0])))
+                return f"{num} or more"
+            except ValueError:
+                # If we can't extract a number, return the original format
+                return "400 or more"  # Default case
     
     # Strip any "Will Elon tweet" prefix and dates
     if "will elon tweet" in name:
@@ -192,26 +203,62 @@ def generate_comparison_table(
     market_probs = {}
     market_asks = {}
     market_bids = {}
+    market_ranges = []  # Keep the original order
+    
     for range_name, details in market_data.get('markets', {}).items():
         # Normalize the range name to match between data sources
         norm_name = normalize_range_name(range_name)
         market_probs[norm_name] = details.get('probability', 0)
         market_asks[norm_name] = details.get('ask', 0)
         market_bids[norm_name] = details.get('bid', 0)
+        if norm_name not in market_ranges:
+            market_ranges.append(norm_name)
     
-    # Normalize prediction range names as well
+    # Determine which ranges need to be combined based on what's in the market data
+    combined_ranges = {}
+    for market_range in market_ranges:
+        if market_range == "350 or more":
+            # Check if we need to combine "350-374", "375-399" and others above 350
+            combined_ranges[market_range] = [
+                r for r in pred_probs.keys() 
+                if (r.startswith("350") or r.startswith("375") or 
+                    r.startswith("400") or "or more" in r)
+            ]
+    
+    # Normalize prediction range names as well and combine values for ranges
+    # that map to the same Polymarket range
     normalized_pred_probs = {}
+    processed_ranges = set()
+    
+    # First handle the special combined ranges
+    for target_range, source_ranges in combined_ranges.items():
+        combined_prob = 0
+        for range_name in source_ranges:
+            if range_name in pred_probs:
+                combined_prob += pred_probs[range_name]
+                processed_ranges.add(range_name)
+        normalized_pred_probs[target_range] = combined_prob
+    
+    # Then process the remaining ranges
     for range_name, prob in pred_probs.items():
+        if range_name in processed_ranges:
+            continue  # Skip already processed ranges
+            
         norm_name = normalize_range_name(range_name)
-        normalized_pred_probs[norm_name] = prob
+        
+        # Only include ranges that map to actual market ranges
+        if norm_name in market_ranges:
+            # Sum probabilities for ranges that map to the same normalized name
+            if norm_name in normalized_pred_probs:
+                normalized_pred_probs[norm_name] += prob
+            else:
+                normalized_pred_probs[norm_name] = prob
     
     # Create comparison table
     comparison_data = []
     
-    # Get all unique range names from both sources
-    all_ranges = set(list(normalized_pred_probs.keys()) + list(market_probs.keys()))
-    
-    for range_name in sorted(all_ranges):
+    # Only use ranges that exist in the Polymarket data
+    for range_name in market_ranges:
         pred_prob = normalized_pred_probs.get(range_name, 0)
         market_prob = market_probs.get(range_name, 0)
         market_ask = market_asks.get(range_name, 0)
