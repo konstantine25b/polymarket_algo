@@ -5,7 +5,7 @@ Scheduler for automating tweet fetching and prediction tasks.
 This module provides functionality to periodically:
 1. Fetch Elon Musk's tweets and store them in the database
 2. Run the Polymarket predictor to update predictions
-3. Run the bidding decision stats to compare predictions with market data and display token IDs
+3. Run the auto-bidder to place orders based on statistical opportunities
 
 Usage:
     python -m src.scheduler.scheduler [options]
@@ -22,12 +22,11 @@ Options:
     --initial-batch N      Initial batch size for incremental fetching (default: 40)
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
-    --no-stats             Don't run the bidding decision stats comparison
-    --threshold FLOAT      Minimum opportunity percentage to include in results (default: 0.0)
-    --enhanced-viz         Generate enhanced visualization with stats
-
-Notes:
-    Token IDs are displayed by default in the bidding stats output to facilitate trading on Polymarket.
+    --no-bidding           Don't run the auto-bidder
+    --threshold FLOAT      Minimum opportunity percentage to place bids (default: 0.0)
+    --amount FLOAT         Amount to bid in USDC (default: 1.0)
+    --dry-run              Run auto-bidder in dry run mode (don't place real orders)
+    --no-stats             Don't show full statistics table
 """
 
 import argparse
@@ -77,12 +76,16 @@ def setup_argparse():
                         help='Maximum batch size for incremental fetching (default: 200)')
     parser.add_argument('--no-prophet', action='store_true',
                         help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
-    parser.add_argument('--no-stats', action='store_true',
-                        help="Don't run the bidding decision stats comparison")
+    parser.add_argument('--no-bidding', action='store_true',
+                        help="Don't run the auto-bidder")
     parser.add_argument('--threshold', type=float, default=0.0,
-                        help='Minimum opportunity percentage to include in results (default: 0.0)')
-    parser.add_argument('--enhanced-viz', action='store_true',
-                        help='Generate enhanced visualization with stats')
+                        help='Minimum opportunity percentage to place bids (default: 0.0)')
+    parser.add_argument('--amount', type=float, default=1.0,
+                        help='Amount to bid in USDC (default: 1.0)')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Run auto-bidder in dry run mode (don\'t place real orders)')
+    parser.add_argument('--no-stats', action='store_true',
+                        help="Don't show full statistics table")
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -165,54 +168,54 @@ def run_prediction(quiet=False, use_prophet=True):
     
     return process.returncode == 0
 
-def run_bidding_decision_stats(quiet=False, use_prophet=True, threshold=0.0, enhanced_viz=False):
-    """Run the bidding decision stats to compare predictions with market data.
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True):
+    """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
         quiet: Whether to suppress output
-        use_prophet: Whether to use the Prophet algorithm
-        threshold: Minimum opportunity percentage to include in results
-        enhanced_viz: Whether to generate enhanced visualization
+        threshold: Minimum opportunity percentage to place bids
+        amount: Amount to bid in USDC
+        dry_run: Whether to run in dry run mode (don't place real orders)
+        show_stats: Whether to show full statistics table
     """
-    logger.info(f"Starting bidding decision stats comparison at {datetime.datetime.now()}")
+    logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
     # Build the command to run
-    cmd = [sys.executable, "-m", "src.bidding_decision.stats", "--visualize", f"--threshold={threshold}", "--show-tokens"]
+    cmd = [
+        sys.executable, 
+        "-m", 
+        "src.bidding_decision.auto_bid.run", 
+        f"--threshold={threshold}",
+        f"--amount={amount}"
+    ]
     
-    # Add enhanced visualization if requested
-    if enhanced_viz:
-        cmd.append("--enhanced-viz")
+    # Add dry run mode if requested
+    if dry_run:
+        cmd.append("--dry-run")
+        logger.info("Running auto-bidder in dry run mode (no real orders will be placed)")
     
-    # Use the same Prophet setting as predictions
-    if not use_prophet:
-        cmd.append("--no-prophet")
+    # Add no-stats flag if requested
+    if not show_stats:
+        cmd.append("--no-stats")
     
     try:
-        if quiet:
+        if quiet and not dry_run:  # Always show output in dry run mode
             process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if process.returncode != 0:
-                logger.error(f"Bidding decision stats failed with error: {process.stderr.decode()}")
+                logger.error(f"Auto-bidder failed with error: {process.stderr.decode()}")
             else:
                 # Print the output even in quiet mode since this is the key result
-                logger.info("Bidding decision stats completed successfully")
+                logger.info("Auto-bidder completed successfully")
                 output = process.stdout.decode()
-                # Extract the key parts of the output (only show the Best Trading Opportunity section if it exists)
-                if "Best Trading Opportunity:" in output:
-                    start_idx = output.find("Comparison Table:")
-                    end_idx = len(output)
-                    if start_idx != -1:
-                        relevant_output = output[start_idx:end_idx]
-                        print("\n" + relevant_output)
-                else:
-                    print("\n" + output)
+                print("\n" + output)
         else:
             process = subprocess.run(cmd)
             if process.returncode != 0:
-                logger.error("Bidding decision stats failed")
+                logger.error("Auto-bidder failed")
             else:
-                logger.info("Bidding decision stats completed successfully")
+                logger.info("Auto-bidder completed successfully")
     except Exception as e:
-        logger.error(f"Error running bidding decision stats: {e}")
+        logger.error(f"Error running auto-bidder: {e}")
         return False
     
     return process.returncode == 0
@@ -240,17 +243,18 @@ def run_scheduled_jobs(args):
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
         prediction_success = run_prediction(
-            quiet=True,  # Always run prediction quietly since we'll show stats instead
+            quiet=True,  # Always run prediction quietly since we'll show bidder output instead
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
         )
         
-        # Run the bidding decision stats if prediction succeeded and stats not disabled
-        if prediction_success and not args.no_stats:
-            run_bidding_decision_stats(
+        # Run the auto-bidder if prediction succeeded and bidding not disabled
+        if prediction_success and not args.no_bidding:
+            run_auto_bidder(
                 quiet=args.quiet,
-                use_prophet=not args.no_prophet,
                 threshold=args.threshold,
-                enhanced_viz=args.enhanced_viz
+                amount=args.amount,
+                dry_run=args.dry_run,
+                show_stats=not args.no_stats
             )
     
     return tweets_success and prediction_success
@@ -277,12 +281,16 @@ def main():
     elif not args.tweets_only:
         logger.info("Using standard prediction algorithm")
     
-    # Log stats configuration
-    if not args.tweets_only and not args.no_stats:
-        logger.info(f"Will run bidding decision stats with threshold: {args.threshold}%")
-        logger.info("Token IDs will be displayed with trading opportunities for easier Polymarket trading")
-        if args.enhanced_viz:
-            logger.info("Enhanced visualization enabled for bidding decision stats")
+    # Log auto-bidder configuration
+    if not args.tweets_only and not args.no_bidding:
+        logger.info(f"Will run auto-bidder with threshold: {args.threshold}%")
+        logger.info(f"Bid amount: {args.amount} USDC")
+        if args.dry_run:
+            logger.info("Auto-bidder running in DRY RUN mode - no real orders will be placed")
+        else:
+            logger.info("Auto-bidder will place REAL orders - use --dry-run to test without placing orders")
+        if args.no_stats:
+            logger.info("Full statistics table display is disabled")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")

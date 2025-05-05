@@ -1,6 +1,6 @@
 # Tweet Scheduler
 
-A tool for automating the tweet fetching and prediction processes for Polymarket.
+A tool for automating the tweet fetching, prediction processes, and automated trading for Polymarket.
 
 ## Overview
 
@@ -8,7 +8,7 @@ This module provides an automated scheduler that periodically:
 
 1. Fetches Elon Musk's tweets and stores them in the database
 2. Runs the Polymarket predictor to update predictions
-3. Runs the Market Prediction Comparison Tool to identify trading opportunities
+3. Runs the Auto-Bidder to place orders based on identified trading opportunities
 
 ## Features
 
@@ -18,11 +18,11 @@ This module provides an automated scheduler that periodically:
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
-- **Market comparison**: Compares prediction data against actual Polymarket order book data
+- **Automated trading**: Automatically places orders on Polymarket based on prediction data
 - **Trading opportunities**: Identifies potential trading opportunities with customizable threshold
-- **Enhanced visualization**: Optional detailed dashboard showing multiple comparison charts
-- **Spread analysis**: Shows bid-ask spreads and calculates spread-adjusted opportunities
-- **Realistic edge calculation**: Accounts for both spread and threshold when evaluating trading opportunities
+- **Dry run mode**: Test the auto-bidder without placing actual orders
+- **Configurable bid amount**: Set the amount of USDC to use for each bid
+- **Statistical analysis**: View detailed stats on each market opportunity
 
 ## Command-Line Usage
 
@@ -36,10 +36,10 @@ python -m src.scheduler
 # Run with custom interval (every 5 minutes)
 python -m src.scheduler --interval 5
 
-# Only fetch tweets, don't run predictions
+# Only fetch tweets, don't run predictions or trading
 python -m src.scheduler --tweets-only
 
-# Only run predictions, don't fetch tweets
+# Only run predictions and trading, don't fetch tweets
 python -m src.scheduler --predictions-only
 
 # Run jobs once and exit (don't keep running)
@@ -60,24 +60,30 @@ python -m src.scheduler --initial-batch 60 --max-batch 300
 # Disable incremental fetching (not recommended)
 python -m src.scheduler --no-incremental
 
-# Don't run the market comparison after predictions
-python -m src.scheduler --no-stats
+# Don't run the auto-bidder after predictions
+python -m src.scheduler --no-bidding
 
 # Set a minimum threshold for trading opportunities (e.g., 3%)
 python -m src.scheduler --threshold 3.0
 
-# Use enhanced visualization for market comparison
-python -m src.scheduler --enhanced-viz
+# Set the bid amount to 2.5 USDC
+python -m src.scheduler --amount 2.5
+
+# Run the auto-bidder in dry run mode (don't place real orders)
+python -m src.scheduler --dry-run
+
+# Don't display the full statistics table
+python -m src.scheduler --no-stats
 
 # Combine multiple options
-python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --enhanced-viz
+python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --amount 2.0 --dry-run
 ```
 
 ## Command-Line Options
 
 - `--interval`: Set the interval between runs in minutes (default: 20)
 - `--tweets-only`: Only run the tweet fetching job
-- `--predictions-only`: Only run the prediction job
+- `--predictions-only`: Only run the prediction and trading jobs
 - `--max-tweets`: Maximum number of tweets to fetch (default: 40)
 - `--no-debug`: Disable debug mode for tweet fetching
 - `--run-once`: Run jobs once and exit
@@ -86,13 +92,15 @@ python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --
 - `--initial-batch`: Initial batch size for incremental fetching (default: 40)
 - `--max-batch`: Maximum batch size for incremental fetching (default: 200)
 - `--no-prophet`: Disable Prophet algorithm for predictions (use standard algorithm instead)
-- `--no-stats`: Don't run the market comparison after predictions
-- `--threshold`: Minimum opportunity percentage for trading recommendations (default: 0.0)
-- `--enhanced-viz`: Generate enhanced visualization dashboard with detailed charts
+- `--no-bidding`: Don't run the auto-bidder after predictions
+- `--threshold`: Minimum opportunity percentage for placing bids (default: 0.0)
+- `--amount`: Amount to bid in USDC (default: 1.0)
+- `--dry-run`: Run auto-bidder in dry run mode (don't place real orders)
+- `--no-stats`: Don't display the full statistics table with market opportunities
 
 ## Smart Incremental Fetching
 
-The scheduler now uses an intelligent incremental fetching strategy by default, which:
+The scheduler uses an intelligent incremental fetching strategy by default, which:
 
 1. Starts with a small batch size (default: 40 tweets)
 2. Checks if this batch overlaps with your existing database
@@ -109,58 +117,54 @@ This approach provides several benefits:
 You can customize the incremental fetching parameters using the `--initial-batch` and
 `--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
 
-## Market Prediction Comparison
+## Automated Trading with Auto-Bidder
 
-After running predictions, the scheduler automatically executes the Market Prediction Comparison Tool, which:
+After running predictions, the scheduler automatically executes the Auto-Bidder, which:
 
 1. Compares Prophet model predictions with actual Polymarket order book data
 2. Calculates differences between predicted and actual market prices
 3. Measures the bid-ask spread on each market to determine real trading costs
-4. Provides three levels of opportunity calculation:
-   - Raw opportunity (absolute difference between prediction and market)
-   - Spread-adjusted opportunity (raw opportunity minus the bid-ask spread)
-   - Fully-adjusted opportunity (spread-adjusted minus the threshold)
-5. Generates visualizations comparing all metrics
-6. Provides specific trading recommendations with realistic edge calculations
+4. Identifies the best buying opportunity where the "buy-only" edge is highest
+5. Places a market buy order for the configured amount (default: 1 USDC)
+6. Provides detailed output about the selected opportunity and order status
 
-Example output:
+The auto-bidder is configured to only place buy orders, focusing on the opportunity with the highest edge after accounting for:
+- The bid-ask spread that must be crossed to execute a trade
+- The configured minimum threshold for meaningful opportunities
+
+To customize the auto-bidder behavior:
+
+- `--threshold`: Set the minimum opportunity percentage (default: 0.0%)
+- `--amount`: Set the USDC amount for each bid (default: 1.0 USDC)
+- `--dry-run`: Test the auto-bidder without placing actual orders
+- `--no-stats`: Skip displaying the full statistical comparison table
+- `--no-bidding`: Skip running the auto-bidder entirely
+
+Example output in dry run mode:
 
 ```
 Comparison Table:
-           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Spread (%)  Difference (%)  Opportunity (%)  Spread-Adj. Opp. (%)  Full-Adj. Opp. (0.0%)
-        150–174          95.58       89.50    89.00    90.00        1.00            5.58            5.58                4.58                  4.58
-        175–199           3.65        9.50     9.00    10.00        1.00           -6.35            6.35                5.35                  5.35
-        200–224           0.48        0.15     0.00     0.50        0.50           -0.02            0.02                0.00                  0.00
-        225–249           0.14        0.00     0.00     0.50        0.50           -0.36            0.36                0.00                  0.00
-...
+[Full statistics table showing all market opportunities]
 
-Best Trading Opportunity:
-Range: 175–199
-Prediction: 3.65%
-Market: 9.5%
-Bid: 9.0%
-Ask: 10.0%
-Spread: 1.0%
-Difference: -6.35%
-Opportunity: 6.35%
-Spread-Adjusted Opportunity: 5.35%
-Fully-Adjusted Opportunity: 5.35%
-Recommendation: SELL 175–199 at 9.0% (prediction: 3.65%)
-Edge: 5.35% after spread and 0.0% threshold
+Token IDs:
+[Token IDs for each range]
+
+Expected Values:
+Prediction: 263.57%
+Market: 289.01%
+Difference: -25.44%
+
+Best Buy Opportunity:
+Range: 200–224
+Prediction: 17.3%
+Market Ask Price: 7.5%
+Edge: 8.9%
+Token ID: 58491148303239718595459688678505994852918801795590099599410816935825697202168
+
+DRY RUN - No order placed.
 ```
 
-The spread-adjusted calculations provide a more realistic view of potential profits by accounting for both:
-
-- The bid-ask spread that must be crossed to execute a trade
-- Any minimum threshold for meaningful opportunities you've specified
-
-This helps identify only the most profitable trading opportunities where the edge is large enough to overcome the market spread.
-
-To customize the market comparison:
-
-- `--threshold`: Set the minimum opportunity percentage (default: 0.0%, shows all opportunities)
-- `--enhanced-viz`: Generate a comprehensive dashboard with multiple charts
-- `--no-stats`: Skip the market comparison entirely
+When running in production mode (without `--dry-run`), the auto-bidder will actually place orders on Polymarket using the configured wallet from your `.env` file.
 
 ## Logs
 
@@ -180,7 +184,7 @@ nohup python -m src.scheduler > /dev/null 2>&1 &
 Or with custom options:
 
 ```bash
-nohup python -m src.scheduler --interval 10 --quiet --threshold 3.0 > /dev/null 2>&1 &
+nohup python -m src.scheduler --interval 10 --quiet --threshold 3.0 --amount 2.0 --dry-run > /dev/null 2>&1 &
 ```
 
 To stop the scheduler running in the background:
@@ -195,12 +199,12 @@ kill <process_id>
 
 ## Implementation Details
 
-The scheduler uses Python's `subprocess` module to run the tweet fetching, prediction, and market comparison scripts as separate processes. This ensures that any failures in one process don't affect the others.
+The scheduler uses Python's `subprocess` module to run the tweet fetching, prediction, and auto-bidder scripts as separate processes. This ensures that any failures in one process don't affect the others.
 
-Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise). If the prediction process succeeds, the market comparison is then executed.
+Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise). If the prediction process succeeds, the auto-bidder is then executed to place orders based on the updated predictions.
 
 ## Related Modules
 
 - **src.apify.get_elon_tweets**: Module for fetching tweets
 - **src.polymarket_predictor**: Module for running predictions
-- **src.bidding_decision.stats**: Module for comparing predictions with market data
+- **src.bidding_decision.auto_bid**: Module for automated bidding based on predictions
