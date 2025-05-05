@@ -300,3 +300,188 @@ Use the provided shell scripts to run the scheduler as a background service:
 ```
 
 For more details, see the [Scheduler README](src/scheduler/README.md).
+
+# Polymarket Algorithmic Trading and Analysis
+
+A Python library for interacting with the Polymarket CLOB API, analyzing trade data, and generating advanced visualizations.
+
+## Features
+
+- **API Client**: Wrapper for the Polymarket CLOB API
+- **Trade Analysis**: Analyze price movements, volumes, and trading patterns
+- **Advanced Visualizations**: Create beautiful, informative visualizations of trade data
+- **Market Monitoring**: Tools for monitoring market conditions
+- **Various Usage Examples**: Ready-to-use examples showing how to interact with the API
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8+
+- pip
+
+### Setup
+
+1. Clone this repository:
+```bash
+git clone https://github.com/yourusername/polymarket_algo.git
+cd polymarket_algo
+```
+
+2. Install required packages:
+```bash
+pip install -r requirements.txt
+```
+
+3. Create a `.env` file in the root directory with your Polymarket API credentials:
+```
+WALLET_PRIVATE_KEY=your_private_key_here
+```
+
+## Usage
+
+### Basic API Interaction
+
+```python
+from src.polymarket.client import PolymarketClient
+
+# Initialize client
+client = PolymarketClient()
+
+# Get market details
+market_id = '0x1234...'
+market = client.get_market(market_id)
+print(market)
+
+# Get trades
+trades = client.get_trades(market_id, limit=50)
+print(f"Retrieved {len(trades)} trades")
+```
+
+### Trade Analysis and Visualization
+
+This library provides powerful tools for analyzing Polymarket trade data and generating beautiful visualizations.
+
+#### Quick Start
+
+Use the provided `run.py` script for quick analysis and visualization:
+
+```bash
+# Run full analysis and create visualizations
+python run.py --input path/to/your/trades.json --market "Market Name" --output results_dir
+
+# Generate only visualizations
+python run.py --input path/to/your/trades.json --market "Market Name" --output results_dir --viz-only
+```
+
+#### Using the Visualizer in Your Code
+
+The enhanced visualizer can be used directly in your code:
+
+```python
+import pandas as pd
+from src.polymarket.trade_analysis.visualizer import PolymarketTradeVisualizer
+
+# Prepare your trade data as a pandas DataFrame
+df = pd.DataFrame(trades)
+
+# Initialize the visualizer
+visualizer = PolymarketTradeVisualizer(
+    theme='dark_background',  # Use 'darkgrid' for light theme
+    output_dir='my_visualizations',
+    dpi=300  # High resolution for output images
+)
+
+# Create price history chart
+visualizer.plot_price_history(
+    df=df,
+    market_name="My Market",
+    save_file=True
+)
+
+# Create volume distribution by outcome
+visualizer.plot_volume_distribution(
+    df=df,
+    by='outcome',
+    save_file=True
+)
+
+# Create price distribution analysis
+visualizer.plot_price_distribution(
+    df=df,
+    save_file=True
+)
+
+# Create trading activity heatmap
+visualizer.plot_trade_heatmap(
+    df=df,
+    save_file=True
+)
+
+# Create comprehensive dashboard
+visualizer.create_dashboard(
+    df=df,
+    market_name="My Market",
+    save_file=True
+)
+```
+
+#### Using the Trade Analyzer
+
+For comprehensive trade analysis:
+
+```python
+from src.polymarket.trade_analysis.trade_analyzer import PolymarketTradeAnalyzer
+
+# Initialize analyzer
+analyzer = PolymarketTradeAnalyzer(output_dir='analysis_results')
+
+# Run complete analysis
+results = analyzer.analyze_all(
+    trades=trades,
+    market_name="My Market",
+    create_visualizations=True
+)
+
+# Print price analysis summary
+print(results['price']['summary'])
+
+# Print volume analysis summary
+print(results['volume']['summary'])
+
+# Print trading pattern analysis summary
+print(results['patterns']['summary'])
+```
+
+## Available Visualizations
+
+The enhanced visualizer produces several types of beautiful data visualizations:
+
+1. **Price History Chart**: Shows price evolution over time with volume bars
+2. **Volume Distribution**: Analyzes trading volume by outcome or side
+3. **Price Distribution**: Histogram and boxplot analysis of price distribution
+4. **Trading Heatmap**: Shows activity patterns by day and hour
+5. **Comprehensive Dashboard**: Combined visualization with all key charts
+
+All visualizations include summary statistics and are saved as high-quality PNG files.
+
+## Examples
+
+Explore the `examples/` directory for more usage examples:
+
+- `examples/basic_example.py`: Basic API interaction
+- `examples/visualizer_example.py`: Generate sample visualizations
+- `examples/trade_analysis_example.py`: Perform trade analysis
+
+To run any example:
+```bash
+python examples/visualizer_example.py
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
