@@ -1,283 +1,219 @@
-# Polymarket Position Tracker
+# Polymarket Position Tracker with Profit/Loss Analytics
 
-A simple tool to track and analyze your current positions on Polymarket based on your trade history.
+A powerful tool for tracking, analyzing, and visualizing your Polymarket positions with comprehensive profit and loss calculations.
 
-## Overview
+## Features
 
-This module analyzes your Polymarket trade history to calculate your current positions across all markets you've traded in. It provides:
+- **Detailed Position Analysis**: Track current position sizes for each outcome in each market
+- **Full Market Information**: Display complete market names and details with full market IDs
+- **Profit/Loss Calculations**: Calculate realized and unrealized P&L for each trade, outcome, and market
+- **Performance Metrics**: Track ROI (Return on Investment) across your entire portfolio
+- **Trade Analytics**: Analyze trade history with detailed profit/loss information
+- **Rich Visualizations**: Generate bubble charts, trade history plots, and market-specific visualizations
+- **Tabular Views**: Display formatted tables of positions and trades with P&L metrics
+- **Data Export**: Export position and trade data to CSV files with comprehensive P&L information
+- **Interactive Exploration**: Interact with visualizations and analyze your trading performance
+- **Smart Market ID Display**: Intelligently display full market IDs without duplication
+- **Robust Market Data Retrieval**: Use multiple API endpoints with graceful fallbacks
+- **Table Image Generation**: Save position tables as high-quality PNG images for sharing or reporting
 
-- Current position sizes for each outcome in each market
-- **Full market IDs** displayed intelligently (no duplication)
-- Robust market data retrieval with fallback mechanisms
-- Full market names and details where available
-- Trade history visualization and analysis
-- Bubble chart visualization of current positions
-- Market-specific trade history analysis
-- Tabular view of positions and trade history
-- CSV export of position and trade data
-- Interactive visualizations of your positions
-- Position summary reporting
-- JSON export of position data
+## Installation
+
+1. Clone the repository
+2. Install dependencies: `pip install -r requirements.txt`
+3. Set up your Polymarket wallet private key in a `.env` file
+
+## Configuration
+
+Create a `.env` file in the root directory with the following:
+
+```
+WALLET_PRIVATE_KEY=your_private_key_here
+```
 
 ## Usage
 
 ### From Python
 
 ```python
-from src.polymarket.my_positions import PolymarketPositionTracker
+from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
 
-# Initialize with default settings (loads wallet key from .env)
+# Initialize tracker
 tracker = PolymarketPositionTracker()
 
-# Get detailed position information
-positions = tracker.get_detailed_positions()
-
-# Print a readable summary
+# Get position summary with P&L information
+positions = tracker.get_positions_summary()
 tracker.print_positions_summary(positions)
 
-# Display positions as a formatted table
-tracker.display_positions_table(positions)
+# Display positions table with P&L metrics
+tracker.display_positions_table()
 
-# Display all trades grouped by market
+# Display positions table and save as image
+tracker.display_positions_table(save_image=True)
+
+# Display trades by market with P&L analytics
 tracker.display_trades_by_market()
 
-# Export to CSV files
-tracker.export_positions_table(positions)
+# Generate visualizations
+tracker.visualize_positions_chart()
+tracker.visualize_trade_history()
+
+# Export data with P&L information
+tracker.export_positions_table()
 tracker.export_trades_by_market()
-
-# Generate all visualizations
-tracker.visualize_positions(positions, save=True, show=True)
-
-# Generate a bubble chart of positions
-tracker.visualize_positions_chart(positions, save=True, show=True)
-
-# Visualize your complete trade history
-trades = tracker.get_my_trades()
-trades_df = tracker.trades_to_dataframe(trades)
-tracker.visualize_trade_history(trades_df, save=True, show=True)
-
-# Visualize trades for a specific market
-tracker.visualize_market_trades(market_id="YOUR_MARKET_ID", save=True, show=True)
-
-# Save to a JSON file
-tracker.save_positions_to_file(positions)
 ```
 
 ### From Command Line
 
-The module includes a command-line interface with multiple options for visualizations and data export:
+Display position summary with P&L information:
 
 ```bash
-# Get all positions
 python -m src.polymarket.my_positions.cli
+```
 
-# Get positions for a specific market
-python -m src.polymarket.my_positions.cli --market YOUR_MARKET_ID
+Display detailed position table with P&L metrics:
 
-# Display positions as a formatted table
+```bash
 python -m src.polymarket.my_positions.cli --positions-table
+```
 
-# Display all trades grouped by market
+Display position table and save as image:
+
+```bash
+python -m src.polymarket.my_positions.cli --positions-table --save-table-image
+```
+
+Specify custom image path:
+
+```bash
+python -m src.polymarket.my_positions.cli --positions-table --save-table-image --table-image-path /path/to/image.png
+```
+
+Display trade history by market with P&L analytics:
+
+```bash
 python -m src.polymarket.my_positions.cli --trades-table
-
-# Export positions to CSV
-python -m src.polymarket.my_positions.cli --export-positions-csv
-
-# Export trades by market to CSV
-python -m src.polymarket.my_positions.cli --export-trades-csv
-
-# Specify CSV export directory
-python -m src.polymarket.my_positions.cli --export-positions-csv --csv-dir /path/to/csv/dir
-
-# Save results to a file
-python -m src.polymarket.my_positions.cli --save
-
-# Generate all visualizations
-python -m src.polymarket.my_positions.cli --visualize
-
-# Show plots interactively
-python -m src.polymarket.my_positions.cli --show-plots
-
-# Generate a bubble chart of your positions
-python -m src.polymarket.my_positions.cli --positions-chart
-
-# Visualize your complete trade history
-python -m src.polymarket.my_positions.cli --trade-history
-
-# Visualize trades for a specific market
-python -m src.polymarket.my_positions.cli --market-trades YOUR_MARKET_ID
-
-# Combine multiple options
-python -m src.polymarket.my_positions.cli --positions-table --trades-table --export-positions-csv --export-trades-csv
-
-# Enable verbose logging
-python -m src.polymarket.my_positions.cli --verbose
 ```
 
-## Configuration
+Generate visualizations:
 
-The position tracker gets your wallet private key from the `.env` file by default. Make sure you have the following environment variable set:
-
-```
-WALLET_PRIVATE_KEY=your_private_key_here
+```bash
+python -m src.polymarket.my_positions.cli --visualize --show-plots
 ```
 
-Alternatively, you can provide the key directly when initializing the tracker or through the command-line interface.
+Export data to CSV files with P&L information:
+
+```bash
+python -m src.polymarket.my_positions.cli --export-positions-csv --export-trades-csv
+```
+
+## Improved Position Table Features
+
+The position table display provides several enhancements for better readability:
+
+- **Shortened Market IDs**: Uses concise identifiers (M1, M2, etc.) in the table
+- **Compact Market Names**: Shortens long market names to fit neatly in the table
+- **Market Reference Guide**: Provides a complete reference of full market names and IDs after the table
+- **Table Image Generation**: Creates high-quality PNG images of position tables with timestamps
+- **Comprehensive P&L**: Displays realized and unrealized profit/loss for each position
+- **ROI Calculation**: Shows percentage return on investment for each position and overall
+
+## Profit/Loss Calculation Features
+
+The P&L tracking system provides comprehensive analytics:
+
+### Realized and Unrealized P&L
+
+- **Realized P&L**: Calculate exact profit/loss for completed trades
+- **Unrealized P&L**: Estimate current value of open positions based on last known prices
+- **Total P&L**: Combined realized and unrealized profit/loss metrics
+
+### Cost Basis Tracking
+
+- Track average cost basis for each position
+- Calculate running cost basis as trades are executed
+- Maintain accurate inventory levels for each outcome
+
+### ROI Calculations
+
+- Calculate Return on Investment (ROI) as a percentage
+- Analyze ROI at the outcome, market, and portfolio levels
+- Compare performance across different trades and markets
+
+### P&L Summary Views
+
+- Market-level P&L summaries
+- Portfolio-level performance metrics
+- Outcome-specific profit and loss analysis
 
 ## Example Output
 
-The position tracker outputs a summary like:
-
-```
-POLYMARKET POSITIONS SUMMARY - 0x123456789abcdef...
-Last Updated: 2023-05-25T14:30:45.123456
-Active Markets: 3
-Total Trades: 42
-
-CURRENT POSITIONS:
-
-Will Bitcoin exceed $100k in 2023? (0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f):
-  • Yes: +100.00 shares (15 trades)
-  • No: -50.00 shares (8 trades)
-
-US 2024 Presidential Election (0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6):
-  • Trump: +25.00 shares (5 trades)
-  • Biden: -10.00 shares (3 trades)
-```
-
-### Table Output
-
-When using the `--positions-table` option, you'll get a nicely formatted table of your current positions with full market IDs:
+### Position Table with P&L Metrics
 
 ```
 CURRENT POSITIONS TABLE:
 
-         Market ID                                            |                Market Name                 | Outcome | Position Size | Trades
------------------------------------------------------------|-------------------------------------------|---------|---------------|-------
-0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc... | Will Bitcoin exceed $100k in 2023?        | Yes     | 100.00        | 15
-0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc... | Will Bitcoin exceed $100k in 2023?        | No      | -50.00        | 8
-0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac... | US 2024 Presidential Election             | Trump   | 25.00         | 5
-0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac... | US 2024 Presidential Election             | Biden   | -10.00        | 3
+Market ID Market Name     Outcome Position Size Current Price Position Value Cost Basis  Trades Realized P&L Unrealized P&L Total P&L    ROI (%)
+       M1 350 or more ★ SUMMARY ★                                      $1.95      $2.00       2        $0.00         $-0.04    $-0.04     -2.09%
+                              Yes         84.94       $0.0230          $1.95      $2.00       2        $0.00         $-0.04    $-0.04     -2.09%
+       M2     300–324 ★ SUMMARY ★                                      $1.00      $1.00       1        $0.00          $0.00     $0.00     +0.00%
+                              Yes          8.20       $0.1220          $1.00      $1.00       1        $0.00          $0.00     $0.00     +0.00%
+       M3     200–224 ★ SUMMARY ★                                      $0.02      $0.02       5        $3.48          $0.00     $3.48 +14080.21%
+                              Yes          0.32       $0.0790          $0.02      $0.02       5        $3.48          $0.00     $3.48 +14080.21%
+       M4     275–299 ★ SUMMARY ★                                      $0.77      $0.77       2       $-0.01         $-0.00    $-0.01     -1.30%
+                              Yes          3.31       $0.2320          $0.77      $0.77       2       $-0.01         $-0.00    $-0.01     -1.30%
 
-Total positions: 4
+PORTFOLIO SUMMARY:
+  Total Position Value: $3.75
+  Total Realized P&L: $3.59
+  Total Unrealized P&L: $-0.04
+  Total P&L: $3.55
+  Overall ROI: +93.78%
+
+MARKET REFERENCE GUIDE:
+  M1: Will Elon tweet 350 or more times May 2–9?
+     ID: 0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f
+  M2: Will Elon tweet 300–324 times May 2–9?
+     ID: 0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6
+  M3: Will Elon tweet 200–224 times May 2–9?
+     ID: 0x820cb7e640e07ba871c249db6d17ec0a56c2a6c866fcf5167ceb7e2b3faa6b02
+  M4: Will Elon tweet 275–299 times May 2–9?
+     ID: 0xb942003e5c182f905b88302b79368d7891a2d3d418a13f884a52e727e4effb95
 ```
 
-Using `--trades-table` provides a detailed breakdown of all trades by market with complete market IDs:
+### Trades Table with P&L Analytics
 
 ```
-TRADES BY MARKET (Total: 31 trades across 3 markets):
+TRADES BY MARKET (Total: 20 trades across 2 markets):
 
---- Market: Will Bitcoin exceed $100k in 2023? (0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f) ---
-  Market ID                                              |        Market Name        | Outcome |       Time       | Price | Size |  Side  | Impact
-------------------------------------------------------|---------------------------|---------|------------------|-------|------|--------|-------
-0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de... | Will Bitcoin exceed $... | Yes     | 2023-05-20 10:15 | 0.65  | 50.0 | BUY    | 50.0
-0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de... | Will Bitcoin exceed $... | Yes     | 2023-05-21 14:30 | 0.70  | 50.0 | BUY    | 50.0
-0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de... | Will Bitcoin exceed $... | No      | 2023-05-22 09:45 | 0.30  | 50.0 | SELL   | -50.0
-Total: 23 trades
+--- Market: Will Elon tweet 350 or more times May 2–9? (0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f) ---
+  Outcome    Time                 Price    Size  Side  Impact  P&L ($)   P&L (%)   Avg Cost
+--------------------------------------------------------------------------------------
+  Yes      2024-05-01 10:15:32  $0.0220    5.0   Buy   +5.0
+  Yes      2024-05-15 14:22:45  $0.0230    5.0   Buy   +5.0   $0.00     +0.00%    $0.0225
+
+Market P&L Summary:
+  Realized P&L: $0.00
+  Unrealized P&L: $-0.04
+  Total P&L: $-0.04
+  ROI: -2.09%
+
+OVERALL PORTFOLIO P&L SUMMARY:
+  Realized P&L: $3.59
+  Unrealized P&L: $-0.04
+  Total P&L: $3.55
+  ROI: +93.78%
 ```
-
-## Visualization Features
-
-The module offers several types of visualizations, all with full market IDs displayed:
-
-1. **Position Size by Market (Pie Chart)** - Shows the distribution of your position sizes across different markets.
-
-2. **All Positions by Size (Bar Chart)** - Horizontal bar chart of all positions sorted by size, with complete market IDs.
-
-3. **Position Bubble Chart** - Visual overview of your positions where:
-
-   - Y-axis represents position size
-   - Bubble size represents number of trades
-   - Colors differentiate between markets
-   - Labels show outcomes and position sizes
-   - Includes full market IDs in the legend
-
-4. **Trade History Visualization** - Visual representation of your trading activity over time, showing:
-
-   - Buy transactions (upward triangle markers)
-   - Sell transactions (downward triangle markers)
-   - Price points for each transaction
-   - Trade details on hover or click
-   - Color-coding by market
-
-5. **Market-Specific Trade History** - Detailed visualization of all your trades within a specific market:
-
-   - Timeline of your trades
-   - Price movement visualization
-   - Buy/sell activity comparison
-   - Trade size representation
-   - Complete transaction details
-
-6. **Position Summary Dashboard** - A comprehensive dashboard with multiple visualizations including:
-   - Position distribution
-   - Top positions
-   - Trade activity history
-   - Tabular data of all positions with full market IDs
-
-## Data Export Features
-
-The module provides several ways to export and view your data:
-
-1. **Position Table Display** - Formatted table showing your current positions sorted by size.
-
-2. **Trade History Table** - Comprehensive view of all trades grouped by market with timestamps and transaction details.
-
-3. **CSV Export of Positions** - Export your current position data to a CSV file for further analysis in spreadsheet applications.
-
-4. **CSV Export of Trades** - Export your complete trade history grouped by market to a CSV file.
-
-5. **JSON Export** - Save position data with detailed market information to a JSON file.
-
-All exports include full market IDs, prices, sizes, and timestamps where available. CSV files are saved in the `output/tables` directory by default, but you can specify a custom location.
-
-## Important Features
-
-- **Smart Market ID Display** - Market IDs are displayed in full but only when needed (avoiding duplication)
-- **Robust Market Data Retrieval** - Multiple API endpoints are tried with graceful fallbacks if market info is unavailable
-- **Trade History** - Visualize your trading activity over time with buy/sell indicators
-- **Trade Counts** - Position summaries now include the number of trades for each position
-- **Market-Specific Analysis** - View trade history for a specific market of interest
-- **Position Bubble Chart** - Intuitive visualization of your positions with size, market, and trade count representation
-- **Tabular Data** - View your positions and trades in neatly formatted tables
-- **Data Export** - Export to CSV for further analysis in spreadsheet applications
 
 ## How It Works
 
-This module:
+The profit and loss calculation system:
 
-1. Connects to the Polymarket CLOB API using your wallet credentials
-2. Fetches your trade history (as both maker and taker)
-3. Attempts to fetch full market names and details from multiple Polymarket API endpoints
-4. Uses fallback mechanisms if market information is unavailable
-5. Calculates your net position for each outcome in each market
-6. Shows only non-zero positions (outcomes where you currently hold shares)
-7. Generates visualizations and tabular views of your positions and trade history
-8. Exports data in various formats (JSON, CSV) for further analysis
-9. Displays full market IDs intelligently (avoiding duplication)
+1. **Tracks Every Trade**: Records the price, size, and side of each trade
+2. **Maintains Inventory**: Keeps running totals of your position in each outcome
+3. **Calculates Cost Basis**: Determines the average cost of your current positions
+4. **Computes Realized P&L**: Calculates profit/loss when positions are reduced
+5. **Estimates Unrealized P&L**: Values current positions at their last known price
+6. **Aggregates Metrics**: Combines data at the outcome, market, and portfolio levels
 
-The implementation accounts for:
-
-- Whether you were the maker or taker in a trade
-- Whether you were buying or selling in each trade
-- Net position after multiple trades in the same outcome
-- Time-based analysis of your trading activity
-- Trade frequency and volume across markets
-
-## Dependencies
-
-- `pandas`: For data manipulation and table display
-- `matplotlib`: For generating visualizations
-- `py_clob_client`: For interfacing with Polymarket's CLOB API
-- `python-dotenv`: For loading environment variables
-- `requests`: For fetching market information
-
-## Notes
-
-- Position calculations account for both buy and sell trades, as well as maker and taker roles
-- Only non-zero positions are included in the output
-- The tracker calls the Polymarket API directly to fetch full market names and details
-- Visualizations are created using Matplotlib and saved as PNG files
-- Full market IDs are preserved in all outputs for accurate identification
-- Trade history visualization shows your trading activity over time
-- The bubble chart visualization provides an intuitive overview of your positions
-- Tables and CSV exports provide detailed breakdowns for further analysis
+For detailed information on the API and implementation, refer to the source code documentation.

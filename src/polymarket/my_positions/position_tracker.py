@@ -27,6 +27,9 @@ class PolymarketPositionTracker:
             key (str, optional): Wallet private key. If None, loads from environment.
         """
         # Set up output directory
+        if output_dir is None:
+            output_dir = 'output'
+        
         self.output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_dir)
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -203,13 +206,13 @@ class PolymarketPositionTracker:
     
     def trades_to_dataframe(self, trades_data):
         """
-        Convert trades data to a pandas DataFrame for analysis.
+        Convert trades data to a pandas DataFrame for analysis with gain/loss calculations.
         
         Args:
             trades_data (list): List of trade data dictionaries.
             
         Returns:
-            pandas.DataFrame: DataFrame with trade data.
+            pandas.DataFrame: DataFrame with trade data including gain/loss metrics.
         """
         if not trades_data:
             return pd.DataFrame()
@@ -244,14 +247,150 @@ class PolymarketPositionTracker:
             
             # Calculate position impact
             size = float(trade_copy.get('size', 0))
+            price = float(trade_copy.get('price', 0))
+            
+            # Calculate dollar value
+            dollar_value = price * size
+            
             if trade_copy.get('my_side') == 'BUY':
                 trade_copy['position_impact'] = size
+                trade_copy['cost_basis'] = dollar_value
+                # For buys, cost is negative (money spent)
+                trade_copy['gain_loss_usd'] = -dollar_value
+                trade_copy['percent_change'] = None  # Not applicable for initial buy
             else:
                 trade_copy['position_impact'] = -size
-                
+                trade_copy['sale_value'] = dollar_value
+                # For sells, gain is positive (money received)
+                trade_copy['gain_loss_usd'] = dollar_value
+                # We don't have previous cost basis here - calculated later
+                trade_copy['percent_change'] = None  # Will be calculated later
+            
             flattened_trades.append(trade_copy)
             
-        return pd.DataFrame(flattened_trades)
+        df = pd.DataFrame(flattened_trades)
+        
+        # Calculate market-level gain/loss
+        if not df.empty and 'market' in df.columns:
+            # Group by market and calculate gain/loss for each market
+            market_gains = {}
+            
+            for market_id, market_df in df.groupby('market'):
+                # Sort by time to process in chronological order
+                market_df = market_df.sort_values('match_time')
+                
+                # Track running cost basis and inventory for each outcome
+                outcome_inventory = {}
+                outcome_cost_basis = {}
+                outcome_realized_pl = {}
+                outcome_data_dict = {}  # Dictionary to store price and other data for each outcome
+                
+                # Initialize for tracking by outcome
+                for outcome in market_df['outcome'].unique():
+                    outcome_inventory[outcome] = 0
+                    outcome_cost_basis[outcome] = 0
+                    outcome_realized_pl[outcome] = 0
+                    outcome_data_dict[outcome] = {'current_price': 0}  # Initialize with current price
+                
+                # Process each trade to update cost basis and calculate P&L
+                for idx, row in market_df.iterrows():
+                    outcome = row['outcome']
+                    size = float(row['size'])
+                    price = float(row['price'])
+                    dollar_value = price * size
+                    
+                    # Update the current price for this outcome
+                    outcome_data_dict[outcome]['current_price'] = price
+                    
+                    if row['my_side'] == 'BUY':
+                        # For buys, add to inventory and cost basis
+                        new_size = outcome_inventory[outcome] + size
+                        new_cost = outcome_cost_basis[outcome] + dollar_value
+                        
+                        # Update average cost basis
+                        outcome_inventory[outcome] = new_size
+                        outcome_cost_basis[outcome] = new_cost
+                        
+                        # Update the row with the average cost basis
+                        df.at[idx, 'avg_cost_basis'] = new_cost / new_size if new_size > 0 else 0
+                        
+                    else:  # SELL
+                        if outcome_inventory[outcome] > 0:
+                            # Calculate average cost basis per share
+                            avg_cost_per_share = outcome_cost_basis[outcome] / outcome_inventory[outcome] if outcome_inventory[outcome] > 0 else 0
+                            
+                            # Calculate realized P&L for this trade
+                            realized_pl = (price - avg_cost_per_share) * size
+                            
+                            # Update realized P&L
+                            outcome_realized_pl[outcome] += realized_pl
+                            
+                            # Reduce inventory and cost basis proportionally
+                            if size <= outcome_inventory[outcome]:
+                                cost_reduction = (size / outcome_inventory[outcome]) * outcome_cost_basis[outcome]
+                                outcome_inventory[outcome] -= size
+                                outcome_cost_basis[outcome] -= cost_reduction
+                            else:
+                                # Selling more than we have (e.g., going short)
+                                outcome_inventory[outcome] = -size + outcome_inventory[outcome]
+                                outcome_cost_basis[outcome] = 0  # Reset cost basis when going short
+                            
+                            # Update the row with realized P&L
+                            df.at[idx, 'gain_loss_usd'] = realized_pl
+                            df.at[idx, 'percent_change'] = (price / avg_cost_per_share - 1) * 100 if avg_cost_per_share > 0 else None
+                            df.at[idx, 'avg_cost_basis'] = avg_cost_per_share
+                
+                # Calculate total gain/loss for this market
+                total_realized_pl = sum(outcome_realized_pl.values())
+                
+                # Calculate unrealized P&L safely
+                unrealized_pl = 0
+                for outcome in outcome_inventory.keys():
+                    # Only calculate for outcomes where we have a position
+                    if outcome_inventory[outcome] > 0:
+                        # Get the latest price safely
+                        current_price = outcome_data_dict[outcome]['current_price']
+                        try:
+                            filtered_df = df[df['market'] == market_id]
+                            outcome_df = filtered_df[filtered_df['outcome'] == outcome]
+                            if not outcome_df.empty:
+                                current_price = float(outcome_df.iloc[-1]['price'])
+                                outcome_data_dict[outcome]['current_price'] = current_price
+                        except (IndexError, TypeError, ValueError) as e:
+                            self.logger.warning(f"Error getting latest price for {outcome}: {e}")
+                        
+                        # Calculate unrealized P&L for this outcome
+                        current_value = current_price * outcome_inventory[outcome]
+                        outcome_unrealized_pl = current_value - outcome_cost_basis[outcome]
+                        unrealized_pl += outcome_unrealized_pl
+                
+                # Store all outcome data in market_gains
+                market_gains[market_id] = {
+                    'realized_pl': total_realized_pl,
+                    'unrealized_pl': unrealized_pl,
+                    'total_pl': total_realized_pl + unrealized_pl,
+                    'by_outcome': {outcome: {
+                        'inventory': outcome_inventory[outcome],
+                        'cost_basis': outcome_cost_basis[outcome],
+                        'realized_pl': outcome_realized_pl[outcome],
+                        'current_price': outcome_data_dict[outcome]['current_price']
+                    } for outcome in outcome_inventory.keys()}
+                }
+            
+            # Store market gains in the class instance for access by other methods
+            self.market_gains = market_gains
+            
+            # Calculate total gain/loss across all markets
+            total_realized_pl = sum([market['realized_pl'] for market in market_gains.values()])
+            total_unrealized_pl = sum([market['unrealized_pl'] for market in market_gains.values()])
+            
+            self.total_gains = {
+                'realized_pl': total_realized_pl,
+                'unrealized_pl': total_unrealized_pl,
+                'total_pl': total_realized_pl + total_unrealized_pl
+            }
+        
+        return df
     
     def calculate_positions(self, df=None):
         """
@@ -918,308 +1057,315 @@ class PolymarketPositionTracker:
         
         table_data = []
         for market_id, market_data in positions['positions'].items():
-            market_name = market_data['name'][:30] + ('...' if len(market_data['name']) > 30 else '')
-            for outcome, position_data in market_data['positions'].items():
-                size = position_data['size']
-                size_formatted = f"{size:.2f}"
-                trades = position_data['trades']
-                table_data.append([market_name, outcome, size_formatted, trades, market_id])
-                
-        # Sort by absolute position size
-        table_data.sort(key=lambda x: abs(float(x[2])), reverse=True)
-        
-        # Create table with market IDs
-        table = table_ax.table(
-            cellText=[[row[0], row[1], row[2], row[3], row[4]] for row in table_data],
-            colLabels=['Market', 'Outcome', 'Size', 'Trades', 'Market ID'],
-            loc='center',
-            cellLoc='center',
-            colWidths=[0.25, 0.1, 0.1, 0.05, 0.45]  # Increase width for Market ID column
-        )
-        
-        # Style table
-        table.auto_set_font_size(False)
-        table.set_fontsize(8)
-        table.scale(1, 1.5)
-        
-        for (i, j), cell in table.get_celld().items():
-            if i == 0:  # Header row
-                cell.set_text_props(weight='bold', color='white')
-                cell.set_facecolor('#444444')
-            elif j == 2:  # Size column
-                size_val = float(table_data[i-1][2])
-                cell.set_facecolor('#004400' if size_val > 0 else '#440000')
-            elif j == 4:  # Market ID column - ensure it's readable
-                cell.set_text_props(fontsize=6)  # Small but readable size for market IDs
-        
-        table_ax.set_title('All Positions with Market IDs', fontsize=14)
-        
-        if save:
-            summary_path = os.path.join(viz_dir, 'position_summary_dashboard.png')
-            plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust to leave room for the title
-            plt.savefig(summary_path, dpi=300, bbox_inches='tight')
-            saved_files['position_summary'] = summary_path
-        
-        if show:
-            plt.show()
-        else:
-            plt.close('all')
-            
-        # Return paths to saved files
-        return saved_files
-        
-    def visualize_market_trades(self, market_id, save=True, show=True):
-        """
-        Visualize trades for a specific market.
-        
-        Args:
-            market_id (str): Market ID to visualize trades for.
-            save (bool): Whether to save visualizations to files.
-            show (bool): Whether to display the visualizations.
-        
-        Returns:
-            dict: Paths to saved visualization files.
-        """
-        if not market_id:
-            self.logger.error("Market ID is required for market trade visualization")
-            return {}
-            
-        # Get trades for this market
-        trades = self.get_trades_by_market(market_id)
-        trades_df = self.trades_to_dataframe(trades)
-        
-        if trades_df.empty:
-            self.logger.warning(f"No trades found for market {market_id}")
-            return {}
-            
-        # Use the trade history visualization with market filter
-        return self.visualize_trade_history(trades_df, market_id=market_id, save=save, show=show)
-    
-    def save_positions_to_file(self, positions=None, filename=None):
-        """
-        Save positions to a JSON file.
-        
-        Args:
-            positions (dict, optional): Position data to save. If None, fetches current positions.
-            filename (str, optional): Custom filename. If None, generates a timestamped filename.
-            
-        Returns:
-            str: Path to the saved file.
-        """
-        if positions is None:
-            positions = self.get_detailed_positions()
-            
-        if filename is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"polymarket_positions_{timestamp}.json"
-            
-        filepath = os.path.join(self.output_dir, filename)
-        
-        try:
-            with open(filepath, 'w') as f:
-                json.dump(positions, f, indent=2)
-                
-            self.logger.info(f"Positions saved to {filepath}")
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Error saving positions to file: {e}")
-            return None
-    
-    def print_positions_summary(self, positions=None):
-        """
-        Print a human-readable summary of current positions.
-        
-        Args:
-            positions (dict, optional): Position data to print. If None, fetches current positions.
-            
-        Returns:
-            str: Formatted summary text.
-        """
-        if positions is None:
-            positions = self.get_detailed_positions()
-            
-        if 'error' in positions:
-            return f"Error: {positions['error']}"
-            
-        # Create summary text
-        lines = [
-            f"POLYMARKET POSITIONS SUMMARY - {positions.get('wallet_address')}",
-            f"Last Updated: {positions.get('last_updated')}",
-            f"Active Markets: {positions.get('total_markets')}",
-            f"Total Trades: {positions.get('total_trades')}",
-            "",
-            "CURRENT POSITIONS:"
-        ]
-        
-        # Add details for each market
-        for market_id, market_data in positions.get('positions', {}).items():
-            market_name = market_data.get('name')
-            
-            # Display market name and ID (avoiding duplication if the market name already contains the ID)
-            if market_name and not market_name.endswith(market_id):
-                lines.append(f"\n{market_name} ({market_id}):")
-            else:
-                lines.append(f"\n{market_name}:")
-            
-            for outcome, position_data in market_data.get('positions', {}).items():
-                size = position_data.get('size', 0)
-                sign = '+' if size > 0 else ''
-                trades_count = position_data.get('trades', 0)
-                lines.append(f"  • {outcome}: {sign}{size:.2f} shares ({trades_count} trades)")
-            
-        summary = "\n".join(lines)
-        print(summary)
-        return summary
-
-    def export_positions_table(self, positions=None, filepath=None):
-        """
-        Export positions data as a formatted table to a CSV file.
-        
-        Args:
-            positions (dict, optional): Position data to export. If None, fetches current positions.
-            filepath (str, optional): Path to save the CSV file. If None, uses a default path.
-            
-        Returns:
-            str: Path to the saved file.
-        """
-        if positions is None:
-            positions = self.get_detailed_positions()
-            
-        if 'error' in positions:
-            self.logger.error(f"Error exporting positions table: {positions['error']}")
-            return None
-            
-        # Create output directory
-        csv_dir = os.path.join(self.output_dir, 'tables')
-        if not os.path.exists(csv_dir):
-            os.makedirs(csv_dir)
-            
-        # Default filepath if not provided
-        if filepath is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filepath = os.path.join(csv_dir, f"positions_table_{timestamp}.csv")
-            
-        # Collect position data
-        table_data = []
-        
-        for market_id, market_data in positions.get('positions', {}).items():
             market_name = market_data.get('name', 'Unknown')
             
+            # Get market gain data if available
+            market_pl_data = self.market_gains.get(market_id, {}) if hasattr(self, 'market_gains') else {}
+            market_realized_pl = market_pl_data.get('realized_pl', 0)
+            market_unrealized_pl = market_pl_data.get('unrealized_pl', 0)
+            
+            # Add summary row for the market
+            table_data.append({
+                'Market ID': market_id,
+                'Market Name': market_name,
+                'Outcome': '[MARKET SUMMARY]',
+                'Position Size': '',
+                'Current Price': '',
+                'Position Value': '',
+                'Cost Basis': '',
+                'Trades': sum(pos.get('trades', 0) for pos in market_data.get('positions', {}).values()),
+                'Realized P&L': market_realized_pl,
+                'Unrealized P&L': market_unrealized_pl,
+                'Total P&L': market_realized_pl + market_unrealized_pl,
+                'ROI (%)': '',
+                'is_summary': True
+            })
+            
+            # Add individual outcome rows
             for outcome, position_data in market_data.get('positions', {}).items():
                 size = position_data.get('size', 0)
                 trades_count = position_data.get('trades', 0)
-                last_trade_time = position_data.get('last_trade_time', '')
                 
-                # Remove timezone info for better CSV compatibility
-                if last_trade_time:
-                    last_trade_time = last_trade_time.split('+')[0].split('Z')[0]
+                # Get outcome-specific P&L data
+                outcome_data = market_pl_data.get('by_outcome', {}).get(outcome, {})
+                cost_basis = outcome_data.get('cost_basis', 0)
+                realized_pl = outcome_data.get('realized_pl', 0)
+                
+                # Calculate current value and unrealized P&L
+                current_price = 0
+                if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                    # Try to get most recent price from trades safely
+                    try:
+                        market_trades = self.get_trades_by_market(market_id)
+                        market_df = self.trades_to_dataframe(market_trades)
+                        if not market_df.empty and 'outcome' in market_df.columns and 'price' in market_df.columns:
+                            outcome_trades = market_df[market_df['outcome'] == outcome]
+                            if not outcome_trades.empty:
+                                current_price = float(outcome_trades.iloc[-1]['price'])
+                    except (IndexError, TypeError, ValueError) as e:
+                        self.logger.warning(f"Error getting current price for {outcome}: {e}")
+                        # Leave current_price as 0 if there's an error
+                
+                current_value = size * current_price
+                unrealized_pl = current_value - cost_basis if size > 0 else 0
+                
+                # Calculate ROI
+                roi = ((realized_pl + unrealized_pl) / cost_basis * 100) if cost_basis > 0 else None
                 
                 table_data.append({
-                    'market_id': market_id,
-                    'market_name': market_name,
-                    'outcome': outcome,
-                    'position_size': size,
-                    'trades_count': trades_count,
-                    'last_trade_time': last_trade_time
+                    'Market ID': "",  # No need to repeat for outcomes
+                    'Market Name': "",  # No need to repeat for outcomes
+                    'Outcome': outcome,
+                    'Position Size': size,
+                    'Current Price': current_price,
+                    'Position Value': current_value,
+                    'Cost Basis': cost_basis,
+                    'Trades': trades_count,
+                    'Realized P&L': realized_pl,
+                    'Unrealized P&L': unrealized_pl,
+                    'Total P&L': realized_pl + unrealized_pl,
+                    'ROI (%)': roi,
+                    'is_summary': False
                 })
                 
         # Convert to DataFrame
         if not table_data:
-            self.logger.warning("No position data to export")
+            print("No position data to export")
             return None
-            
+        
         df = pd.DataFrame(table_data)
         
-        # Sort by absolute position size (descending)
-        df['abs_size'] = df['position_size'].abs()
-        df = df.sort_values('abs_size', ascending=False)
-        df = df.drop(columns=['abs_size'])
+        # Only include non-empty columns
+        df = df.loc[:, df.columns[df.astype(bool).any()]]
         
-        # Save to CSV
-        try:
-            df.to_csv(filepath, index=False)
-            self.logger.info(f"Positions table exported to {filepath}")
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Error saving positions table: {e}")
-            return None
+        # Sort by market name and then by absolute position size (descending)
+        df['sort_key'] = df.apply(lambda row: (row['Market Name'] if row['is_summary'] else '', 
+                                             not row['is_summary'], 
+                                             -abs(float(row['Position Size'].replace('$', '').replace(',', '')) 
+                                                  if isinstance(row['Position Size'], str) and row['Position Size'] 
+                                                  else 0)), axis=1)
+        df = df.sort_values('sort_key')
+        df = df.drop(columns=['sort_key', 'is_summary'])
+        
+        # Generate file path if not provided
+        if file_path is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tables_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output', 'tables')
+            os.makedirs(tables_dir, exist_ok=True)
+            file_path = os.path.join(tables_dir, f"positions_table_{timestamp}.csv")
+        
+        # Export to CSV
+        df.to_csv(file_path, index=False)
+        print(f"Positions table exported to: {file_path}")
+        
+        # Generate summary file
+        if hasattr(self, 'market_gains'):
+            summary_path = file_path.replace('.csv', '_summary.csv')
             
-    def export_trades_by_market(self, trades=None, filepath=None):
+            # Calculate totals
+            total_position_value = sum([row['Position Value'] for row in table_data if pd.notnull(row['Position Value'])])
+            total_realized_pl = sum([market_data.get('realized_pl', 0) for market_data in self.market_gains.values()])
+            total_unrealized_pl = sum([market_data.get('unrealized_pl', 0) for market_data in self.market_gains.values()])
+            total_pl = total_realized_pl + total_unrealized_pl
+            
+            # Calculate overall ROI
+            total_cost = sum([market_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                            for market_id, market_data in self.market_gains.items() 
+                            for outcome in market_data.get('by_outcome', {}).keys()])
+            
+            overall_roi = ((total_realized_pl + total_unrealized_pl) / total_cost) * 100 if total_cost > 0 else None
+            
+            # Create summary DataFrame
+            summary_data = [
+                {'Metric': 'Total Position Value', 'Value': total_position_value},
+                {'Metric': 'Total Realized P&L', 'Value': total_realized_pl},
+                {'Metric': 'Total Unrealized P&L', 'Value': total_unrealized_pl},
+                {'Metric': 'Total P&L', 'Value': total_pl},
+                {'Metric': 'Overall ROI (%)', 'Value': overall_roi}
+            ]
+            
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(summary_path, index=False)
+            print(f"Portfolio summary exported to: {summary_path}")
+        
+        return file_path
+            
+    def export_trades_by_market(self, trades=None, file_path=None):
         """
-        Export historical trades grouped by market IDs to a CSV file.
+        Export historical trades grouped by market IDs to a CSV file with P&L information.
         
         Args:
             trades (list, optional): List of trade data. If None, fetches all trades.
-            filepath (str, optional): Path to save the CSV file. If None, uses a default path.
-            
+            file_path (str, optional): Path to save the CSV file. If None, generates a default path.
+        
         Returns:
-            str: Path to the saved file.
+            str: Path to the saved CSV file.
         """
         # Get trades if not provided
         if trades is None:
             trades = self.get_my_trades()
             
         if not trades:
-            self.logger.warning("No trades to export")
+            print("No trades to export")
             return None
-            
-        # Convert to DataFrame
+        
+        # Convert to DataFrame with P&L calculations
         df = self.trades_to_dataframe(trades)
         
         if df.empty:
-            self.logger.warning("No trade data to export")
+            print("No trade data to export")
             return None
-            
-        # Create output directory
-        csv_dir = os.path.join(self.output_dir, 'tables')
-        if not os.path.exists(csv_dir):
-            os.makedirs(csv_dir)
-            
-        # Default filepath if not provided
-        if filepath is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filepath = os.path.join(csv_dir, f"trades_by_market_{timestamp}.csv")
-            
+        
         # Add market name to the DataFrame
         df['market_name'] = df['market'].apply(self.get_market_name)
         
-        # Format timestamp for better readability
-        if 'match_time' in df.columns:
-            df['match_time_str'] = df['match_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        # Format the DataFrame for export
+        export_df = df.copy()
         
-        # Select and order columns for the export
+        # Format the match_time
+        if 'match_time' in export_df.columns:
+            export_df['time'] = export_df['match_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Select columns for export
         columns = [
-            'market', 'market_name', 'outcome', 'match_time_str', 'price', 'size', 
-            'my_side', 'position_impact', 'is_maker', 'is_taker'
+            'market', 'market_name', 'outcome', 'time', 'price', 'size', 
+            'my_side', 'position_impact', 'gain_loss_usd', 'percent_change', 'avg_cost_basis'
         ]
         
         # Only include columns that exist
-        export_columns = [col for col in columns if col in df.columns]
+        export_columns = [col for col in columns if col in export_df.columns]
         
-        # Add additional columns if they exist
-        for col in df.columns:
-            if col not in export_columns and not col.startswith('match_time'):
-                export_columns.append(col)
-                
-        # Sort by market and timestamp
-        df = df.sort_values(['market', 'match_time'])
+        # Ensure market ID is included
+        if 'market' not in export_columns:
+            export_columns.insert(0, 'market')
+        
+        export_df = export_df[export_columns]
+        
+        # Generate file path if not provided
+        if file_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            tables_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output', 'tables')
+            os.makedirs(tables_dir, exist_ok=True)
+            file_path = os.path.join(tables_dir, f"trades_by_market_{timestamp}.csv")
         
         # Export to CSV
-        try:
-            df[export_columns].to_csv(filepath, index=False)
-            self.logger.info(f"Trades by market exported to {filepath}")
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Error saving trades table: {e}")
-            return None
+        export_df.to_csv(file_path, index=False)
+        print(f"Trades by market exported to: {file_path}")
+        
+        # Generate summary file with P&L by market
+        if hasattr(self, 'market_gains'):
+            summary_path = file_path.replace('.csv', '_summary.csv')
             
-    def display_positions_table(self, positions=None):
+            # Prepare market summary data
+            market_summary = []
+            total_realized_pl = 0
+            total_unrealized_pl = 0
+            
+            for market_id, market_data in self.market_gains.items():
+                market_name = self.get_market_name(market_id)
+                realized_pl = market_data.get('realized_pl', 0)
+                unrealized_pl = market_data.get('unrealized_pl', 0)
+                total_pl = realized_pl + unrealized_pl
+                
+                # Calculate market-level ROI
+                market_cost = sum([data.get('cost_basis', 0) for data in market_data.get('by_outcome', {}).values()])
+                roi = (total_pl / market_cost * 100) if market_cost > 0 else None
+                
+                total_realized_pl += realized_pl
+                total_unrealized_pl += unrealized_pl
+                
+                market_summary.append({
+                    'Market ID': market_id,
+                    'Market Name': market_name,
+                    'Trade Count': len(export_df[export_df['market'] == market_id]),
+                    'Realized P&L': realized_pl,
+                    'Unrealized P&L': unrealized_pl,
+                    'Total P&L': total_pl,
+                    'ROI (%)': roi,
+                    'Cost Basis': market_cost
+                })
+            
+            # Calculate overall totals
+            total_pl = total_realized_pl + total_unrealized_pl
+            total_cost = sum([market_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                            for market_id, market_data in self.market_gains.items() 
+                            for outcome in market_data.get('by_outcome', {}).keys()])
+            
+            overall_roi = (total_pl / total_cost * 100) if total_cost > 0 else None
+            
+            # Add total row
+            market_summary.append({
+                'Market ID': 'TOTAL',
+                'Market Name': 'Portfolio Summary',
+                'Trade Count': len(export_df),
+                'Realized P&L': total_realized_pl,
+                'Unrealized P&L': total_unrealized_pl,
+                'Total P&L': total_pl,
+                'ROI (%)': overall_roi,
+                'Cost Basis': total_cost
+            })
+            
+            # Create summary DataFrame
+            summary_df = pd.DataFrame(market_summary)
+            
+            # Sort by total P&L
+            summary_df = summary_df.sort_values('Total P&L', ascending=False)
+            
+            # Export summary to CSV
+            summary_df.to_csv(summary_path, index=False)
+            print(f"Market P&L summary exported to: {summary_path}")
+            
+            # Generate outcome-level summary
+            outcome_path = file_path.replace('.csv', '_outcomes.csv')
+            
+            # Prepare outcome summary data
+            outcome_summary = []
+            
+            for market_id, market_data in self.market_gains.items():
+                market_name = self.get_market_name(market_id)
+                
+                for outcome, data in market_data.get('by_outcome', {}).items():
+                    inventory = data.get('inventory', 0)
+                    cost_basis = data.get('cost_basis', 0)
+                    realized_pl = data.get('realized_pl', 0)
+                    
+                    # Only include outcomes with non-zero inventory or realized P&L
+                    if inventory != 0 or realized_pl != 0:
+                        avg_cost = cost_basis / inventory if inventory > 0 else 0
+                        
+                        outcome_summary.append({
+                            'Market ID': market_id,
+                            'Market Name': market_name,
+                            'Outcome': outcome,
+                            'Inventory': inventory,
+                            'Avg Cost': avg_cost,
+                            'Cost Basis': cost_basis,
+                            'Realized P&L': realized_pl
+                        })
+            
+            # Create outcome DataFrame
+            if outcome_summary:
+                outcome_df = pd.DataFrame(outcome_summary)
+                
+                # Sort by market ID and then outcome
+                outcome_df = outcome_df.sort_values(['Market ID', 'Outcome'])
+                
+                # Export outcome summary to CSV
+                outcome_df.to_csv(outcome_path, index=False)
+                print(f"Outcome-level summary exported to: {outcome_path}")
+        
+        return file_path
+            
+    def display_positions_table(self, positions=None, save_image=False, filename=None, show_full_references=True):
         """
-        Display positions as a formatted table in the console.
+        Display a table of current positions with P&L information.
         
         Args:
             positions (dict, optional): Position data to display. If None, fetches current positions.
-            
+            save_image (bool): Whether to save the table as an image
+            filename (str, optional): Filename for the saved image. If None, generates a default name.
+            show_full_references (bool): Whether to show full market names and IDs after the table
+        
         Returns:
             pandas.DataFrame: DataFrame with position data.
         """
@@ -1230,32 +1376,119 @@ class PolymarketPositionTracker:
             print(f"Error: {positions['error']}")
             return None
             
-        # Collect position data
+        # Create data for the table
         table_data = []
+        total_position_value = 0
         
-        for market_id, market_data in positions.get('positions', {}).items():
+        # Keep a reference of full names and IDs for later display
+        market_references = {}
+        
+        # Ensure we have a consistent ordering of markets
+        market_ids = list(positions.get('positions', {}).keys())
+        
+        # Generate short IDs for each market
+        market_id_mapping = {
+            market_id: f"M{i+1}" for i, market_id in enumerate(market_ids)
+        }
+        
+        # Process each market in order
+        for market_idx, market_id in enumerate(market_ids):
+            market_data = positions['positions'][market_id]
             market_name = market_data.get('name', 'Unknown')
+            short_id = market_id_mapping[market_id]
             
-            # If the market name already contains or is derived from the ID, don't duplicate it
-            if market_name.endswith(market_id) or market_name.startswith("Market "):
-                display_market_id = ""  # Empty string to avoid duplication
+            # Create a shortened market name
+            # Extract the main part from Elon tweet market names
+            if "Elon tweet" in market_name:
+                short_name = market_name.split("Will Elon tweet")[1].split("times")[0].strip()
             else:
-                display_market_id = market_id
+                # For other markets, just take first 15 chars
+                short_name = market_name[:15] + "..." if len(market_name) > 15 else market_name
             
-            short_market_name = market_name[:60] + '...' if len(market_name) > 60 else market_name
+            # Store full reference for later
+            market_references[short_id] = {
+                'full_id': market_id,
+                'full_name': market_name
+            }
             
+            # Get market gain data if available
+            market_pl_data = self.market_gains.get(market_id, {}) if hasattr(self, 'market_gains') else {}
+            market_realized_pl = market_pl_data.get('realized_pl', 0)
+            market_unrealized_pl = market_pl_data.get('unrealized_pl', 0)
+            market_total_pl = market_realized_pl + market_unrealized_pl
+                
+            # Calculate position value for the market
+            market_position_value = sum(
+                pos.get('size', 0) * 
+                market_pl_data.get('by_outcome', {}).get(outcome, {}).get('current_price', 0) 
+                for outcome, pos in market_data.get('positions', {}).items()
+            )
+
+            # Calculate cost basis for the market
+            market_cost_basis = sum(
+                market_pl_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                for outcome in market_data.get('positions', {}).keys()
+            )
+
+            # Calculate ROI if cost basis is positive
+            market_roi = None
+            if market_cost_basis > 0:
+                market_roi = (market_total_pl / market_cost_basis) * 100
+            
+            # Process outcomes for this market (typically should only be 1 per market)
             for outcome, position_data in market_data.get('positions', {}).items():
                 size = position_data.get('size', 0)
                 trades_count = position_data.get('trades', 0)
+                    
+                # Get outcome-specific P&L data
+                outcome_data = market_pl_data.get('by_outcome', {}).get(outcome, {})
+                cost_basis = outcome_data.get('cost_basis', 0)
+                realized_pl = outcome_data.get('realized_pl', 0)
+                    
+                # Calculate current value and unrealized P&L
+                current_price = 0
+                if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                    # Try to get current price from outcome_data first
+                    if 'current_price' in outcome_data:
+                        current_price = outcome_data.get('current_price', 0)
+                    else:
+                        # Try to get most recent price from trades safely
+                        try:
+                            market_trades = self.get_trades_by_market(market_id)
+                            market_df = self.trades_to_dataframe(market_trades)
+                            if not market_df.empty and 'outcome' in market_df.columns and 'price' in market_df.columns:
+                                outcome_trades = market_df[market_df['outcome'] == outcome]
+                                if not outcome_trades.empty:
+                                    current_price = float(outcome_trades.iloc[-1]['price'])
+                        except (IndexError, TypeError, ValueError) as e:
+                            self.logger.warning(f"Error getting current price for {outcome}: {e}")
+                            # Leave current_price as 0 if there's an error
+                    
+                current_value = size * current_price
+                unrealized_pl = current_value - cost_basis if size > 0 else 0
+                    
+                # Calculate ROI
+                roi = ((realized_pl + unrealized_pl) / cost_basis * 100) if cost_basis > 0 else None
+                    
+                total_position_value += current_value
                 
+                # Add a single row with market and outcome info combined
                 table_data.append({
-                    'Market ID': display_market_id,
-                    'Market Name': short_market_name,
+                    'Market ID': short_id,
+                    'Market Name': short_name,
                     'Outcome': outcome,
                     'Position Size': size,
-                    'Trades': trades_count
+                    'Current Price': current_price,
+                    'Position Value': current_value,
+                    'Cost Basis': cost_basis,
+                    'Trades': trades_count,
+                    'Realized P&L': realized_pl,
+                    'Unrealized P&L': unrealized_pl,
+                    'Total P&L': realized_pl + unrealized_pl,
+                    'ROI (%)': roi,
+                    'market_sort': market_idx
                 })
-                
+                    
         # Convert to DataFrame
         if not table_data:
             print("No position data to display")
@@ -1263,30 +1496,402 @@ class PolymarketPositionTracker:
             
         df = pd.DataFrame(table_data)
         
+        # Remove any potential duplicate rows (should not happen with our logic, but just to be safe)
+        df = df.drop_duplicates()
+            
         # Only include non-empty columns
         df = df.loc[:, df.columns[df.astype(bool).any()]]
         
-        # Sort by absolute position size (descending)
-        df['abs_size'] = df['Position Size'].abs()
-        df = df.sort_values('abs_size', ascending=False)
-        df = df.drop(columns=['abs_size'])
+        # Sort by market order
+        df = df.sort_values(by=['market_sort'], ascending=[True])
         
-        # Format the table
+        # Ensure consistent column order
+        desired_columns = [
+            'Market ID', 'Market Name', 'Outcome', 'Position Size', 'Current Price', 
+            'Position Value', 'Cost Basis', 'Trades', 'Realized P&L', 
+            'Unrealized P&L', 'Total P&L', 'ROI (%)'
+        ]
+        
+        # Get columns that exist in both the DataFrame and desired_columns
+        ordered_columns = [col for col in desired_columns if col in df.columns]
+        
+        # Add any remaining columns not in desired_columns (excluding our internal columns)
+        excluded_cols = ['market_sort']
+        remaining_cols = [col for col in df.columns if col not in desired_columns and col not in excluded_cols]
+        ordered_columns.extend(remaining_cols)
+        
+        # Reorder columns
+        if ordered_columns:
+            df = df[ordered_columns]
+        
+        # Format numeric columns for display
+        format_columns = {
+            'Position Size': lambda x: f"{float(x):.2f}" if pd.notnull(x) and x != '' else "",
+            'Current Price': lambda x: f"${float(x):.4f}" if pd.notnull(x) and x != '' else "",
+            'Position Value': lambda x: f"${float(x):.2f}" if pd.notnull(x) and x != '' else "",
+            'Cost Basis': lambda x: f"${float(x):.2f}" if pd.notnull(x) and x != '' else "",
+            'Realized P&L': lambda x: f"${float(x):.2f}" if pd.notnull(x) else "$0.00",
+            'Unrealized P&L': lambda x: f"${float(x):.2f}" if pd.notnull(x) else "$0.00",
+            'Total P&L': lambda x: f"${float(x):.2f}" if pd.notnull(x) else "$0.00",
+            'ROI (%)': lambda x: f"{float(x):+.2f}%" if pd.notnull(x) else ""
+        }
+            
+        # Apply formatting
+        for col, formatter in format_columns.items():
+            if col in df.columns:
+                df[col] = df[col].apply(formatter)
+            
+        # Drop temporary columns
+        df = df.drop(columns=['market_sort'], errors='ignore')
+            
+        # Set up display options for a cleaner output
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', None)
         pd.set_option('display.expand_frame_repr', False)
+            
+        # Print header
+        print("\nCURRENT POSITIONS TABLE:")
+            
+        # Print the table with clean formatting to avoid duplicate rows
+        print(df.to_string(index=False))
+            
+        # Print summary
+        active_positions = len(df)
+        print(f"\nTotal positions: {active_positions}")
+            
+        # Calculate total values for P&L summary
+        if hasattr(self, 'total_gains'):
+            total_realized_pl = self.total_gains.get('realized_pl', 0)
+            total_unrealized_pl = self.total_gains.get('unrealized_pl', 0)
+            total_pl = total_realized_pl + total_unrealized_pl
+                
+            # Calculate overall ROI
+            total_cost = sum([market_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                              for market_id, market_data in self.market_gains.items() 
+                              for outcome in market_data.get('by_outcome', {}).keys()])
+                
+            # Print portfolio summary
+            print("\nPORTFOLIO SUMMARY:")
+            print(f"  Total Position Value: ${total_position_value:.2f}")
+            print(f"  Total Realized P&L: ${total_realized_pl:.2f}")
+            print(f"  Total Unrealized P&L: ${total_unrealized_pl:.2f}")
+            print(f"  Total P&L: ${total_pl:.2f}")
+                
+            if total_cost > 0:
+                overall_roi = (total_pl / total_cost) * 100
+                print(f"  Overall ROI: {overall_roi:+.2f}%")
         
-        # Print the table
-        print("\nCURRENT POSITIONS TABLE:\n")
-        print(df)
-        print(f"\nTotal positions: {len(df)}")
+        # Print market reference guide if requested
+        if show_full_references and market_references:
+            print("\nMARKET REFERENCE GUIDE:")
+            for short_id, ref_data in sorted(market_references.items()):
+                print(f"  {short_id}: {ref_data['full_name']}")
+                print(f"     ID: {ref_data['full_id']}")
+        
+        # Save image if requested
+        if save_image:
+            try:
+                import matplotlib.pyplot as plt
+                from matplotlib.table import Table
+                
+                # Create a figure and axis with the right size
+                num_rows = len(df) + 3  # Add some extra rows for headers and padding
+                fig_height = max(6, num_rows * 0.4)  # Adjust height based on number of rows
+                fig, ax = plt.subplots(figsize=(15, fig_height))
+                
+                # Hide the axis
+                ax.axis('off')
+                ax.axis('tight')
+                
+                # Create a table with the DataFrame data
+                table = ax.table(
+                    cellText=df.values,
+                    colLabels=df.columns,
+                    loc='center',
+                    cellLoc='center',
+                    colColours=['#f2f2f2'] * len(df.columns),
+                    colWidths=[0.1] * len(df.columns)
+                )
+                
+                # Style the table
+                table.auto_set_font_size(False)
+                table.set_fontsize(9)
+                table.scale(1, 1.5)
+                
+                # Add a title
+                plt.title("Polymarket Position Table", fontsize=16, pad=20)
+                
+                # Add timestamp and portfolio summary at the bottom
+                summary_text = f"Total P&L: ${total_pl:.2f} | ROI: {overall_roi:+.2f}% | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                fig.text(0.5, 0.01, summary_text, ha='center', fontsize=10)
+                
+                # Generate filename if not provided
+                if filename is None:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    tables_dir = os.path.join(self.output_dir, 'tables')
+                    os.makedirs(tables_dir, exist_ok=True)
+                    filename = os.path.join(tables_dir, f"positions_table_{timestamp}.png")
+                
+                # Save the figure
+                plt.tight_layout()
+                plt.savefig(filename, dpi=150, bbox_inches='tight')
+                plt.close()
+                
+                print(f"\nPosition table image saved to: {filename}")
+                
+            except ImportError:
+                print("\nCould not save image. Matplotlib is required to save tables as images.")
+            except Exception as e:
+                print(f"\nError saving table image: {e}")
         
         return df
+
+    def clear_market_cache(self):
+        """
+        Clear the cached market information.
         
+        This can be useful when market information has been updated and you want to fetch fresh data.
+        
+        Returns:
+            int: Number of cleared cache entries.
+        """
+        cache_size = len(self.market_info_cache)
+        self.market_info_cache = {}
+        self.logger.info(f"Cleared market cache ({cache_size} entries)")
+        return cache_size 
+
+    def get_positions_summary(self):
+        """
+        Get a simplified summary of current positions.
+        
+        This method provides a simpler overview compared to get_detailed_positions().
+        
+        Returns:
+            dict: Dictionary with simplified position information.
+        """
+        # First get detailed positions
+        detailed = self.get_detailed_positions()
+        
+        if 'error' in detailed:
+            return detailed
+        
+        # Ensure we have P&L data calculated
+        if not hasattr(self, 'market_gains'):
+            trades = self.get_my_trades()
+            self.trades_to_dataframe(trades)  # This will populate market_gains
+        
+        # Extract just what we need for a summary
+        summary = {
+            'wallet_address': detailed.get('wallet_address', self.wallet_address),
+            'total_markets': detailed.get('total_markets', 0),
+            'total_trades': detailed.get('total_trades', 0),
+            'positions': {},
+            'last_updated': detailed.get('last_updated', datetime.now().isoformat())
+        }
+        
+        # Calculate total portfolio metrics
+        total_position_value = 0
+        total_realized_pl = 0
+        total_unrealized_pl = 0
+        
+        if hasattr(self, 'market_gains'):
+            for market_id, market_data in self.market_gains.items():
+                total_realized_pl += market_data.get('realized_pl', 0)
+                total_unrealized_pl += market_data.get('unrealized_pl', 0)
+        
+        # Include P&L metrics in the summary
+        summary['pl_metrics'] = {
+            'total_realized_pl': total_realized_pl,
+            'total_unrealized_pl': total_unrealized_pl,
+            'total_pl': total_realized_pl + total_unrealized_pl
+        }
+        
+        # Only include markets with active positions
+        for market_id, market_data in detailed.get('positions', {}).items():
+            # Get P&L data for this market if available
+            market_pl = {}
+            if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                market_pl = {
+                    'realized_pl': self.market_gains[market_id].get('realized_pl', 0),
+                    'unrealized_pl': self.market_gains[market_id].get('unrealized_pl', 0),
+                    'total_pl': self.market_gains[market_id].get('realized_pl', 0) + self.market_gains[market_id].get('unrealized_pl', 0)
+                }
+            
+            # Add to summary
+            summary['positions'][market_id] = {
+                'name': market_data.get('name', ''),
+                'positions': market_data.get('positions', {}),
+                'total_trades': market_data.get('total_trades', 0),
+                'pl_metrics': market_pl
+            }
+            
+            # Calculate position value for this market
+            market_position_value = 0
+            for outcome, pos_data in market_data.get('positions', {}).items():
+                size = pos_data.get('size', 0)
+                # Try to get price from most recent trade safely
+                current_price = 0
+                if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                    try:
+                        outcome_data = self.market_gains[market_id].get('by_outcome', {}).get(outcome, {})
+                        if outcome_data and 'current_price' in outcome_data:
+                            current_price = outcome_data.get('current_price', 0)
+                        else:
+                            # Try to get price from recent trades
+                            market_trades = self.get_trades_by_market(market_id)
+                            market_df = self.trades_to_dataframe(market_trades)
+                            if not market_df.empty and 'outcome' in market_df.columns and 'price' in market_df.columns:
+                                outcome_trades = market_df[market_df['outcome'] == outcome]
+                                if not outcome_trades.empty:
+                                    current_price = float(outcome_trades.iloc[-1]['price'])
+                    except (IndexError, TypeError, ValueError) as e:
+                        self.logger.warning(f"Error getting current price for {outcome}: {e}")
+                        # Leave current_price as 0 if there's an error
+                
+                market_position_value += size * current_price
+            
+            summary['positions'][market_id]['position_value'] = market_position_value
+            total_position_value += market_position_value
+        
+        summary['total_position_value'] = total_position_value
+        
+        return summary 
+
+    def export_positions(self, positions=None, filename=None):
+        """
+        Export positions to a JSON file (alias for save_positions_to_file).
+        
+        Args:
+            positions (dict, optional): Position data to save. If None, fetches current positions.
+            filename (str, optional): Custom filename. If None, generates a timestamped filename.
+            
+        Returns:
+            str: Path to the saved file.
+        """
+        return self.save_positions_to_file(positions, filename) 
+
+    def print_detailed_positions(self, positions=None):
+        """
+        Print a detailed view of positions with P&L information.
+        
+        Args:
+            positions (dict, optional): Position data to print. If None, fetches current positions.
+            
+        Returns:
+            str: Formatted detailed positions text.
+        """
+        if positions is None:
+            positions = self.get_detailed_positions()
+            
+        if 'error' in positions:
+            print(f"Error: {positions['error']}")
+            return None
+        
+        # Ensure P&L data is available
+        if not hasattr(self, 'market_gains'):
+            trades = self.get_my_trades()
+            self.trades_to_dataframe(trades)
+        
+        # Create detailed output
+        lines = [
+            f"DETAILED POLYMARKET POSITIONS - {positions.get('wallet_address')}",
+            f"Last Updated: {positions.get('last_updated')}",
+            f"Active Markets: {positions.get('total_markets')}",
+            f"Total Trades: {positions.get('total_trades')}",
+            ""
+        ]
+        
+        # Add portfolio summary if P&L data is available
+        if hasattr(self, 'total_gains'):
+            total_realized_pl = self.total_gains.get('realized_pl', 0)
+            total_unrealized_pl = self.total_gains.get('unrealized_pl', 0)
+            total_pl = self.total_gains.get('total_pl', 0)
+            
+            lines.extend([
+                "PORTFOLIO P&L SUMMARY:",
+                f"  Realized P&L: ${total_realized_pl:.2f}",
+                f"  Unrealized P&L: ${total_unrealized_pl:.2f}",
+                f"  Total P&L: ${total_pl:.2f}",
+                ""
+            ])
+            
+            # Calculate ROI if we have total cost basis
+            total_cost = sum([market_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                            for market_id, market_data in self.market_gains.items() 
+                            for outcome in market_data.get('by_outcome', {}).keys()])
+            
+            if total_cost > 0:
+                roi = (total_pl / total_cost) * 100
+                lines.append(f"  ROI: {roi:+.2f}%\n")
+        
+        # Add details for each market
+        lines.append("CURRENT POSITIONS BY MARKET:")
+        
+        for market_id, market_data in positions.get('positions', {}).items():
+            market_name = market_data.get('name')
+            
+            # Display market name and ID
+            if market_name and not market_name.endswith(market_id):
+                lines.append(f"\n{market_name} ({market_id}):")
+            else:
+                lines.append(f"\n{market_name}:")
+            
+            # Add market P&L summary if available
+            if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                market_pl = self.market_gains[market_id]
+                realized_pl = market_pl.get('realized_pl', 0)
+                unrealized_pl = market_pl.get('unrealized_pl', 0)
+                total_pl = realized_pl + unrealized_pl
+                
+                lines.append(f"  Market P&L Summary:")
+                lines.append(f"    Realized: ${realized_pl:.2f}")
+                lines.append(f"    Unrealized: ${unrealized_pl:.2f}")
+                lines.append(f"    Total: ${total_pl:.2f}")
+                
+                # Calculate market ROI
+                market_cost = sum([data.get('cost_basis', 0) for data in market_pl.get('by_outcome', {}).values()])
+                if market_cost > 0:
+                    market_roi = (total_pl / market_cost) * 100
+                    lines.append(f"    ROI: {market_roi:+.2f}%")
+                
+                lines.append("")
+            
+            # Add position details
+            lines.append("  Current Positions:")
+            
+            for outcome, position_data in market_data.get('positions', {}).items():
+                size = position_data.get('size', 0)
+                sign = '+' if size > 0 else ''
+                trades_count = position_data.get('trades', 0)
+                
+                position_line = f"    • {outcome}: {sign}{size:.2f} shares ({trades_count} trades)"
+                
+                # Add P&L details for this outcome
+                if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                    outcome_data = self.market_gains[market_id].get('by_outcome', {}).get(outcome, {})
+                    if outcome_data:
+                        realized_pl = outcome_data.get('realized_pl', 0)
+                        cost_basis = outcome_data.get('cost_basis', 0)
+                        
+                        if size > 0 and cost_basis > 0:
+                            avg_cost = cost_basis / size
+                            position_line += f" | Avg Cost: ${avg_cost:.4f}"
+                        
+                        if realized_pl != 0:
+                            position_line += f" | Realized P&L: ${realized_pl:.2f}"
+                
+                lines.append(position_line)
+            
+            lines.append("")  # Blank line after each market
+        
+        detailed_text = "\n".join(lines)
+        print(detailed_text)
+        return detailed_text 
+
     def display_trades_by_market(self, trades=None):
         """
-        Display historical trades grouped by market IDs in the console.
+        Display historical trades grouped by market IDs with profit/loss information.
         
         Args:
             trades (list, optional): List of trade data. If None, fetches all trades.
@@ -1302,7 +1907,7 @@ class PolymarketPositionTracker:
             print("No trades to display")
             return None
             
-        # Convert to DataFrame
+        # Convert to DataFrame with P&L calculations
         df = self.trades_to_dataframe(trades)
         
         if df.empty:
@@ -1312,63 +1917,131 @@ class PolymarketPositionTracker:
         # Add market name to the DataFrame
         df['market_name'] = df['market'].apply(self.get_market_name)
         
-        # Format the DataFrame for display
-        display_df = df.copy()
+        # Format the match_time
+        if 'match_time' in df.columns:
+            df['time'] = df['match_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
         
-        # Format match_time
-        if 'match_time' in display_df.columns:
-            display_df['Time'] = display_df['match_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-        # Format market ID and name - don't truncate market ID
-        display_df['Market ID'] = display_df['market']
-        display_df['Market Name'] = display_df['market_name'].apply(lambda x: x[:40] + '...' if len(x) > 40 else x)
+        # Format P&L columns
+        for col in ['gain_loss_usd', 'percent_change', 'avg_cost_basis']:
+            if col in df.columns:
+                if col == 'percent_change':
+                    # Filter out None values before formatting
+                    mask = df[col].notnull()
+                    df.loc[mask, col] = df.loc[mask, col].apply(lambda x: f"{x:+.2f}%" if pd.notnull(x) else "")
+                elif col == 'gain_loss_usd':
+                    df[col] = df[col].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else "")
+                elif col == 'avg_cost_basis':
+                    df[col] = df[col].apply(lambda x: f"${x:.4f}" if pd.notnull(x) else "")
         
-        # Select columns for display
+        # Select columns for display - ensure market ID is not truncated
         columns = [
-            'Market ID', 'Market Name', 'outcome', 'Time', 'price', 'size', 
-            'my_side', 'position_impact'
+            'market', 'outcome', 'time', 'price', 'size', 'my_side', 
+            'gain_loss_usd', 'percent_change', 'avg_cost_basis'
         ]
         
-        # Rename columns
-        column_mapping = {
-            'outcome': 'Outcome',
-            'price': 'Price',
-            'size': 'Size',
-            'my_side': 'Side',
-            'position_impact': 'Impact'
-        }
-        
-        for old, new in column_mapping.items():
-            if old in display_df.columns:
-                display_df[new] = display_df[old]
-                
         # Only include columns that exist
-        display_columns = [col for col in columns if col in display_df.columns]
+        display_columns = [col for col in columns if col in df.columns]
         
-        # Format the table
-        pd.set_option('display.max_rows', None)
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.width', None)
-        pd.set_option('display.expand_frame_repr', False)
+        # Print overview
+        unique_markets = df['market'].nunique()
+        total_trades = len(df)
+        print(f"\nTRADES BY MARKET (Total: {total_trades} trades across {unique_markets} markets):\n")
         
-        # Group by market and display
-        markets = display_df['Market ID'].unique()
+        # Track overall P&L for summary
+        total_realized_pl = 0
+        total_unrealized_pl = 0
         
-        print(f"\nTRADES BY MARKET (Total: {len(df)} trades across {len(markets)} markets):\n")
-        
-        for market_id in markets:
-            market_df = display_df[display_df['Market ID'] == market_id]
-            market_name = market_df['Market Name'].iloc[0]
+        # Loop through each unique market and display trades
+        for market_id in df['market'].unique():
+            market_df = df[df['market'] == market_id].copy()
+            market_name = market_df['market_name'].iloc[0]
             
-            # Format the header to avoid duplicate market IDs
-            if market_name.endswith(market_id) or market_name.startswith("Market "):
-                print(f"\n--- Market: {market_name} ---")
-            else:
-                print(f"\n--- Market: {market_name} ({market_id}) ---")
+            # Display market header with full ID
+            print(f"\n--- Market: {market_name} ({market_id}) ---")
             
-            # Don't display the Market ID column since it's already in the header
-            display_cols = [col for col in display_columns if col != 'Market ID']
-            print(market_df[display_cols].sort_values('Time'))
-            print(f"Total: {len(market_df)} trades\n")
+            # Create a formatted table for this market's trades
+            display_df = market_df[display_columns].copy()
             
-        return df 
+            # Format price as currency
+            if 'price' in display_df.columns:
+                display_df['price'] = display_df['price'].apply(lambda x: f"${float(x):.4f}" if pd.notnull(x) else "")
+            
+            # Format size as number
+            if 'size' in display_df.columns:
+                display_df['size'] = display_df['size'].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "")
+            
+            # Rename columns for display
+            column_renames = {
+                'my_side': 'Side',
+                'position_impact': 'Impact',
+                'gain_loss_usd': 'P&L ($)',
+                'percent_change': 'P&L (%)',
+                'avg_cost_basis': 'Avg Cost',
+                'time': 'Time',
+                'outcome': 'Outcome',
+                'price': 'Price',
+                'size': 'Size'
+            }
+            
+            # Only rename columns that exist
+            rename_dict = {col: new_name for col, new_name in column_renames.items() 
+                          if col in display_df.columns}
+            
+            display_df = display_df.rename(columns=rename_dict)
+            
+            # For cleaner display, don't show the market ID in each row
+            if 'market' in display_df.columns:
+                display_df = display_df.drop(columns=['market'])
+            
+            # Sort by time
+            if 'Time' in display_df.columns:
+                display_df = display_df.sort_values('Time')
+            
+            # Print the table
+            pd.set_option('display.max_rows', None)
+            pd.set_option('display.max_columns', None)
+            pd.set_option('display.width', None)
+            pd.set_option('display.expand_frame_repr', False)
+            
+            print(display_df.to_string(index=False))
+            
+            # Get market P&L metrics if available
+            if hasattr(self, 'market_gains') and market_id in self.market_gains:
+                market_pl = self.market_gains[market_id]
+                market_realized_pl = market_pl.get('realized_pl', 0)
+                market_unrealized_pl = market_pl.get('unrealized_pl', 0)
+                total_market_pl = market_realized_pl + market_unrealized_pl
+                
+                # Update totals for overall summary
+                total_realized_pl += market_realized_pl
+                total_unrealized_pl += market_unrealized_pl
+                
+                # Print market P&L summary
+                print("\nMarket P&L Summary:")
+                print(f"  Realized P&L: ${market_realized_pl:.2f}")
+                print(f"  Unrealized P&L: ${market_unrealized_pl:.2f}")
+                print(f"  Total P&L: ${total_market_pl:.2f}")
+                
+                # Calculate and display ROI if possible
+                market_cost = sum([data.get('cost_basis', 0) for data in market_pl.get('by_outcome', {}).values()])
+                if market_cost > 0:
+                    market_roi = (total_market_pl / market_cost) * 100
+                    print(f"  ROI: {market_roi:+.2f}%")
+        
+        # Print overall portfolio P&L summary
+        print("\nOVERALL PORTFOLIO P&L SUMMARY:")
+        print(f"  Realized P&L: ${total_realized_pl:.2f}")
+        print(f"  Unrealized P&L: ${total_unrealized_pl:.2f}")
+        print(f"  Total P&L: ${total_realized_pl + total_unrealized_pl:.2f}")
+        
+        # Calculate overall ROI
+        if hasattr(self, 'market_gains'):
+            total_cost = sum([market_data.get('by_outcome', {}).get(outcome, {}).get('cost_basis', 0) 
+                              for market_id, market_data in self.market_gains.items() 
+                              for outcome in market_data.get('by_outcome', {}).keys()])
+            
+            if total_cost > 0:
+                overall_roi = ((total_realized_pl + total_unrealized_pl) / total_cost) * 100
+                print(f"  ROI: {overall_roi:+.2f}%")
+        
+        return df

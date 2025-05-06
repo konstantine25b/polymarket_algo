@@ -1,254 +1,178 @@
-#!/usr/bin/env python
-import os
+#!/usr/bin/env python3
+"""
+Command-line interface for the Polymarket position tracker with profit/loss calculations.
+"""
+
 import argparse
-import logging
+import os
 import sys
+import logging
 from datetime import datetime
-from .position_tracker import PolymarketPositionTracker
-import pandas as pd
+
+from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description='Track and analyze your Polymarket positions based on trade history.'
-    )
+    parser = argparse.ArgumentParser(description='Track and analyze Polymarket positions with profit/loss calculations')
     
-    parser.add_argument('--market', '-m', type=str, 
-                        help='Filter positions by specific market ID')
-    parser.add_argument('--output', '-o', type=str, default='output',
-                        help='Directory to save output files (default: output)')
-    parser.add_argument('--save', '-s', action='store_true',
-                        help='Save results to a JSON file')
-    parser.add_argument('--filename', '-f', type=str,
-                        help='Custom filename for saved results (implies --save)')
-    parser.add_argument('--key', '-k', type=str,
-                        help='Wallet private key (if not set in .env)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Enable verbose logging')
+    # Position and trade information
+    parser.add_argument('--positions', action='store_true', help='Display basic position summary')
+    parser.add_argument('--detailed', action='store_true', help='Display detailed position information')
+    parser.add_argument('--positions-table', action='store_true', help='Display current positions as a formatted table with P&L info')
+    parser.add_argument('--save-table-image', action='store_true', help='Save the positions table as an image')
+    parser.add_argument('--table-image-path', type=str, help='Path for the saved table image')
+    parser.add_argument('--trades-table', action='store_true', help='Display all trades grouped by market as tables with P&L metrics')
+    parser.add_argument('--market-trades', type=str, metavar='MARKET_ID', help='Display trades for a specific market')
     
-    # Table Options
-    table_group = parser.add_argument_group('Table Options')
-    table_group.add_argument('--positions-table', action='store_true',
-                        help='Display current positions as a formatted table')
-    table_group.add_argument('--trades-table', action='store_true',
-                        help='Display all trades grouped by market as tables')
-    table_group.add_argument('--export-positions-csv', action='store_true',
-                        help='Export positions to a CSV file')
-    table_group.add_argument('--export-trades-csv', action='store_true',
-                        help='Export trades by market to a CSV file')
-    table_group.add_argument('--csv-dir', type=str,
-                        help='Directory to save CSV files (default: output/tables)')
+    # Visualization options
+    parser.add_argument('--visualize', action='store_true', help='Generate all visualizations')
+    parser.add_argument('--positions-chart', action='store_true', help='Generate position visualization charts')
+    parser.add_argument('--trade-history', action='store_true', help='Generate trade history visualization')
+    parser.add_argument('--market-chart', type=str, metavar='MARKET_ID', help='Generate trade chart for a specific market')
+    parser.add_argument('--show-plots', action='store_true', help='Show visualization plots interactively')
     
-    # Visualization Options
-    viz_group = parser.add_argument_group('Visualization Options')
-    viz_group.add_argument('--visualize', '-viz', action='store_true',
-                        help='Generate all visualizations of position data and trade history')
-    viz_group.add_argument('--show-plots', action='store_true',
-                        help='Display visualization plots interactively')
-    viz_group.add_argument('--positions-chart', action='store_true',
-                        help='Generate a bubble chart visualization of current positions')
-    viz_group.add_argument('--trade-history', action='store_true',
-                        help='Visualize your complete trade history')
-    viz_group.add_argument('--market-trades', type=str, metavar='MARKET_ID',
-                        help='Visualize trades for a specific market')
+    # Export options
+    parser.add_argument('--export-positions', action='store_true', help='Export positions to JSON')
+    parser.add_argument('--export-positions-csv', action='store_true', help='Export positions to CSV with P&L information')
+    parser.add_argument('--export-trades-csv', action='store_true', help='Export trades by market to CSV with P&L metrics')
+    parser.add_argument('--csv-dir', type=str, help='Directory to save CSV files')
+    
+    # Advanced configuration
+    parser.add_argument('--config', type=str, help='Path to configuration file')
+    parser.add_argument('--output-dir', type=str, help='Output directory for generated files')
+    parser.add_argument('--clear-cache', action='store_true', help='Clear cached market data')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
     
     return parser.parse_args()
 
 def main():
-    """Main function to run the CLI."""
+    """Main entry point for the CLI."""
     args = parse_args()
     
-    # Set up logging
+    # Configure logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     
-    # Configure pandas to display full data
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', None)
-    pd.set_option('display.max_colwidth', None)  # Add this to show full market IDs
-    pd.set_option('display.expand_frame_repr', False)
+    # Initialize the position tracker
+    output_dir = args.output_dir if args.output_dir else None
+    tracker = PolymarketPositionTracker(
+        output_dir=output_dir,
+        log_level=log_level
+    )
     
-    try:
-        print("Connecting to Polymarket...")
-        
-        # Initialize the position tracker
-        tracker = PolymarketPositionTracker(
-            output_dir=args.output,
-            log_level=log_level,
-            key=args.key
-        )
-        
-        # Get position data
-        if args.market:
-            print(f"Analyzing positions for market: {args.market}")
-            trades = tracker.get_trades_by_market(args.market)
-            if not trades:
-                print("No trades found for this market ID.")
-                return 0
+    if args.clear_cache and hasattr(tracker, 'clear_market_cache'):
+        tracker.clear_market_cache()
+        print("Market cache cleared.")
+    
+    # Display position summaries if requested
+    if args.positions or (not any([args.detailed, args.positions_table, args.trades_table, args.market_trades, 
+                                  args.visualize, args.positions_chart, args.trade_history, args.market_chart,
+                                  args.export_positions, args.export_positions_csv, args.export_trades_csv,
+                                  args.save_table_image])):
+        print("\nPOSITION SUMMARY (with P&L calculations):")
+        positions = tracker.get_positions_summary()
+        tracker.print_positions_summary(positions)
+    
+    if args.detailed:
+        print("\nDETAILED POSITIONS:")
+        positions = tracker.get_detailed_positions()
+        tracker.print_detailed_positions(positions)
+    
+    if args.positions_table or args.save_table_image:
+        save_image = args.save_table_image
+        image_path = args.table_image_path if args.table_image_path else None
+        tracker.display_positions_table(save_image=save_image, filename=image_path)
+    
+    if args.trades_table:
+        tracker.display_trades_by_market()
+    
+    if args.market_trades:
+        market_id = args.market_trades
+        trades = tracker.get_trades_by_market(market_id)
+        print(f"\nTRADES FOR MARKET: {tracker.get_market_name(market_id)} ({market_id})")
+        if trades:
+            market_trades_df = tracker.trades_to_dataframe(trades)
+            if not market_trades_df.empty:
+                market_pl_data = tracker.market_gains.get(market_id, {}) if hasattr(tracker, 'market_gains') else {}
+                print(market_trades_df[['outcome', 'match_time', 'price', 'size', 'my_side', 'position_impact', 'gain_loss_usd', 'percent_change']])
                 
-            df = tracker.trades_to_dataframe(trades)
-            positions = tracker.calculate_positions(df)
-            result = {
-                'wallet_address': tracker.wallet_address,
-                'market_id': args.market,
-                'total_trades': len(trades),
-                'positions': positions,
-                'last_updated': datetime.now().isoformat()
-            }
+                # Display market P&L summary
+                if market_pl_data:
+                    realized_pl = market_pl_data.get('realized_pl', 0)
+                    unrealized_pl = market_pl_data.get('unrealized_pl', 0)
+                    print(f"\nMarket P&L Summary:")
+                    print(f"  Realized P&L: ${realized_pl:.2f}")
+                    print(f"  Unrealized P&L: ${unrealized_pl:.2f}")
+                    print(f"  Total P&L: ${realized_pl + unrealized_pl:.2f}")
+            else:
+                print("No trade data available for this market.")
         else:
-            print("Analyzing all positions...")
-            result = tracker.get_detailed_positions()
-            if not result or (isinstance(result, dict) and result.get('error')):
-                print("No positions found.")
-                return 0
-        
-        # Print summary
-        print("\nPosition Summary:\n")
-        tracker.print_positions_summary(result)
-        
-        # Display positions as table if requested
-        if args.positions_table:
-            tracker.display_positions_table(result)
-            
-        # Display trades table if requested
-        if args.trades_table:
-            # For market-specific analysis, use only those trades
-            if args.market:
-                trades = tracker.get_trades_by_market(args.market)
-                tracker.display_trades_by_market(trades)
-            else:
-                # Otherwise get all trades
-                tracker.display_trades_by_market()
-        
-        # Export positions to CSV if requested
-        if args.export_positions_csv:
-            print("\nExporting positions to CSV...")
-            csv_filepath = None
-            
-            if args.csv_dir:
-                # Create custom directory if specified
-                os.makedirs(args.csv_dir, exist_ok=True)
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                csv_filepath = os.path.join(args.csv_dir, f"positions_table_{timestamp}.csv")
-                
-            positions_csv = tracker.export_positions_table(result, filepath=csv_filepath)
-            if positions_csv:
-                print(f"Positions exported to: {positions_csv}")
-            else:
-                print("Failed to export positions to CSV.")
-                
-        # Export trades to CSV if requested
-        if args.export_trades_csv:
-            print("\nExporting trades to CSV...")
-            csv_filepath = None
-            
-            if args.csv_dir:
-                # Create custom directory if specified
-                os.makedirs(args.csv_dir, exist_ok=True)
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                csv_filepath = os.path.join(args.csv_dir, f"trades_by_market_{timestamp}.csv")
-            
-            # For market-specific analysis, use only those trades
-            if args.market:
-                trades = tracker.get_trades_by_market(args.market)
-                trades_csv = tracker.export_trades_by_market(trades, filepath=csv_filepath)
-            else:
-                # Otherwise export all trades
-                trades_csv = tracker.export_trades_by_market(filepath=csv_filepath)
-                
-            if trades_csv:
-                print(f"Trades exported to: {trades_csv}")
-            else:
-                print("Failed to export trades to CSV.")
-        
-        # Save to file if requested
-        if args.save or args.filename:
-            print("\nSaving position data...")
-            filename = args.filename
-            filepath = tracker.save_positions_to_file(result, filename)
-            if filepath:
-                print(f"Results saved to: {filepath}")
-            else:
-                print("Failed to save results to file.")
-        
-        # Generate visualizations based on options
-        viz_files = {}
-        
-        # Option: Visualize trades for a specific market
-        if args.market_trades:
-            print(f"\nGenerating trade visualization for market: {args.market_trades[:8]}...")
-            market_viz_files = tracker.visualize_market_trades(
-                market_id=args.market_trades,
-                save=True,
-                show=args.show_plots
-            )
-            viz_files.update(market_viz_files)
-        
-        # Option: Visualize complete trade history
-        if args.trade_history:
-            print("\nGenerating complete trade history visualization...")
-            trades_list = tracker.get_my_trades()
-            trades_df = tracker.trades_to_dataframe(trades_list)
-            if not trades_df.empty:
-                trade_history_files = tracker.visualize_trade_history(
-                    trades_df=trades_df,
-                    save=True,
-                    show=args.show_plots
-                )
-                viz_files.update(trade_history_files)
-            else:
-                print("No trades found to visualize.")
-                
-        # Option: Generate positions chart
-        if args.positions_chart:
-            print("\nGenerating positions chart...")
-            position_chart_files = tracker.visualize_positions_chart(
-                positions=result,
-                save=True,
-                show=args.show_plots
-            )
-            viz_files.update(position_chart_files)
-        
-        # Option: Generate all visualizations
-        if args.visualize:
-            print("\nGenerating all position and trade visualizations...")
-            all_viz_files = tracker.visualize_positions(
-                positions=result,
-                save=True,
-                show=args.show_plots
-            )
-            viz_files.update(all_viz_files)
-            
-        # Print visualization results
-        if viz_files:
-            print(f"\nCreated {len(viz_files)} visualizations:")
-            for viz_name, viz_path in viz_files.items():
-                print(f"  - {viz_name}: {viz_path}")
-        elif args.visualize or args.trade_history or args.positions_chart or args.market_trades:
-            print("\nNo visualizations were generated.")
-                
-        print("\nDone!")
-        
-    except KeyboardInterrupt:
-        print("\n\nOperation cancelled by user.")
-        return 1
-    except ValueError as e:
-        print(f"\nConfiguration error: {e}")
-        if "WALLET_PRIVATE_KEY" in str(e):
-            print("\nMake sure you have set the WALLET_PRIVATE_KEY in your .env file or provided it with --key")
-        return 1
-    except ConnectionError as e:
-        print(f"\nConnection error: {e}")
-        print("\nMake sure you have a working internet connection and Polymarket API is accessible.")
-        return 1
-    except Exception as e:
-        print(f"\nUnexpected error: {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
-        return 1
+            print("No trades found for this market.")
     
-    return 0
+    # Export position data if requested
+    if args.export_positions:
+        positions = tracker.get_detailed_positions()
+        tracker.export_positions(positions)
+    
+    # Export positions to CSV if requested
+    if args.export_positions_csv:
+        csv_dir = args.csv_dir if args.csv_dir else None
+        if csv_dir:
+            # Create custom directory if it doesn't exist
+            os.makedirs(csv_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_path = os.path.join(csv_dir, f"positions_table_{timestamp}.csv")
+            tracker.export_positions_table(file_path=file_path)
+        else:
+            tracker.export_positions_table()
+    
+    # Export trades to CSV if requested
+    if args.export_trades_csv:
+        csv_dir = args.csv_dir if args.csv_dir else None
+        if csv_dir:
+            # Create custom directory if it doesn't exist
+            os.makedirs(csv_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_path = os.path.join(csv_dir, f"trades_by_market_{timestamp}.csv")
+            tracker.export_trades_by_market(file_path=file_path)
+        else:
+            tracker.export_trades_by_market()
+    
+    # Generate visualizations if requested
+    viz_files = []
+    
+    if args.visualize or args.positions_chart:
+        pos_chart = tracker.visualize_positions_chart()
+        if pos_chart:
+            viz_files.append(pos_chart)
+    
+    if args.visualize or args.trade_history:
+        trade_history = tracker.visualize_trade_history()
+        if trade_history:
+            viz_files.append(trade_history)
+    
+    if args.market_chart:
+        market_id = args.market_chart
+        market_chart = tracker.visualize_market_trades(market_id)
+        if market_chart:
+            viz_files.append(market_chart)
+    
+    # Show plots interactively if requested
+    if args.show_plots and viz_files:
+        try:
+            import matplotlib.pyplot as plt
+            plt.show()
+        except ImportError:
+            print("Matplotlib is required to show plots interactively.")
+    
+    # Print generated file paths
+    if viz_files:
+        print("\nGenerated visualization files:")
+        for f in viz_files:
+            print(f"- {f}")
 
 if __name__ == '__main__':
-    sys.exit(main()) 
+    main() 
