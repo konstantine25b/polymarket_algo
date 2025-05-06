@@ -11,6 +11,8 @@ from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 import logging
 import datetime
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 
 # Configure logging
 logging.basicConfig(
@@ -286,6 +288,9 @@ def generate_comparison_table(
         # Calculate buy-only opportunity (only when prediction > ask)
         buy_only_opportunity = max(0, opportunity - spread - threshold) if diff > 0 else 0
         
+        # Calculate sell-only opportunity (only when prediction < bid)
+        sell_only_opportunity = max(0, opportunity - spread - threshold) if diff < 0 else 0
+        
         # Skip rows that don't meet the threshold
         if opportunity < threshold and range_name != 'EXPECTED VALUE':
             continue
@@ -302,6 +307,7 @@ def generate_comparison_table(
             'Adj-Sp (%)': spread_adj_opportunity,
             f'Adj-Full ({threshold}%)': fully_adj_opportunity,
             f'Buy-Only ({threshold}%)': buy_only_opportunity,
+            f'Sell-Only ({threshold}%)': sell_only_opportunity,
             'Token ID': token_id,
             'Market ID': market_id
         })
@@ -327,6 +333,7 @@ def generate_comparison_table(
         'Adj-Sp (%)': abs(ev_diff),  # No spread for expected value
         f'Adj-Full ({threshold}%)': max(0, abs(ev_diff) - threshold),
         f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0,
+        f'Sell-Only ({threshold}%)': max(0, abs(ev_diff) - threshold) if ev_diff < 0 else 0,
         'Token ID': None,  # No token ID for expected value
         'Market ID': None   # No market ID for expected value
     }])
@@ -630,6 +637,9 @@ def _plot_trading_opportunities(ax, df, full_adj_opp_col, threshold):
     # Get the buy-only opportunity column name
     buy_only_col = f'Buy-Only ({threshold}%)'
     
+    # Get the sell-only opportunity column name
+    sell_only_col = f'Sell-Only ({threshold}%)'
+    
     # Only show rows with meaningful opportunities
     display_df = sorted_df[sorted_df[full_adj_opp_col] > 0]
     if display_df.empty:
@@ -637,18 +647,20 @@ def _plot_trading_opportunities(ax, df, full_adj_opp_col, threshold):
     
     ranges = display_df['Range']
     x = np.arange(len(ranges))
-    width = 0.25  # Make bars narrower to fit three
+    width = 0.2  # Make bars narrower to fit four columns
     
     # Create grouped bar chart for opportunities
-    bars_raw = ax.bar(x - width, display_df['Opp (%)'], width, 
+    bars_raw = ax.bar(x - 1.5*width, display_df['Opp (%)'], width, 
                       label='Raw Opp', color='#4285F4', alpha=0.7)
-    bars_full_adj = ax.bar(x, display_df[full_adj_opp_col], width, 
+    bars_full_adj = ax.bar(x - 0.5*width, display_df[full_adj_opp_col], width, 
                       label=f'Adj ({threshold}%)', color='#34A853')
-    bars_buy_only = ax.bar(x + width, display_df[buy_only_col], width, 
+    bars_buy_only = ax.bar(x + 0.5*width, display_df[buy_only_col], width, 
                       label=f'Buy-Only', color='#FBBC05')
+    bars_sell_only = ax.bar(x + 1.5*width, display_df[sell_only_col], width, 
+                      label=f'Sell-Only', color='#EA4335')
     
     # Add value labels
-    for bars in [bars_raw, bars_full_adj, bars_buy_only]:
+    for bars in [bars_raw, bars_full_adj, bars_buy_only, bars_sell_only]:
         for bar in bars:
             height = bar.get_height()
             if height > 0:
@@ -760,6 +772,9 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
     # Get the buy-only opportunity column name
     buy_only_col = f'Buy-Only ({threshold}%)'
     
+    # Get the sell-only opportunity column name
+    sell_only_col = f'Sell-Only ({threshold}%)'
+    
     if df_filtered.empty:
         ax.text(
             0.5, 0.5,
@@ -789,6 +804,7 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
         market = row['Mkt (%)']
         spread_adj = row['Adj-Sp (%)']
         buy_only = row[buy_only_col]
+        sell_only = row[sell_only_col]
         token_id = row.get('Token ID', 'N/A')
         
         # Truncate token ID if it's too long
@@ -804,18 +820,20 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
             f"{market:.2f}%",
             f"{row['Diff (%)']}%",
             f"{edge:.2f}%",
+            f"{buy_only:.2f}%",
+            f"{sell_only:.2f}%",
             token_id
         ])
     
     # Create the table
-    columns = ['Range', 'Action', 'Price', 'Spread', 'Pred', 'Mkt', 'Diff', f'Adj ({threshold}%)', 'Token ID']
+    columns = ['Range', 'Action', 'Price', 'Spread', 'Pred', 'Mkt', 'Diff', f'Adj ({threshold}%)', 'Buy-Only', 'Sell-Only', 'Token ID']
     colors = []
     
     for row in table_data:
         if row[1] == "BUY":
-            colors.append(['w', 'w', '#C8E6C9', '#FFF9C4', 'w', 'w', 'w', 'w', '#E8F5E9'])  # Green for BUY
+            colors.append(['w', 'w', '#C8E6C9', '#FFF9C4', 'w', 'w', 'w', 'w', '#E8F5E9', '#F5F5F5', '#E8F5E9'])  # Green for BUY
         else:
-            colors.append(['w', 'w', '#FFCDD2', '#FFF9C4', 'w', 'w', 'w', 'w', '#FFEBEE'])  # Red for SELL
+            colors.append(['w', 'w', '#FFCDD2', '#FFF9C4', 'w', 'w', 'w', 'w', '#F5F5F5', '#FFEBEE', '#FFEBEE'])  # Red for SELL
     
     table = ax.table(
         cellText=table_data,
@@ -840,7 +858,7 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
     top_price = table_data[0][2]
     top_spread = table_data[0][3]
     top_edge = table_data[0][7]
-    top_token = table_data[0][8]
+    top_token = table_data[0][10]
     
     summary_text = (
         f"Best Opportunity: {top_action} {top_range} at {top_price}\n"
@@ -858,6 +876,114 @@ def _plot_detailed_recommendations(ax, df, full_adj_opp_col, threshold):
     )
     
     ax.axis('off')
+
+def visualize_simple_table(
+    comparison_df: pd.DataFrame,
+    output_path: Optional[str] = None,
+    threshold: float = 0.0
+) -> None:
+    """
+    Create a simple, readable visualization of the comparison table.
+    
+    Args:
+        comparison_df: Comparison DataFrame
+        output_path: Path to save visualization
+        threshold: Threshold value used for adjusted opportunities
+    """
+    if comparison_df.empty:
+        logger.error("No data to visualize")
+        return
+    
+    # Create a copy to avoid modifying the original
+    df = comparison_df.copy()
+    
+    # Format the DataFrame for display
+    # Remove token ID and market ID for visualization clarity
+    display_df = df.drop(['Token ID', 'Market ID'], axis=1, errors='ignore')
+    
+    # Define the figure size based on the table dimensions
+    rows, cols = display_df.shape
+    fig_width = max(12, cols * 1.2)  # At least 12 inches wide, or wider for many columns
+    fig_height = max(8, rows * 0.5)  # At least 8 inches tall, or taller for many rows
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.axis('off')
+    
+    # Create the table
+    table = ax.table(
+        cellText=display_df.round(2).values,
+        colLabels=display_df.columns,
+        loc='center',
+        cellLoc='center'
+    )
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.5)
+    
+    # Color the header row
+    for j in range(len(display_df.columns)):
+        table[(0, j)].set_facecolor('#E0E0E0')
+        table[(0, j)].set_text_props(weight='bold')
+    
+    # Color the cells based on values (for opportunity columns)
+    opportunity_cols = ['Opp (%)', 'Adj-Sp (%)', f'Adj-Full ({threshold}%)', 
+                         f'Buy-Only ({threshold}%)', f'Sell-Only ({threshold}%)']
+    opportunity_col_indices = [list(display_df.columns).index(col) for col in opportunity_cols if col in display_df.columns]
+    
+    # Define a color normalizer for the opportunity values
+    norm = mcolors.Normalize(vmin=0, vmax=display_df[opportunity_cols].values.max())
+    cmap_buy = cm.Greens
+    cmap_sell = cm.Reds
+    
+    # Get indices of the 'Diff (%)' column for determining buy/sell coloring
+    diff_col_idx = list(display_df.columns).index('Diff (%)')
+    
+    # Color cells based on values
+    for i in range(len(display_df)):
+        row_dict = display_df.iloc[i].to_dict()
+        
+        # Highlight the EXPECTED VALUE row differently
+        if display_df.iloc[i]['Range'] == 'EXPECTED VALUE':
+            for j in range(len(display_df.columns)):
+                table[(i+1, j)].set_facecolor('#FFF9C4')  # Light yellow for expected value row
+            continue
+        
+        # Highlight opportunity columns based on value
+        for j in opportunity_col_indices:
+            value = display_df.iloc[i].iloc[j]
+            if value > 0:
+                diff_value = display_df.iloc[i].iloc[diff_col_idx]
+                # Use green for buy opportunities (positive diff) and red for sell (negative diff)
+                if 'Buy-Only' in display_df.columns[j]:
+                    # Buy-only column only has buy opportunities
+                    color = cmap_buy(norm(value))
+                elif 'Sell-Only' in display_df.columns[j]:
+                    # Sell-only column only has sell opportunities
+                    color = cmap_sell(norm(value))
+                else:
+                    # Other opportunity columns use green/red based on diff value
+                    color = cmap_buy(norm(value)) if diff_value > 0 else cmap_sell(norm(value))
+                
+                table[(i+1, j)].set_facecolor(color)
+    
+    # Add a title and timestamp
+    plt.title(f"Market vs Prediction Comparison Table (Threshold: {threshold}%)", 
+             fontsize=14, fontweight='bold', pad=20)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    plt.figtext(0.01, 0.01, f"Generated: {timestamp}", fontsize=8)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    if output_path:
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        logger.info(f"Simple table visualization saved to {output_path}")
+    else:
+        plt.show()
 
 def initialize_directories():
     """Create necessary directories for output files."""
@@ -892,6 +1018,7 @@ def main():
     parser.add_argument('--viz-output', type=str, help='Path to save visualization')
     parser.add_argument('--threshold', type=float, default=0.0, help='Minimum opportunity percentage (0-100) to include in results')
     parser.add_argument('--enhanced-viz', action='store_true', help='Generate enhanced visualization with more details')
+    parser.add_argument('--simple-table', action='store_true', help='Generate simple table visualization')
     parser.add_argument('--show-tokens', action='store_true', help='Show token IDs in console output')
     
     args = parser.parse_args()
@@ -904,6 +1031,16 @@ def main():
     if args.visualize and args.viz_output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         args.viz_output = os.path.join(viz_dir, f'comparison_{timestamp}.png')
+    
+    # Path for simple table visualization
+    simple_table_output = None
+    if args.simple_table:
+        if args.viz_output:
+            # Modify the viz_output path to indicate it's a simple table
+            simple_table_output = args.viz_output.replace('.png', '_table.png')
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            simple_table_output = os.path.join(viz_dir, f'table_{timestamp}.png')
     
     try:
         # Generate comparison table
@@ -933,6 +1070,7 @@ def main():
             data_rows = df[df['Range'] != 'EXPECTED VALUE']
             full_adj_opp_col = f'Adj-Full ({args.threshold}%)'
             buy_only_col = f'Buy-Only ({args.threshold}%)'
+            sell_only_col = f'Sell-Only ({args.threshold}%)'
             
             if not data_rows.empty:
                 # Find the index of the max adjusted opportunity
@@ -953,6 +1091,7 @@ def main():
                     print(f"Spread-Adjusted Opportunity: {max_opp_row['Adj-Sp (%)']}%")
                     print(f"Fully-Adjusted Opportunity: {max_opp_row[full_adj_opp_col]}%")
                     print(f"Buy-Only Opportunity: {max_opp_row[buy_only_col]}%")
+                    print(f"Sell-Only Opportunity: {max_opp_row[sell_only_col]}%")
                     
                     # Show token ID for best opportunity
                     if 'Token ID' in max_opp_row and max_opp_row['Token ID']:
@@ -972,6 +1111,15 @@ def main():
                 print("No data available for comparison. Please check the logs for errors.")
         else:
             print("No data available for comparison. Please check the logs for errors.")
+        
+        # Generate simple table visualization if requested
+        if args.simple_table and not df.empty:
+            visualize_simple_table(
+                comparison_df=df,
+                output_path=simple_table_output,
+                threshold=args.threshold
+            )
+            print(f"\nSimple table visualization saved to: {simple_table_output}")
         
         # Generate visualization if requested
         if args.visualize and not df.empty:

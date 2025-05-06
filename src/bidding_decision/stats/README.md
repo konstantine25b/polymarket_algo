@@ -12,6 +12,8 @@ A sophisticated tool to compare predictions from the Prophet model with actual P
 - Provides threshold-adjusted opportunity values for realistic trading decisions
 - Allows filtering by a minimum threshold to focus on significant opportunities
 - Visualizes comparisons with detailed bar charts and comprehensive dashboards
+- Provides separate Buy-Only and Sell-Only opportunity values for clear trade direction
+- Creates simple table visualizations for better data readability  
 - Provides specific trading recommendations with exact prices
 - Automatically saves results to timestamped files
 
@@ -45,6 +47,9 @@ python -m src.bidding_decision.stats --visualize
 # Generate enhanced visualization dashboard with multiple charts
 python -m src.bidding_decision.stats --visualize --enhanced-viz
 
+# Generate a simple table visualization for better readability
+python -m src.bidding_decision.stats --simple-table
+
 # Save visualization to specific file
 python -m src.bidding_decision.stats --visualize --viz-output my_comparison.png
 
@@ -56,22 +61,22 @@ python -m src.bidding_decision.stats --visualize --enhanced-viz --threshold 3.0
 
 ```
 Comparison Table:
-           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Difference (%)  Opportunity (%)  Adj. Opportunity (3.0%)
-        150–174           95.58        89.5     89.0     90.0            5.58            5.58                      2.58
-        175–199            3.65         9.5      9.0     10.0           -6.35            6.35                      3.35
-        200–224            0.48        0.15      0.0      0.5           -0.02            0.02                      0.00
-        225–249            0.14         0.0      0.0      0.5           -0.36            0.36                      0.00
-        250–274            0.09         0.0      0.0      0.5           -0.41            0.41                      0.00
-        275–299            0.02         0.0      0.0      0.5           -0.48            0.48                      0.00
-        300–324            0.01         0.0      0.0      0.5           -0.49            0.49                      0.00
-        325–349             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00
-        350–374            0.01         0.0      0.0      0.5           -0.49            0.49                      0.00
-        375–399             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00
-    400 or more            0.02         0.0      0.0      0.5           -0.48            0.48                      0.00
- less than 100             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00
-        100–124             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00
-        125–149             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00
-  EXPECTED VALUE         163.47      163.07     N/A     N/A            0.40            0.40                      0.00
+           Range  Prediction (%)  Market (%)  Bid (%)  Ask (%)  Difference (%)  Opportunity (%)  Adj. Opportunity (3.0%)  Buy-Only (3.0%)  Sell-Only (3.0%)
+        150–174           95.58        89.5     89.0     90.0            5.58            5.58                      2.58            2.58             0.00
+        175–199            3.65         9.5      9.0     10.0           -6.35            6.35                      3.35            0.00             3.35
+        200–224            0.48        0.15      0.0      0.5           -0.02            0.02                      0.00            0.00             0.00
+        225–249            0.14         0.0      0.0      0.5           -0.36            0.36                      0.00            0.00             0.00
+        250–274            0.09         0.0      0.0      0.5           -0.41            0.41                      0.00            0.00             0.00
+        275–299            0.02         0.0      0.0      0.5           -0.48            0.48                      0.00            0.00             0.00
+        300–324            0.01         0.0      0.0      0.5           -0.49            0.49                      0.00            0.00             0.00
+        325–349             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00            0.00             0.00
+        350–374            0.01         0.0      0.0      0.5           -0.49            0.49                      0.00            0.00             0.00
+        375–399             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00            0.00             0.00
+    400 or more            0.02         0.0      0.0      0.5           -0.48            0.48                      0.00            0.00             0.00
+ less than 100             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00            0.00             0.00
+        100–124             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00            0.00             0.00
+        125–149             0.0         0.0      0.0      0.5           -0.50            0.50                      0.00            0.00             0.00
+  EXPECTED VALUE         163.47      163.07     N/A     N/A            0.40            0.40                      0.00            0.00             0.00
 
 Best Trading Opportunity:
 Range: 175–199
@@ -96,10 +101,22 @@ Edge: 3.35% after 3.0% threshold
 - **Difference (%)**: Prediction minus Ask (for buy opportunities) or Prediction minus Bid (for sell opportunities)
 - **Opportunity (%)**: The absolute value of the difference
 - **Adj. Opportunity (X%)**: The opportunity after subtracting your minimum threshold
+- **Buy-Only (X%)**: Opportunity values for buy trades only (positive differences)
+- **Sell-Only (X%)**: Opportunity values for sell trades only (negative differences)
 
 The tool uses ask prices for buy opportunities and bid prices for sell opportunities to provide realistic trading recommendations based on actual executable prices, not theoretical midpoints.
 
 ## Visualization Options
+
+### Simple Table Visualization
+
+The simple table visualization (`--simple-table`) creates an easy-to-read table with color-coding:
+- Green cells highlight buy opportunities
+- Red cells highlight sell opportunities
+- Yellow row shows the expected value
+- Intensity of colors indicates the magnitude of the opportunity
+
+This visualization is ideal for quickly reviewing all data points in a comprehensive format.
 
 ### Standard Visualization
 
