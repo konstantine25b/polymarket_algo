@@ -77,19 +77,42 @@ class PolymarketPositionTracker:
             return self.market_info_cache[market_id]
             
         try:
-            url = f"{self.polymarket_api}/markets/{market_id}"
-            response = requests.get(url)
+            # Try multiple potential endpoints for market data
+            endpoints = [
+                f"{self.polymarket_api}/markets/{market_id}",
+                f"{self.polymarket_api}/v2/markets/{market_id}",
+                f"https://clob.polymarket.com/markets/{market_id}"  # Alternative endpoint
+            ]
             
-            if response.status_code == 200:
-                market_data = response.json()
-                self.market_info_cache[market_id] = market_data
-                return market_data
-            else:
-                self.logger.warning(f"Failed to fetch market info for {market_id}: {response.status_code}")
-                return None
+            for url in endpoints:
+                response = requests.get(url)
+                
+                if response.status_code == 200:
+                    market_data = response.json()
+                    self.market_info_cache[market_id] = market_data
+                    self.logger.info(f"Successfully fetched market info for {market_id[:10]}...")
+                    return market_data
+                    
+            # If we reach here, none of the endpoints worked
+            # Create a fallback market info object
+            fallback_market_info = {
+                'question': f"Market {market_id[:10]}...",
+                'market_id': market_id,
+                'description': "Market information unavailable"
+            }
+            self.market_info_cache[market_id] = fallback_market_info
+            self.logger.warning(f"Could not fetch market info for {market_id} from any endpoints")
+            return fallback_market_info
         except Exception as e:
             self.logger.warning(f"Error fetching market info: {e}")
-            return None
+            # Create a fallback market info object
+            fallback_market_info = {
+                'question': f"Market {market_id[:10]}...",
+                'market_id': market_id,
+                'description': "Market information unavailable"
+            }
+            self.market_info_cache[market_id] = fallback_market_info
+            return fallback_market_info
             
     def get_market_name(self, market_id):
         """
@@ -99,12 +122,17 @@ class PolymarketPositionTracker:
             market_id (str): The market ID to fetch the name for.
             
         Returns:
-            str: Full market name or full market ID if not found.
+            str: Full market name or shortened market ID if not found.
         """
         market_info = self.get_market_info(market_id)
-        if market_info and 'question' in market_info:
-            return market_info['question']
-        return market_id  # Return full market ID without truncation
+        # Try different potential field names for the market name
+        for field in ['question', 'title', 'name', 'description']:
+            if market_info and field in market_info and market_info[field]:
+                return market_info[field]
+        
+        # If we couldn't find a suitable name, return a shortened version of the market ID
+        # This makes it easier to read in tables and visualizations
+        return f"Market {market_id[:16]}..."
 
     def get_my_trades(self):
         """
@@ -392,8 +420,11 @@ class PolymarketPositionTracker:
             market_name = self.get_market_name(market_id)
             short_name = market_name[:30] + ('...' if len(market_name) > 30 else '')
             
-            # Format market display name - show full market ID
-            market_display = f"{short_name} ({market_id})"
+            # Only add ID to the display name if it's not already in the market name
+            if not market_name.endswith(market_id) and not market_name.startswith("Market "):
+                market_display = f"{short_name} ({market_id[:16]}...)"
+            else:
+                market_display = short_name
             
             # Plot buy trades
             buys = market_trades[market_trades['my_side'] == 'BUY']
@@ -470,7 +501,15 @@ class PolymarketPositionTracker:
                         )
         
         # Style the chart
-        title = f"Trade History - {market_id}" if market_id else "Complete Trade History"
+        if market_id:
+            if len(market_id) > 20:
+                display_id = f"{market_id[:16]}..."
+            else:
+                display_id = market_id
+            title = f"Trade History - {display_id}"
+        else:
+            title = "Complete Trade History"
+        
         trade_ax.set_title(title, fontsize=16)
         trade_ax.set_xlabel('Date', fontsize=12)
         trade_ax.set_ylabel('Price', fontsize=12)
@@ -574,7 +613,12 @@ class PolymarketPositionTracker:
             market_df = df[df['market_id'] == market_id]
             market_name = market_df['market_name'].iloc[0]
             short_name = market_name[:30] + ('...' if len(market_name) > 30 else '')
-            display_name = f"{short_name} ({market_id})"
+            
+            # Only add ID to the display name if it's not already in the market name
+            if not market_name.endswith(market_id) and not market_name.startswith("Market "):
+                display_name = f"{short_name} ({market_id[:16]}...)"
+            else:
+                display_name = short_name
             
             sizes = market_df['trades'] * 100  # Scale by number of trades
             sizes = sizes.clip(100, 2000)  # Min/max size
@@ -1010,15 +1054,19 @@ class PolymarketPositionTracker:
         # Add details for each market
         for market_id, market_data in positions.get('positions', {}).items():
             market_name = market_data.get('name')
-            # Display full market ID without truncation
-            lines.append(f"\n{market_name} ({market_id}):")
+            
+            # Display market name and ID (avoiding duplication if the market name already contains the ID)
+            if market_name and not market_name.endswith(market_id):
+                lines.append(f"\n{market_name} ({market_id}):")
+            else:
+                lines.append(f"\n{market_name}:")
             
             for outcome, position_data in market_data.get('positions', {}).items():
                 size = position_data.get('size', 0)
                 sign = '+' if size > 0 else ''
                 trades_count = position_data.get('trades', 0)
                 lines.append(f"  • {outcome}: {sign}{size:.2f} shares ({trades_count} trades)")
-                
+            
         summary = "\n".join(lines)
         print(summary)
         return summary
@@ -1187,15 +1235,21 @@ class PolymarketPositionTracker:
         
         for market_id, market_data in positions.get('positions', {}).items():
             market_name = market_data.get('name', 'Unknown')
-            short_market_name = market_name[:40] + '...' if len(market_name) > 40 else market_name
-            # Show full market ID without truncation
+            
+            # If the market name already contains or is derived from the ID, don't duplicate it
+            if market_name.endswith(market_id) or market_name.startswith("Market "):
+                display_market_id = ""  # Empty string to avoid duplication
+            else:
+                display_market_id = market_id
+            
+            short_market_name = market_name[:60] + '...' if len(market_name) > 60 else market_name
             
             for outcome, position_data in market_data.get('positions', {}).items():
                 size = position_data.get('size', 0)
                 trades_count = position_data.get('trades', 0)
                 
                 table_data.append({
-                    'Market ID': market_id,
+                    'Market ID': display_market_id,
                     'Market Name': short_market_name,
                     'Outcome': outcome,
                     'Position Size': size,
@@ -1208,6 +1262,9 @@ class PolymarketPositionTracker:
             return None
             
         df = pd.DataFrame(table_data)
+        
+        # Only include non-empty columns
+        df = df.loc[:, df.columns[df.astype(bool).any()]]
         
         # Sort by absolute position size (descending)
         df['abs_size'] = df['Position Size'].abs()
@@ -1303,8 +1360,15 @@ class PolymarketPositionTracker:
             market_df = display_df[display_df['Market ID'] == market_id]
             market_name = market_df['Market Name'].iloc[0]
             
-            print(f"\n--- Market: {market_name} ({market_id}) ---")
-            print(market_df[display_columns].sort_values('Time'))
+            # Format the header to avoid duplicate market IDs
+            if market_name.endswith(market_id) or market_name.startswith("Market "):
+                print(f"\n--- Market: {market_name} ---")
+            else:
+                print(f"\n--- Market: {market_name} ({market_id}) ---")
+            
+            # Don't display the Market ID column since it's already in the header
+            display_cols = [col for col in display_columns if col != 'Market ID']
+            print(market_df[display_cols].sort_values('Time'))
             print(f"Total: {len(market_df)} trades\n")
             
         return df 

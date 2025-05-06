@@ -7,8 +7,9 @@ A simple tool to track and analyze your current positions on Polymarket based on
 This module analyzes your Polymarket trade history to calculate your current positions across all markets you've traded in. It provides:
 
 - Current position sizes for each outcome in each market
-- **Full market IDs** displayed in all outputs (tables, visualizations, and summaries)
-- Full market names and details
+- **Full market IDs** displayed intelligently (no duplication)
+- Robust market data retrieval with fallback mechanisms
+- Full market names and details where available
 - Trade history visualization and analysis
 - Bubble chart visualization of current positions
 - Market-specific trade history analysis
@@ -231,7 +232,8 @@ All exports include full market IDs, prices, sizes, and timestamps where availab
 
 ## Important Features
 
-- **Complete Market IDs** - Market IDs are displayed in full in all outputs, including visualizations, tables, and the summary display
+- **Smart Market ID Display** - Market IDs are displayed in full but only when needed (avoiding duplication)
+- **Robust Market Data Retrieval** - Multiple API endpoints are tried with graceful fallbacks if market info is unavailable
 - **Trade History** - Visualize your trading activity over time with buy/sell indicators
 - **Trade Counts** - Position summaries now include the number of trades for each position
 - **Market-Specific Analysis** - View trade history for a specific market of interest
@@ -245,12 +247,13 @@ This module:
 
 1. Connects to the Polymarket CLOB API using your wallet credentials
 2. Fetches your trade history (as both maker and taker)
-3. Fetches full market names and details from the Polymarket API
-4. Calculates your net position for each outcome in each market
-5. Shows only non-zero positions (outcomes where you currently hold shares)
-6. Generates visualizations and tabular views of your positions and trade history
-7. Exports data in various formats (JSON, CSV) for further analysis
-8. Displays full market IDs for complete traceability
+3. Attempts to fetch full market names and details from multiple Polymarket API endpoints
+4. Uses fallback mechanisms if market information is unavailable
+5. Calculates your net position for each outcome in each market
+6. Shows only non-zero positions (outcomes where you currently hold shares)
+7. Generates visualizations and tabular views of your positions and trade history
+8. Exports data in various formats (JSON, CSV) for further analysis
+9. Displays full market IDs intelligently (avoiding duplication)
 
 The implementation accounts for:
 
