@@ -16,6 +16,7 @@ A powerful tool for tracking, analyzing, and visualizing your Polymarket positio
 - **Smart Market ID Display**: Intelligently display full market IDs without duplication
 - **Robust Market Data Retrieval**: Use multiple API endpoints with graceful fallbacks
 - **Table Image Generation**: Save position tables as high-quality PNG images for sharing or reporting
+- **Simple Position Format**: Quickly get a basic dictionary of market IDs and share quantities
 
 ## Installation
 
@@ -45,6 +46,10 @@ tracker = PolymarketPositionTracker()
 positions = tracker.get_positions_summary()
 tracker.print_positions_summary(positions)
 
+# Get simple dictionary of market IDs and share quantities
+simple_positions = tracker.get_simple_positions()
+print(simple_positions)
+
 # Display positions table with P&L metrics
 tracker.display_positions_table()
 
@@ -69,6 +74,12 @@ Display position summary with P&L information:
 
 ```bash
 python -m src.polymarket.my_positions.cli
+```
+
+Display simple list of market IDs and share quantities:
+
+```bash
+python -m src.polymarket.my_positions.cli --simple-positions
 ```
 
 Display detailed position table with P&L metrics:
@@ -179,6 +190,50 @@ MARKET REFERENCE GUIDE:
      ID: 0x820cb7e640e07ba871c249db6d17ec0a56c2a6c866fcf5167ceb7e2b3faa6b02
   M4: Will Elon tweet 275–299 times May 2–9?
      ID: 0xb942003e5c182f905b88302b79368d7891a2d3d418a13f884a52e727e4effb95
+```
+
+### Simple Positions Output
+
+```
+SIMPLE POSITIONS (Market ID -> Outcome -> Share Quantity):
+
+Will Elon tweet 350 or more times May 2–9? (0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f):
+  Yes: 84.940000 shares
+
+Will Elon tweet 300–324 times May 2–9? (0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6):
+  Yes: 8.200000 shares
+
+Will Elon tweet 200–224 times May 2–9? (0x820cb7e640e07ba871c249db6d17ec0a56c2a6c866fcf5167ceb7e2b3faa6b02):
+  Yes: 0.320000 shares
+
+Will Elon tweet 275–299 times May 2–9? (0xb942003e5c182f905b88302b79368d7891a2d3d418a13f884a52e727e4effb95):
+  Yes: 3.310000 shares
+```
+
+### Programmatic Usage of Simple Positions
+
+```python
+from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+
+# Initialize tracker
+tracker = PolymarketPositionTracker()
+
+# Get simple dictionary of market IDs and share quantities
+simple_positions = tracker.get_simple_positions()
+
+# Example of the returned data structure:
+# {
+#    '0x14ebc0ede61a12aaad2da1c7c591376ab8a61b9e71c671de49fc653ce6e1999f': {'Yes': 84.94},
+#    '0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6': {'Yes': 8.2},
+#    '0x820cb7e640e07ba871c249db6d17ec0a56c2a6c866fcf5167ceb7e2b3faa6b02': {'Yes': 0.32},
+#    '0xb942003e5c182f905b88302b79368d7891a2d3d418a13f884a52e727e4effb95': {'Yes': 3.31}
+# }
+
+# Process the data programmatically
+for market_id, outcomes in simple_positions.items():
+    print(f"Market: {market_id}")
+    for outcome, quantity in outcomes.items():
+        print(f"  {outcome}: {quantity} shares")
 ```
 
 ### Trades Table with P&L Analytics

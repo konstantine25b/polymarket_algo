@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument('--positions', action='store_true', help='Display basic position summary')
     parser.add_argument('--detailed', action='store_true', help='Display detailed position information')
     parser.add_argument('--positions-table', action='store_true', help='Display current positions as a formatted table with P&L info')
+    parser.add_argument('--simple-positions', action='store_true', help='Display a simple list of market IDs and share quantities')
     parser.add_argument('--save-table-image', action='store_true', help='Save the positions table as an image')
     parser.add_argument('--table-image-path', type=str, help='Path for the saved table image')
     parser.add_argument('--trades-table', action='store_true', help='Display all trades grouped by market as tables with P&L metrics')
@@ -71,10 +72,19 @@ def main():
     if args.positions or (not any([args.detailed, args.positions_table, args.trades_table, args.market_trades, 
                                   args.visualize, args.positions_chart, args.trade_history, args.market_chart,
                                   args.export_positions, args.export_positions_csv, args.export_trades_csv,
-                                  args.save_table_image])):
+                                  args.save_table_image, args.simple_positions])):
         print("\nPOSITION SUMMARY (with P&L calculations):")
         positions = tracker.get_positions_summary()
         tracker.print_positions_summary(positions)
+    
+    if args.simple_positions:
+        print("\nSIMPLE POSITIONS (Market ID -> Outcome -> Share Quantity):")
+        simple_positions = tracker.get_simple_positions()
+        for market_id, outcomes in simple_positions.items():
+            market_name = tracker.get_market_name(market_id)
+            print(f"\n{market_name} ({market_id}):")
+            for outcome, quantity in outcomes.items():
+                print(f"  {outcome}: {quantity:.6f} shares")
     
     if args.detailed:
         print("\nDETAILED POSITIONS:")

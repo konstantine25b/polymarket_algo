@@ -1649,17 +1649,42 @@ class PolymarketPositionTracker:
 
     def clear_market_cache(self):
         """
-        Clear the cached market information.
-        
-        This can be useful when market information has been updated and you want to fetch fresh data.
+        Clear the market information cache.
         
         Returns:
-            int: Number of cleared cache entries.
+            int: Number of cache entries cleared.
         """
         cache_size = len(self.market_info_cache)
         self.market_info_cache = {}
         self.logger.info(f"Cleared market cache ({cache_size} entries)")
         return cache_size 
+
+    def get_simple_positions(self):
+        """
+        Get a simple dictionary of market IDs and share quantities.
+        
+        Returns:
+            dict: Dictionary with market IDs as keys and a nested dictionary of outcome-to-quantity as values.
+        """
+        # Get position data
+        positions = self.calculate_positions()
+        
+        if not positions:
+            return {}
+        
+        # Create a simple dictionary structure
+        simple_positions = {}
+        
+        for market_id, market_data in positions.items():
+            outcome_positions = {}
+            
+            for outcome, position_data in market_data['positions'].items():
+                # Just include the size (number of shares)
+                outcome_positions[outcome] = position_data['size']
+            
+            simple_positions[market_id] = outcome_positions
+            
+        return simple_positions
 
     def get_positions_summary(self):
         """
