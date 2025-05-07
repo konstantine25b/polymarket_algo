@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
+from src.pinned_checker.pinnedChecker import PinnedChecker
 # Import Polymarket API client to get the count frames
 from src.polymarket.api_client import PolymarketAPIClient
 
@@ -138,6 +139,13 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
         # This is safer than converting to naive datetime objects
         filtered_df = df[(df['created_at_dt'] >= start_datetime) & (df['created_at_dt'] <= end_datetime)]
         total_count = len(filtered_df)
+
+        # WRYMP'S CHANGES
+        # ================================
+        pinChecker = PinnedChecker()
+        if pinChecker.checkForNewPinnedTweet():
+            total_count += 1
+        # ================================
         
         logger.info(f"\n=== Tweet Count Verification ===")
         logger.info(f"Time range (ET): {start_datetime} to {end_datetime}")
