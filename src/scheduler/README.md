@@ -9,6 +9,7 @@ This module provides an automated scheduler that periodically:
 1. Fetches Elon Musk's tweets and stores them in the database
 2. Runs the Polymarket predictor to update predictions
 3. Runs the Auto-Bidder to place orders based on identified trading opportunities
+4. Runs the Position Seller to automatically sell positions that should be sold
 
 ## Features
 
@@ -18,9 +19,11 @@ This module provides an automated scheduler that periodically:
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
-- **Automated trading**: Automatically places orders on Polymarket based on prediction data
-- **Trading opportunities**: Identifies potential trading opportunities with customizable threshold
-- **Dry run mode**: Test the auto-bidder without placing actual orders
+- **Automated trading**: Automatically places buy orders and sells positions on Polymarket based on prediction data
+- **Trading opportunities**: Identifies potential trading opportunities with customizable thresholds
+- **Weighted selection**: Option to use weighted probability selection for buy opportunities instead of always choosing the best one
+- **Separate thresholds**: Configure different thresholds for buying and selling positions
+- **Dry run mode**: Test the auto-bidder and auto-seller without placing actual orders
 - **Configurable bid amount**: Set the amount of USDC to use for each bid
 - **Statistical analysis**: View detailed stats on each market opportunity
 
@@ -30,53 +33,62 @@ This module provides an automated scheduler that periodically:
 # Activate virtual environment
 source venv/bin/activate
 
+# I use it commonly
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --weighted-selection --interval 30
+
 # Run with default settings (every 20 minutes)
-python -m src.scheduler
+python -m src.scheduler.scheduler
 
 # Run with custom interval (every 5 minutes)
-python -m src.scheduler --interval 5
+python -m src.scheduler.scheduler --interval 5
 
 # Only fetch tweets, don't run predictions or trading
-python -m src.scheduler --tweets-only
+python -m src.scheduler.scheduler --tweets-only
 
 # Only run predictions and trading, don't fetch tweets
-python -m src.scheduler --predictions-only
+python -m src.scheduler.scheduler --predictions-only
 
 # Run jobs once and exit (don't keep running)
-python -m src.scheduler --run-once
+python -m src.scheduler.scheduler --run-once
 
 # Change the maximum number of tweets to fetch
-python -m src.scheduler --max-tweets 100
+python -m src.scheduler.scheduler --max-tweets 100
 
 # Disable debug mode for tweet fetching
-python -m src.scheduler --no-debug
+python -m src.scheduler.scheduler --no-debug
 
 # Run in quiet mode with less output
-python -m src.scheduler --quiet
+python -m src.scheduler.scheduler --quiet
 
 # Customize incremental fetching parameters
-python -m src.scheduler --initial-batch 60 --max-batch 300
+python -m src.scheduler.scheduler --initial-batch 60 --max-batch 300
 
 # Disable incremental fetching (not recommended)
-python -m src.scheduler --no-incremental
+python -m src.scheduler.scheduler --no-incremental
 
 # Don't run the auto-bidder after predictions
-python -m src.scheduler --no-bidding
+python -m src.scheduler.scheduler --no-bidding
 
-# Set a minimum threshold for trading opportunities (e.g., 3%)
-python -m src.scheduler --threshold 3.0
+# Don't run the auto-seller after predictions
+python -m src.scheduler.scheduler --no-selling
+
+# Set minimum thresholds for buying and selling (e.g., 3% for buying, 2% for selling)
+python -m src.scheduler.scheduler --buy-threshold 3.0 --sell-threshold 2.0
 
 # Set the bid amount to 2.5 USDC
-python -m src.scheduler --amount 2.5
+python -m src.scheduler.scheduler --amount 2.5
 
-# Run the auto-bidder in dry run mode (don't place real orders)
-python -m src.scheduler --dry-run
+# Use weighted selection for buy opportunities
+python -m src.scheduler.scheduler --weighted-selection
+
+# Run in dry run mode (don't place real orders)
+python -m src.scheduler.scheduler --dry-run
 
 # Don't display the full statistics table
-python -m src.scheduler --no-stats
+python -m src.scheduler.scheduler --no-stats
 
 # Combine multiple options
-python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --amount 2.0 --dry-run
+python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run
 ```
 
 ## Command-Line Options
@@ -93,10 +105,13 @@ python -m src.scheduler --interval 15 --max-tweets 50 --quiet --threshold 5.0 --
 - `--max-batch`: Maximum batch size for incremental fetching (default: 200)
 - `--no-prophet`: Disable Prophet algorithm for predictions (use standard algorithm instead)
 - `--no-bidding`: Don't run the auto-bidder after predictions
-- `--threshold`: Minimum opportunity percentage for placing bids (default: 0.0)
+- `--no-selling`: Don't run the auto-seller after predictions
+- `--buy-threshold`: Minimum opportunity percentage for placing buy orders (default: 0.0)
+- `--sell-threshold`: Minimum opportunity percentage for selling positions (default: 0.0)
 - `--amount`: Amount to bid in USDC (default: 1.0)
-- `--dry-run`: Run auto-bidder in dry run mode (don't place real orders)
+- `--dry-run`: Run auto-bidder and auto-seller in dry run mode (don't place real orders)
 - `--no-stats`: Don't display the full statistics table with market opportunities
+- `--weighted-selection`: Use weighted probability selection for buy opportunities instead of always choosing the best opportunity
 
 ## Smart Incremental Fetching
 
@@ -124,18 +139,22 @@ After running predictions, the scheduler automatically executes the Auto-Bidder,
 1. Compares Prophet model predictions with actual Polymarket order book data
 2. Calculates differences between predicted and actual market prices
 3. Measures the bid-ask spread on each market to determine real trading costs
-4. Identifies the best buying opportunity where the "buy-only" edge is highest
+4. Identifies the best buying opportunities where the "buy-only" edge is highest
 5. Places a market buy order for the configured amount (default: 1 USDC)
 6. Provides detailed output about the selected opportunity and order status
 
-The auto-bidder is configured to only place buy orders, focusing on the opportunity with the highest edge after accounting for:
+The auto-bidder is configured to place buy orders, focusing on opportunities with the highest edge after accounting for:
+
 - The bid-ask spread that must be crossed to execute a trade
 - The configured minimum threshold for meaningful opportunities
 
+When weighted selection is enabled, the auto-bidder will select from multiple positive opportunities using a weighted probability system where higher edges have a higher chance of being selected, instead of always choosing the single best opportunity.
+
 To customize the auto-bidder behavior:
 
-- `--threshold`: Set the minimum opportunity percentage (default: 0.0%)
+- `--buy-threshold`: Set the minimum opportunity percentage for buying (default: 0.0%)
 - `--amount`: Set the USDC amount for each bid (default: 1.0 USDC)
+- `--weighted-selection`: Use weighted selection instead of always choosing the best opportunity
 - `--dry-run`: Test the auto-bidder without placing actual orders
 - `--no-stats`: Skip displaying the full statistical comparison table
 - `--no-bidding`: Skip running the auto-bidder entirely
@@ -164,7 +183,57 @@ Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569
 DRY RUN - No order placed.
 ```
 
-When running in production mode (without `--dry-run`), the auto-bidder will actually place orders on Polymarket using the configured wallet from your `.env` file.
+## Automated Trading with Position Seller
+
+After running predictions, the scheduler also executes the Position Seller, which:
+
+1. Retrieves all your current positions from your Polymarket account
+2. Generates a statistical comparison between predictions and market prices
+3. Identifies positions where the model predicts a lower probability than the market price
+4. Calculates the "sell-only" opportunity for each position, accounting for spread and threshold
+5. Executes market sell orders for positions with positive sell opportunities
+6. Provides detailed output about positions sold and execution status
+
+The position seller:
+
+- Filters out positions with less than 0.01 shares (Polymarket's minimum order size)
+- Only sells positions with sell opportunities above the configured threshold
+- Executes market sell orders at the current bid price
+- Provides comprehensive error handling and notifications
+
+To customize the position seller behavior:
+
+- `--sell-threshold`: Set the minimum opportunity percentage for selling (default: 0.0%)
+- `--dry-run`: Test the position seller without placing actual sell orders
+- `--no-stats`: Skip displaying the full statistical comparison table
+- `--no-selling`: Skip running the position seller entirely
+
+Example output in production mode:
+
+```
+POSITIONS RECOMMENDED FOR SELLING (THRESHOLD: 2.0%):
+==================================
+
+Will Elon tweet 275–299 times May 2–9? (275–299):
+  Outcome: Yes
+  Quantity: 1.492536 shares
+  Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569720720
+  Current Bid Price: 22.00%
+  Your Model's Prediction: 14.02%
+  Difference: -7.98%
+  Sell Opportunity: 5.98% (after applying 2.0% threshold)
+
+Executing sell orders for 1 positions...
+
+Selling 1.492536 shares of 275–299 (Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569720720)
+Expected sale price: 22.00%
+Sell opportunity: 5.98% (after applying 2.0% threshold)
+Connected with wallet: 0x08E9Fa...
+Sell order executed successfully!
+Response: {'orderId': '987654321', 'status': 'filled', 'price': '0.22', 'fillAmount': '1.492536'}
+
+SELL ORDER SUMMARY: Successfully sold 1 out of 1 positions
+```
 
 ## Logs
 
@@ -178,13 +247,13 @@ The scheduler writes logs to both the console and a log file:
 To run the scheduler as a background service (e.g., on a server), you can use:
 
 ```bash
-nohup python -m src.scheduler > /dev/null 2>&1 &
+nohup python -m src.scheduler.scheduler > /dev/null 2>&1 &
 ```
 
 Or with custom options:
 
 ```bash
-nohup python -m src.scheduler --interval 10 --quiet --threshold 3.0 --amount 2.0 --dry-run > /dev/null 2>&1 &
+nohup python -m src.scheduler.scheduler --interval 10 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --dry-run > /dev/null 2>&1 &
 ```
 
 To stop the scheduler running in the background:
@@ -199,12 +268,13 @@ kill <process_id>
 
 ## Implementation Details
 
-The scheduler uses Python's `subprocess` module to run the tweet fetching, prediction, and auto-bidder scripts as separate processes. This ensures that any failures in one process don't affect the others.
+The scheduler uses Python's `subprocess` module to run the tweet fetching, prediction, auto-bidder, and position seller scripts as separate processes. This ensures that any failures in one process don't affect the others.
 
-Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise). If the prediction process succeeds, the auto-bidder is then executed to place orders based on the updated predictions.
+Each process is monitored, and failures are logged. If the tweet fetching process fails, the prediction process is still attempted (unless configured otherwise). If the prediction process succeeds, the auto-bidder and position seller are then executed to place buy orders and sell positions based on the updated predictions.
 
 ## Related Modules
 
 - **src.apify.get_elon_tweets**: Module for fetching tweets
 - **src.polymarket_predictor**: Module for running predictions
-- **src.bidding_decision.auto_bid**: Module for automated bidding based on predictions
+- **src.bidding_decision.auto_bid.run**: Module for automated bidding based on predictions
+- **src.bidding_decision.auto_bid.run_seller**: Module for automated selling of positions

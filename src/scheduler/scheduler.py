@@ -6,6 +6,7 @@ This module provides functionality to periodically:
 1. Fetch Elon Musk's tweets and store them in the database
 2. Run the Polymarket predictor to update predictions
 3. Run the auto-bidder to place orders based on statistical opportunities
+4. Add the auto-seller to place sell orders based on statistical opportunities
 
 Usage:
     python -m src.scheduler.scheduler [options]
@@ -23,10 +24,13 @@ Options:
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
     --no-bidding           Don't run the auto-bidder
-    --threshold FLOAT      Minimum opportunity percentage to place bids (default: 0.0)
+    --no-selling           Don't run the auto-seller
+    --buy-threshold FLOAT  Minimum opportunity percentage to place buy orders (default: 0.0)
+    --sell-threshold FLOAT Minimum opportunity percentage to place sell orders (default: 0.0)
     --amount FLOAT         Amount to bid in USDC (default: 1.0)
-    --dry-run              Run auto-bidder in dry run mode (don't place real orders)
+    --dry-run              Run auto-bidder and auto-seller in dry run mode (don't place real orders)
     --no-stats             Don't show full statistics table
+    --weighted-selection   Use weighted selection for buy opportunities instead of choosing the best
 """
 
 import argparse
@@ -78,14 +82,20 @@ def setup_argparse():
                         help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
     parser.add_argument('--no-bidding', action='store_true',
                         help="Don't run the auto-bidder")
-    parser.add_argument('--threshold', type=float, default=0.0,
-                        help='Minimum opportunity percentage to place bids (default: 0.0)')
+    parser.add_argument('--no-selling', action='store_true',
+                        help="Don't run the auto-seller")
+    parser.add_argument('--buy-threshold', type=float, default=0.0,
+                        help='Minimum opportunity percentage to place buy orders (default: 0.0)')
+    parser.add_argument('--sell-threshold', type=float, default=0.0,
+                        help='Minimum opportunity percentage to place sell orders (default: 0.0)')
     parser.add_argument('--amount', type=float, default=1.0,
                         help='Amount to bid in USDC (default: 1.0)')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Run auto-bidder in dry run mode (don\'t place real orders)')
+                        help='Run auto-bidder and auto-seller in dry run mode (don\'t place real orders)')
     parser.add_argument('--no-stats', action='store_true',
                         help="Don't show full statistics table")
+    parser.add_argument('--weighted-selection', action='store_true',
+                        help='Use weighted selection for buy opportunities instead of choosing the best')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -168,7 +178,7 @@ def run_prediction(quiet=False, use_prophet=True):
     
     return process.returncode == 0
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -177,6 +187,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         amount: Amount to bid in USDC
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
+        weighted_selection: Whether to use weighted selection instead of choosing the best opportunity
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -197,6 +208,11 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     # Add no-stats flag if requested
     if not show_stats:
         cmd.append("--no-stats")
+        
+    # Add weighted selection if requested
+    if weighted_selection:
+        cmd.append("--weighted-selection")
+        logger.info("Using weighted selection for buy opportunities")
     
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
@@ -216,6 +232,57 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
                 logger.info("Auto-bidder completed successfully")
     except Exception as e:
         logger.error(f"Error running auto-bidder: {e}")
+        return False
+    
+    return process.returncode == 0
+
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True):
+    """Run the auto-seller to sell positions based on statistical opportunities.
+    
+    Args:
+        quiet: Whether to suppress output
+        threshold: Minimum opportunity percentage to sell positions
+        dry_run: Whether to run in dry run mode (don't place real orders)
+        show_stats: Whether to show full statistics table
+    """
+    logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
+    
+    # Build the command to run
+    cmd = [
+        sys.executable, 
+        "-m", 
+        "src.bidding_decision.auto_bid.run_seller", 
+        f"--threshold={threshold}",
+        "--auto-sell"
+    ]
+    
+    # Add dry run mode if requested
+    if dry_run:
+        cmd.append("--dry-run")
+        logger.info("Running auto-seller in dry run mode (no real orders will be placed)")
+    
+    # Add no-stats flag if requested
+    if not show_stats:
+        cmd.append("--no-stats")
+    
+    try:
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Auto-seller failed with error: {process.stderr.decode()}")
+            else:
+                # Print the output even in quiet mode since this is the key result
+                logger.info("Auto-seller completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Auto-seller failed")
+            else:
+                logger.info("Auto-seller completed successfully")
+    except Exception as e:
+        logger.error(f"Error running auto-seller: {e}")
         return False
     
     return process.returncode == 0
@@ -251,8 +318,18 @@ def run_scheduled_jobs(args):
         if prediction_success and not args.no_bidding:
             run_auto_bidder(
                 quiet=args.quiet,
-                threshold=args.threshold,
+                threshold=args.buy_threshold,
                 amount=args.amount,
+                dry_run=args.dry_run,
+                show_stats=not args.no_stats,
+                weighted_selection=args.weighted_selection
+            )
+            
+        # Run the auto-seller if prediction succeeded and selling not disabled
+        if prediction_success and not args.no_selling:
+            run_auto_seller(
+                quiet=args.quiet,
+                threshold=args.sell_threshold,
                 dry_run=args.dry_run,
                 show_stats=not args.no_stats
             )
@@ -283,14 +360,24 @@ def main():
     
     # Log auto-bidder configuration
     if not args.tweets_only and not args.no_bidding:
-        logger.info(f"Will run auto-bidder with threshold: {args.threshold}%")
+        logger.info(f"Will run auto-bidder with threshold: {args.buy_threshold}%")
         logger.info(f"Bid amount: {args.amount} USDC")
+        if args.weighted_selection:
+            logger.info("Using weighted selection for buy opportunities")
         if args.dry_run:
             logger.info("Auto-bidder running in DRY RUN mode - no real orders will be placed")
         else:
             logger.info("Auto-bidder will place REAL orders - use --dry-run to test without placing orders")
         if args.no_stats:
             logger.info("Full statistics table display is disabled")
+            
+    # Log auto-seller configuration
+    if not args.tweets_only and not args.no_selling:
+        logger.info(f"Will run auto-seller with threshold: {args.sell_threshold}%")
+        if args.dry_run:
+            logger.info("Auto-seller running in DRY RUN mode - no real orders will be placed")
+        else:
+            logger.info("Auto-seller will place REAL orders - use --dry-run to test without placing orders")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")
