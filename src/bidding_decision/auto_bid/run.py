@@ -75,6 +75,8 @@ def main():
                         help='Find opportunities but do not place orders')
     parser.add_argument('--no-stats', action='store_true',
                         help='Do not print full statistics table')
+    parser.add_argument('--weighted-selection', action='store_true',
+                        help='Use weighted selection from multiple opportunities rather than always choosing the best one')
     
     args = parser.parse_args()
     
@@ -85,7 +87,8 @@ def main():
     # Create the auto-bidder
     bidder = AutoBidder(
         threshold=args.threshold,
-        order_amount=args.amount
+        order_amount=args.amount,
+        use_weighted_selection=args.weighted_selection
     )
     
     try:
@@ -113,12 +116,18 @@ def main():
             sys.exit(0)
         
         # Print opportunity details
-        print("\nBest Buy Opportunity:")
+        selection_method = "weighted selection" if opportunity.get('selection_method') == 'weighted' else "highest edge"
+        total_opps = opportunity.get('total_opportunities', 1)
+        
+        print("\nSelected Buy Opportunity:")
         print(f"Range: {opportunity['range']}")
         print(f"Prediction: {opportunity['prediction']}%")
         print(f"Market Ask Price: {opportunity['ask']}%")
         print(f"Edge: {opportunity['opportunity']}% (after applying {args.threshold}% threshold)")
         print(f"Token ID: {opportunity['token_id']}")
+        
+        if total_opps > 1:
+            print(f"Selection method: {selection_method} from {total_opps} positive opportunities")
         
         # Place the order if not a dry run
         if args.dry_run:

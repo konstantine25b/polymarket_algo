@@ -12,6 +12,7 @@ A suite of tools for automating trading on Polymarket, including:
 - Automatically identifies the best buy opportunities using statistical analysis
 - Places market buy orders for a specified amount (default: 1 USDC)
 - Configurable minimum threshold for opportunities (default: 0.0%)
+- Supports weighted selection from multiple opportunities (instead of always choosing the best one)
 - Displays full statistical comparison table
 - Safely skips bidding when no valid opportunities exist
 - Supports dry run mode to test without placing actual orders
@@ -42,6 +43,9 @@ python -m src.bidding_decision.auto_bid.run --threshold 3.0
 # Change the bid amount
 python -m src.bidding_decision.auto_bid.run --amount 2.5
 
+# Use weighted selection instead of always choosing the best opportunity
+python -m src.bidding_decision.auto_bid.run --weighted-selection
+
 # Run in dry run mode (no real orders placed)
 python -m src.bidding_decision.auto_bid.run --dry-run
 
@@ -60,7 +64,8 @@ from src.bidding_decision.auto_bid.bidder import AutoBidder
 # Initialize with custom parameters
 bidder = AutoBidder(
     threshold=3.0,  # Minimum 3% edge required
-    order_amount=1.0  # 1 USDC per order
+    order_amount=1.0,  # 1 USDC per order
+    use_weighted_selection=True  # Use weighted probability selection instead of highest edge
 )
 
 # Complete automated process
@@ -166,6 +171,31 @@ Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569
 DRY RUN - No order placed.
 ```
 
+#### Weighted Selection Output
+
+With the `--weighted-selection` flag, you might see output like this:
+
+```
+Comparison Table:
+         Range  Pred (%)  Mkt (%)  Bid (%)  Ask (%)  Spread (%)  Diff (%)  Opp (%)  Adj-Sp (%)  Adj-Full (0.0%)  Buy-Only (0.0%)
+       175–199      5.83     2.30     1.90     2.70        0.80      3.13     3.13        2.33             2.33             2.33
+       200–224     17.30     7.05     6.60     7.50        0.90      9.80     9.80        8.90             8.90             8.90
+       225–249     22.28    17.00    16.00    18.00        2.00      4.28     4.28        2.28             2.28             2.28
+// ... more ranges ...
+
+Selected Buy Opportunity:
+Range: 225–249
+Prediction: 22.28%
+Market Ask Price: 18.00%
+Edge: 2.28% (after applying 0.0% threshold)
+Token ID: 58491148303239718595459688678505994852918801795590099599410816935825697202048
+Selection method: weighted selection from 3 positive opportunities
+
+DRY RUN - No order placed.
+```
+
+Even though the "200-224" range had the highest edge (8.9%), the weighted selection algorithm chose the "225-249" range, which still has a positive edge (2.28%). This helps diversify your bidding strategy over time.
+
 #### Position Seller Output (All Positions)
 
 When running the position seller, you'll see all your positions with recommendations for which ones to sell:
@@ -241,7 +271,9 @@ Found 1 positions to sell based on current market conditions.
 3. It displays the full statistics table showing all opportunities
 4. It checks if any buy-only opportunities are greater than 0
    - If all buy-only opportunities are 0 or negative, it exits without placing orders
-5. It identifies the opportunity with the highest "buy-only" edge above your threshold
+5. It selects an opportunity to trade:
+   - **Default mode**: It identifies the opportunity with the highest "buy-only" edge above your threshold
+   - **Weighted selection mode**: It selects from all positive opportunities using a weighted probability system where higher edges have a higher chance of being selected
 6. It places a market buy order for the configured amount (default: 1 USDC)
 
 The "buy-only" edge is calculated as:
@@ -271,6 +303,7 @@ The "buy-only" edge is calculated as:
 
 - **Threshold**: Minimum percentage edge required (default: 0.0%)
 - **Amount**: USDC amount to bid for Auto-Bidder (default: 1.0 USDC)
+- **Weighted Selection**: Whether to use weighted probability selection from multiple opportunities instead of always choosing the best one (default: false)
 - **Wallet**: Uses the `WALLET_PRIVATE_KEY` from your `.env` file by default
 - **Stats Display**: Displays full statistics by default, can be disabled with `--no-stats`
 - **Position Display**: Shows all positions by default, can be limited to sell recommendations with `--sell-only`
