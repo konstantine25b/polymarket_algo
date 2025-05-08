@@ -1,4 +1,7 @@
 from playwright.sync_api import sync_playwright
+from datetime import datetime
+import hashlib
+import os
 
 
 class PinnedChecker:
@@ -6,60 +9,85 @@ class PinnedChecker:
         self.username = "elonmusk"
         self.filepath = "src/pinned_checker/loggedPinned.txt"
 
-    def checkForNewPinnedTweet(self) -> bool:
-        currentResult = self.get_pinned_tweet()
-        if currentResult == "ERROR":
-            return False
-        if self.alreadyLogged(currentResult):
-            return True
-        else:
-            self.logResult(currentResult)
-            return True
-        return False
+    def checkForNewPinnedTweets(self):
+        current_results = self.get_pinned_tweets()
+        if not current_results:
+            return
 
-    def get_pinned_tweet(self):
+        for result in current_results:
+            if not self.already_logged(result):
+                self.log_result(result)
+
+    def get_pinned_tweets(self):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
 
-            # Go to profile page
             url = f"https://x.com/{self.username}"
             page.goto(url, timeout=60000)
-
-            # Wait for tweets to load
             page.wait_for_selector("article")
 
-            # Find all tweet articles
             tweets = page.query_selector_all("article")
+            pinned = []
             for tweet in tweets:
                 inner_text = tweet.inner_text()
                 if "Pinned" in inner_text:
-                    browser.close()
-                    return inner_text
-            else:
-                browser.close()
-                return "ERROR"
+                    pinned.append(inner_text)
 
-    def alreadyLogged(self, currentResult):
+            browser.close()
+            return pinned
+
+    def extract_content(self, tweet_text):
         try:
-            with open(self.filepath, "r") as f:
-                splitOnName = currentResult.split("@elonmusk")
-                # print(splitOnName)
-                # print(splitOnName[1].split("\n"))
-                content = splitOnName[1].split("\n")[3]
-                return f.read() == content
-        except FileNotFoundError:
+            split_on_name = tweet_text.split(f"@{self.username}")
+            return split_on_name[1].split("\n")[3].strip()
+        except Exception:
+            return tweet_text.strip().split("\n")[0]  # fallback
+
+    def generate_tweet_id(self, content):
+        return hashlib.sha256(content.encode()).hexdigest()[:18]
+
+    def already_logged(self, tweet_text):
+        content = self.extract_content(tweet_text)
+        tweet_id = self.generate_tweet_id(content)
+
+        if not os.path.exists(self.filepath):
             return False
 
-    def logResult(self, currentResult):
-        with open(self.filepath, "w") as f:
-            splitOnName = currentResult.split("@elonmusk")
-            # print(splitOnName)
-            # print(splitOnName[1].split("\n"))
-            content = splitOnName[1].split("\n")[3]
-            f.write(content)
+        with open(self.filepath, "r") as f:
+            for line in f:
+                if line.startswith(f'"{tweet_id}"'):
+                    return True
+        return False
+
+    def log_result(self, tweet_text):
+        content = self.extract_content(tweet_text)
+        tweet_id = self.generate_tweet_id(content)
+        timestamp = datetime.utcnow().strftime("%Y:%m:%d:%H:%M:%S")
+        formatted = f'"{tweet_id}","{content}","{timestamp}"\n'
+
+        with open(self.filepath, "a") as f:
+            f.write(formatted)
+
+        print("Logged new pinned tweet:", formatted.strip())
+
+    def get_all_pinned(self):
+        if not os.path.exists(self.filepath):
+            return []
+
+        results = []
+        with open(self.filepath, "r") as f:
+            for line in f:
+                parts = line.strip().split('","')
+                if len(parts) == 3:
+                    tweet_id = parts[0].strip('"')
+                    content = parts[1]
+                    timestamp = parts[2].strip('"')
+                    results.append([tweet_id, content, timestamp])
+        return results
 
 
-rei = PinnedChecker()
-print(rei.checkForNewPinnedTweet())
+if __name__ == "__main__":
+    checker = PinnedChecker()
+    checker.checkForNewPinnedTweets()

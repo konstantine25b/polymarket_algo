@@ -137,15 +137,34 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
         
         # IMPORTANT: Compare timezone-aware datetime objects directly
         # This is safer than converting to naive datetime objects
-        filtered_df = df[(df['created_at_dt'] >= start_datetime) & (df['created_at_dt'] <= end_datetime)]
-        total_count = len(filtered_df)
 
         # WRYMP'S CHANGES
         # ================================
         pinChecker = PinnedChecker()
-        if pinChecker.checkForNewPinnedTweet():
-            total_count += 1
+        pinChecker.checkForNewPinnedTweets()
+        pinned_rows = pinChecker.get_all_pinned()
+
+        if pinned_rows:
+            pinned_df = pd.DataFrame(pinned_rows, columns=["id", "text", "created_at"])
+
+            pinned_df["created_at_dt"] = pd.to_datetime(pinned_df["created_at"], format="%Y:%m:%d:%H:%M:%S", errors="coerce")
+            pinned_df["created_at_dt"] = pinned_df["created_at_dt"].dt.tz_localize("UTC").dt.tz_convert(ET_TIMEZONE)
+
+            for col in df.columns:
+                if col not in pinned_df.columns:
+                    pinned_df[col] = None
+
+            pinned_df = pinned_df[df.columns]
+
+            df = pd.concat([df, pinned_df], ignore_index=True)
+            logger.info(f"Added {len(pinned_df)} pinned tweets to dataset")
+        else:
+            logger.info("No pinned tweets found to add")
         # ================================
+
+        filtered_df = df[(df['created_at_dt'] >= start_datetime) & (df['created_at_dt'] <= end_datetime)]
+        total_count = len(filtered_df)
+
         
         logger.info(f"\n=== Tweet Count Verification ===")
         logger.info(f"Time range (ET): {start_datetime} to {end_datetime}")
