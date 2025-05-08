@@ -1,8 +1,13 @@
-# Polymarket Auto-Bidder
+# Polymarket Auto-Bidder and Position Seller
 
-A simple automated bidding system that analyzes statistical market opportunities and places orders on Polymarket.
+A suite of tools for automating trading on Polymarket, including:
+
+1. **Auto-Bidder** - Analyzes statistical market opportunities and places buy orders
+2. **Position Seller** - Identifies which existing positions should be sold based on statistical analysis
 
 ## Features
+
+### Auto-Bidder
 
 - Automatically identifies the best buy opportunities using statistical analysis
 - Places market buy orders for a specified amount (default: 1 USDC)
@@ -11,9 +16,21 @@ A simple automated bidding system that analyzes statistical market opportunities
 - Safely skips bidding when no valid opportunities exist
 - Supports dry run mode to test without placing actual orders
 
+### Position Seller
+
+- Displays all your current positions with complete statistical information
+- Highlights positions that are recommended for selling
+- Identifies positions where Buy-Only value is 0, indicating they should be sold
+- Shows current market prices (bid/ask), spread, and your model's predictions for each position
+- Provides token IDs needed for programmatic selling
+- Shows Buy-Only and Sell-Only opportunity values for every position
+- Includes a summary of which positions should be sold and why
+
 ## Usage
 
-### Command Line
+### Auto-Bidder
+
+#### Command Line
 
 ```bash
 # Basic usage (uses values from .env file)
@@ -35,10 +52,10 @@ python -m src.bidding_decision.auto_bid.run --no-stats
 python -m src.bidding_decision.auto_bid.run --key YOUR_PRIVATE_KEY
 ```
 
-### Python API
+#### Python API
 
 ```python
-from src.bidding_decision.auto_bid import AutoBidder
+from src.bidding_decision.auto_bid.bidder import AutoBidder
 
 # Initialize with custom parameters
 bidder = AutoBidder(
@@ -63,7 +80,49 @@ if opportunity:
     bidder.place_order(opportunity)
 ```
 
+### Position Seller
+
+#### Command Line
+
+```bash
+# Basic usage - shows all positions with recommendations
+python -m src.bidding_decision.auto_bid.run_seller
+
+# Display only positions recommended for selling (not all positions)
+python -m src.bidding_decision.auto_bid.run_seller --sell-only
+
+# Specify minimum opportunity threshold
+python -m src.bidding_decision.auto_bid.run_seller --threshold 3.0
+
+# Skip displaying the full stats table
+python -m src.bidding_decision.auto_bid.run_seller --no-stats
+
+# Enable verbose logging
+python -m src.bidding_decision.auto_bid.run_seller --verbose
+```
+
+#### Python API
+
+```python
+from src.bidding_decision.auto_bid.position_seller import PositionSeller
+
+# Initialize with custom parameters
+seller = PositionSeller(threshold=3.0)  # Minimum 3% edge required
+
+# Get all positions with statistical information
+all_positions, comparison_df = seller.get_all_positions_with_stats()
+
+# Display all positions with recommendations
+seller.print_all_positions(all_positions)
+
+# Or just get positions that should be sold
+positions_to_sell = seller.get_positions_to_sell()
+seller.print_sell_recommendations(positions_to_sell)
+```
+
 ### Sample Output
+
+#### Auto-Bidder Output
 
 Running with the `--dry-run` flag will show you the full stats table and the best opportunity without placing an actual order:
 
@@ -107,23 +166,75 @@ Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569
 DRY RUN - No order placed.
 ```
 
-If all buy-only opportunities are 0 or negative, the program will exit without placing any orders:
+#### Position Seller Output (All Positions)
+
+When running the position seller, you'll see all your positions with recommendations for which ones to sell:
 
 ```
-Comparison Table:
-[...table shows all opportunities...]
+ALL YOUR CURRENT POSITIONS:
+============================
 
-Token IDs:
-[...token IDs listed...]
+Will Elon tweet 225–249 times May 2–9? (225–249) (RECOMMENDED TO SELL):
+  Outcome: Yes
+  Quantity: 0.071903 shares
+  Token ID: 99677738681569692969530319808900493429917602001237659764921467975358516664236
+  Current Price: Bid 55.00% / Ask 56.00% (Spread: 1.00%)
+  Your Model's Prediction: 49.67%
+  Difference: -6.33%
+  Buy-Only Opportunity: 0.00%
+  Sell-Only Opportunity: 5.33%
 
-Expected Values:
-[...expected values shown...]
+Will Elon tweet 200–224 times May 2–9? (200–224):
+  Outcome: Yes
+  Quantity: 62.500000 shares
+  Token ID: 58491148303239718595459688678505994852918801795590099599410816935825697202168
+  Current Price: Bid 0.80% / Ask 1.70% (Spread: 0.90%)
+  Your Model's Prediction: 14.64%
+  Difference: 12.94%
+  Buy-Only Opportunity: 12.04%
+  Sell-Only Opportunity: 0.00%
 
-2025-05-05 23:01:25,012 - src.bidding_decision.auto_bid.bidder - INFO - All buy-only opportunities are 0 or negative. No suitable trades available.
-2025-05-05 23:01:25,012 - src.bidding_decision.auto_bid.run - INFO - No suitable opportunities found. Exiting.
+Will Elon tweet 300–324 times May 2–9? (300–324):
+  Outcome: Yes
+  Quantity: 0.554505 shares
+  Token ID: 65797596156986552520681751081841163827397285360337892026989663816422180341953
+  Current Price: Bid 0.60% / Ask 1.00% (Spread: 0.40%)
+  Your Model's Prediction: 3.05%
+  Difference: 2.05%
+  Buy-Only Opportunity: 1.65%
+  Sell-Only Opportunity: 0.00%
+
+SUMMARY: You have 1 positions recommended for selling.
+
+Found 1 positions to sell out of 3 total positions.
+```
+
+#### Position Seller Output (Sell-Only Mode)
+
+Using the `--sell-only` flag will show only the positions you should sell:
+
+```
+POSITIONS RECOMMENDED FOR SELLING:
+==================================
+
+Will Elon tweet 225–249 times May 2–9? (225–249):
+  Outcome: Yes
+  Quantity: 0.071903 shares
+  Token ID: 99677738681569692969530319808900493429917602001237659764921467975358516664236
+  Current Bid Price: 55.00%
+  Your Model's Prediction: 49.67%
+  Difference: -6.33%
+
+Note: These positions are recommended for selling because they
+have zero buy opportunity in the comparison table, which suggests
+they are overvalued compared to your model's predictions.
+
+Found 1 positions to sell based on current market conditions.
 ```
 
 ## How It Works
+
+### Auto-Bidder Process
 
 1. The auto-bidder connects to Polymarket using the configured wallet
 2. It generates a statistical comparison between predictions and current market prices
@@ -138,12 +249,31 @@ The "buy-only" edge is calculated as:
 - `(Prediction - Ask Price) - Spread - Threshold`
 - Only positive values are considered for buying
 
+### Position Seller Process
+
+1. The position seller retrieves all your current positions
+2. It generates a statistical comparison table between predictions and market prices
+3. It displays information about every position you own including:
+   - Market name and range
+   - Outcome and quantity
+   - Current bid/ask prices and spread
+   - Your model's prediction and the difference from market price
+   - Buy-Only and Sell-Only opportunity values
+4. It highlights positions where the Buy-Only value is 0, indicating they should be sold
+5. For positions recommended for selling, it provides:
+   - The quantity you currently own
+   - The token ID needed for selling
+   - The current bid price (what you'd get if you sold)
+   - The model's prediction vs. the market
+   - The difference between your prediction and the market
+
 ## Configuration
 
-- **Threshold**: Minimum percentage edge required to place an order (default: 0.0%)
-- **Amount**: USDC amount to bid (default: 1.0 USDC)
+- **Threshold**: Minimum percentage edge required (default: 0.0%)
+- **Amount**: USDC amount to bid for Auto-Bidder (default: 1.0 USDC)
 - **Wallet**: Uses the `WALLET_PRIVATE_KEY` from your `.env` file by default
 - **Stats Display**: Displays full statistics by default, can be disabled with `--no-stats`
+- **Position Display**: Shows all positions by default, can be limited to sell recommendations with `--sell-only`
 
 ## Requirements
 
