@@ -22,10 +22,12 @@ A suite of tools for automating trading on Polymarket, including:
 - Displays all your current positions with complete statistical information
 - Highlights positions that are recommended for selling
 - Identifies positions where Buy-Only value is 0, indicating they should be sold
+- **Automatically executes sell orders for recommended positions**
 - Shows current market prices (bid/ask), spread, and your model's predictions for each position
 - Provides token IDs needed for programmatic selling
 - Shows Buy-Only and Sell-Only opportunity values for every position
 - Includes a summary of which positions should be sold and why
+- Supports dry run mode to test without placing actual sell orders
 
 ## Usage
 
@@ -96,6 +98,12 @@ python -m src.bidding_decision.auto_bid.run_seller
 # Display only positions recommended for selling (not all positions)
 python -m src.bidding_decision.auto_bid.run_seller --sell-only
 
+# Automatically sell all recommended positions
+python -m src.bidding_decision.auto_bid.run_seller --auto-sell
+
+# Do a dry run of auto-sell (shows what would be sold without executing orders)
+python -m src.bidding_decision.auto_bid.run_seller --auto-sell --dry-run
+
 # Specify minimum opportunity threshold
 python -m src.bidding_decision.auto_bid.run_seller --threshold 3.0
 
@@ -123,6 +131,12 @@ seller.print_all_positions(all_positions)
 # Or just get positions that should be sold
 positions_to_sell = seller.get_positions_to_sell()
 seller.print_sell_recommendations(positions_to_sell)
+
+# Execute sell orders for recommended positions
+results = seller.execute_sell_orders(positions_to_sell)
+
+# Or do a dry run without executing actual orders
+dry_run_results = seller.execute_sell_orders(positions_to_sell, dry_run=True)
 ```
 
 ### Sample Output
@@ -262,6 +276,46 @@ they are overvalued compared to your model's predictions.
 Found 1 positions to sell based on current market conditions.
 ```
 
+#### Auto-Sell Output
+
+Using the `--auto-sell` flag will execute sell orders for all recommended positions:
+
+```
+POSITIONS RECOMMENDED FOR SELLING (THRESHOLD: 3.0%):
+==================================
+
+Will Elon tweet 250–274 times May 2–9? (250–274):
+  Outcome: Yes
+  Quantity: 1.492536 shares
+  Token ID: 93124055671959869958037846065354081314545895099992000276527130498502400601286
+  Current Bid Price: 59.00%
+  Your Model's Prediction: 35.41%
+  Difference: -23.59%
+  Sell Opportunity: 20.59% (after applying 3.0% threshold)
+
+Skipping 0 positions with quantity less than 0.01 (Polymarket minimum):
+
+Executing sell orders for 1 positions...
+
+Selling 1.492536 shares of 250–274 (Token ID: 93124055671959869958037846065354081314545895099992000276527130498502400601286)
+Expected sale price: 59.00%
+Sell opportunity: 20.59% (after applying 3.0% threshold)
+Connected with wallet: 0x08E9Fa...
+Sell order executed successfully!
+Response: {'orderId': '123456789', 'status': 'filled', 'price': '0.59', 'fillAmount': '1.492536'}
+
+SELL ORDER SUMMARY: Successfully sold 1 out of 1 positions
+```
+
+If you have positions with quantities below the minimum:
+
+```
+Skipping 1 positions with quantity less than 0.01 (Polymarket minimum):
+  - 325–349: 0.002536 shares (below minimum)
+```
+
+If you prefer to see what would be sold without executing actual orders, use `--auto-sell --dry-run`.
+
 ## How It Works
 
 ### Auto-Bidder Process
@@ -291,8 +345,11 @@ The "buy-only" edge is calculated as:
    - Current bid/ask prices and spread
    - Your model's prediction and the difference from market price
    - Buy-Only and Sell-Only opportunity values
-4. It highlights positions where the Buy-Only value is 0, indicating they should be sold
-5. For positions recommended for selling, it provides:
+4. It identifies positions where the Sell-Only value is positive, indicating they should be sold
+5. If auto-sell is enabled:
+   - It filters out positions with quantities less than 0.01 (Polymarket's minimum order size)
+   - It automatically executes market sell orders for the remaining valid positions
+6. For positions recommended for selling, it provides:
    - The quantity you currently own
    - The token ID needed for selling
    - The current bid price (what you'd get if you sold)
@@ -304,12 +361,24 @@ The "buy-only" edge is calculated as:
 - **Threshold**: Minimum percentage edge required (default: 0.0%)
 - **Amount**: USDC amount to bid for Auto-Bidder (default: 1.0 USDC)
 - **Weighted Selection**: Whether to use weighted probability selection from multiple opportunities instead of always choosing the best one (default: false)
+- **Auto-Sell**: Whether to automatically execute sell orders for recommended positions (default: false)
+- **Dry Run**: Show what would be done but don't execute actual orders (default: false)
 - **Wallet**: Uses the `WALLET_PRIVATE_KEY` from your `.env` file by default
 - **Stats Display**: Displays full statistics by default, can be disabled with `--no-stats`
 - **Position Display**: Shows all positions by default, can be limited to sell recommendations with `--sell-only`
+- **Minimum Order Size**: Positions with less than 0.01 shares will be skipped when selling (Polymarket requirement)
 
 ## Requirements
 
 - Configured `.env` file with `WALLET_PRIVATE_KEY`
 - Properly set up Polymarket bidding module
 - Prophet predictions properly configured
+
+## Common Issues
+
+### Auto-Sell
+
+- **Minimum Order Size**: Polymarket requires a minimum order size of 0.01 shares. Positions with smaller quantities will be automatically skipped.
+- **Invalid Amounts**: This error occurs when trying to execute an order that's too small, typically below 0.01 shares.
+- **Insufficient Funds**: Make sure your wallet has enough USDC to cover transaction fees.
+- **Price Slippage**: Sometimes market prices change between the time of analysis and order execution, causing slippage errors. Try again or adjust your threshold.

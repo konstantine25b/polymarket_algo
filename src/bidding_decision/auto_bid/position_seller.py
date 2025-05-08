@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+from src.polymarket.bidding.sell.market.run import run_market_sell
 
 # Configure logging
 logging.basicConfig(
@@ -198,6 +199,108 @@ class PositionSeller:
         print("\nNote: These positions are recommended for selling because they")
         print(f"have positive sell opportunity above the {self.threshold}% threshold,")
         print("which suggests they are overvalued compared to your model's predictions.")
+        
+    def execute_sell_orders(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None, dry_run: bool = False) -> List[Dict[str, Any]]:
+        """
+        Execute sell orders for all positions recommended for selling.
+        
+        Args:
+            positions_to_sell: List of positions to sell. If None, will be fetched.
+            dry_run: If True, show what would be done but don't execute actual sells
+            
+        Returns:
+            List of results for executed sell orders
+        """
+        if positions_to_sell is None:
+            positions_to_sell = self.get_positions_to_sell()
+            
+        if not positions_to_sell:
+            print(f"\nNo positions to sell with threshold {self.threshold}%.")
+            return []
+        
+        # Filter out positions with quantities less than 0.01
+        valid_positions = []
+        skipped_positions = []
+        
+        for position in positions_to_sell:
+            if position['quantity'] < 0.01:
+                skipped_positions.append(position)
+            else:
+                valid_positions.append(position)
+        
+        if skipped_positions:
+            print(f"\nSkipping {len(skipped_positions)} positions with quantity less than 0.01 (Polymarket minimum):")
+            for position in skipped_positions:
+                print(f"  - {position['range']}: {position['quantity']:.6f} shares (below minimum)")
+        
+        if not valid_positions:
+            print("\nNo valid positions to sell after filtering for minimum quantity (0.01).")
+            return []
+            
+        print(f"\nExecuting sell orders for {len(valid_positions)} positions...")
+        results = []
+        
+        for position in valid_positions:
+            token_id = position['token_id']
+            quantity = position['quantity']
+            
+            # Round the quantity to 6 decimal places to avoid precision issues
+            quantity = round(quantity, 6)
+            
+            print(f"\nSelling {quantity:.6f} shares of {position['range']} (Token ID: {token_id})")
+            print(f"Expected sale price: {position['bid_price']:.2f}%")
+            print(f"Sell opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
+            
+            if dry_run:
+                print("DRY RUN - No actual sell order executed")
+                results.append({
+                    'position': position,
+                    'status': 'dry_run',
+                    'message': 'Skipped execution in dry run mode'
+                })
+            else:
+                try:
+                    # Execute the market sell order using the imported run_market_sell function
+                    response = run_market_sell(token_id, quantity)
+                    print("Sell order executed successfully!")
+                    print(f"Response: {response}")
+                    
+                    results.append({
+                        'position': position,
+                        'status': 'success',
+                        'response': response
+                    })
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"Error executing sell order: {error_message}")
+                    
+                    # Check for specific error about invalid amounts
+                    if "invalid amounts" in error_message.lower() or "must be higher than 0" in error_message.lower():
+                        print("Note: Polymarket requires a minimum order size (typically 0.01 shares).")
+                        print("This error can occur if the actual order size is too small after fees or other adjustments.")
+                    # Check for insufficient funds error
+                    elif "insufficient" in error_message.lower() or "funds" in error_message.lower():
+                        print("Note: You may have insufficient funds to complete this transaction.")
+                        print("Make sure your wallet has enough USDC to cover the transaction fees.")
+                    # Check for slippage errors
+                    elif "slippage" in error_message.lower() or "price" in error_message.lower():
+                        print("Note: The market price may have changed since the order was generated.")
+                        print("Try again or adjust your threshold to account for market volatility.")
+                    
+                    results.append({
+                        'position': position,
+                        'status': 'error',
+                        'error': error_message
+                    })
+        
+        # Print summary
+        successful_sells = sum(1 for r in results if r['status'] == 'success')
+        if dry_run:
+            print(f"\nDRY RUN SUMMARY: Would have sold {len(valid_positions)} positions")
+        else:
+            print(f"\nSELL ORDER SUMMARY: Successfully sold {successful_sells} out of {len(valid_positions)} positions")
+            
+        return results
 
 def main():
     """Command-line entry point"""
@@ -210,6 +313,10 @@ def main():
                       help='Enable verbose logging')
     parser.add_argument('--sell-only', action='store_true',
                       help='Show only positions to sell, not all positions')
+    parser.add_argument('--auto-sell', action='store_true',
+                      help='Automatically execute sell orders for recommended positions')
+    parser.add_argument('--dry-run', action='store_true',
+                      help='Show what would be sold but don\'t execute actual sell orders')
     
     args = parser.parse_args()
     
@@ -220,17 +327,24 @@ def main():
     # Create the position seller
     seller = PositionSeller(threshold=args.threshold)
     
-    if args.sell_only:
-        # Get and print sell recommendations only
-        positions_to_sell = seller.get_positions_to_sell()
+    # Get positions to sell
+    positions_to_sell = seller.get_positions_to_sell()
+    
+    if args.auto_sell:
+        # Execute sell orders (with dry run mode if specified)
+        seller.execute_sell_orders(positions_to_sell, dry_run=args.dry_run)
+    elif args.sell_only:
+        # Just show sell recommendations
         seller.print_sell_recommendations(positions_to_sell)
     else:
-        # Get and print all positions
+        # Show all positions with recommendations
         all_positions, _ = seller.get_all_positions_with_stats()
         seller.print_all_positions(all_positions)
+        
+        # Print a summary if there are positions to sell
+        if positions_to_sell:
+            print(f"\nFound {len(positions_to_sell)} positions to sell out of {len(all_positions)} total positions.")
     
-    # Return the number of positions found
-    positions_to_sell = seller.get_positions_to_sell()
     return len(positions_to_sell)
 
 if __name__ == "__main__":

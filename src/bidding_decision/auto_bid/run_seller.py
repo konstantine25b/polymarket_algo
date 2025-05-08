@@ -70,6 +70,10 @@ def main():
                         help='Enable verbose logging')
     parser.add_argument('--sell-only', action='store_true',
                         help='Show only positions to sell, not all positions')
+    parser.add_argument('--auto-sell', action='store_true',
+                        help='Automatically execute sell orders for recommended positions')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Show what would be sold but don\'t execute actual sell orders')
     
     args = parser.parse_args()
     
@@ -96,10 +100,15 @@ def main():
         # Retrieve all positions with stats
         all_positions, _ = seller.get_all_positions_with_stats()
         
+        # Get positions to sell
+        positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
+        
+        # Execute automatic selling if requested
+        if args.auto_sell:
+            seller.execute_sell_orders(positions_to_sell, dry_run=args.dry_run)
         # Display positions based on command line option
-        if args.sell_only:
+        elif args.sell_only:
             # Get and print only positions to sell
-            positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
             seller.print_sell_recommendations(positions_to_sell)
             
             if not positions_to_sell:
@@ -111,7 +120,6 @@ def main():
             seller.print_all_positions(all_positions)
             
             # Count positions to sell for the summary
-            positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
             if positions_to_sell:
                 print(f"\nFound {len(positions_to_sell)} positions to sell out of {len(all_positions)} total positions.")
     
