@@ -320,25 +320,56 @@ def generate_comparison_table(
     market_ev = market_data.get('summary', {}).get('expected_value', 0)
     ev_diff = pred_ev - market_ev
     
-    # Add summary row
-    summary_row = pd.DataFrame([{
-        'Range': 'EXPECTED VALUE',
-        'Pred (%)': pred_ev,
-        'Mkt (%)': market_ev,
-        'Bid (%)': None,  # No Bid for expected value
-        'Ask (%)': None,  # No Ask for expected value
-        'Spread (%)': None,  # No Spread for expected value
-        'Diff (%)': ev_diff,
-        'Opp (%)': abs(ev_diff),
-        'Adj-Sp (%)': abs(ev_diff),  # No spread for expected value
-        f'Adj-Full ({threshold}%)': max(0, abs(ev_diff) - threshold),
-        f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0,
-        f'Sell-Only ({threshold}%)': max(0, abs(ev_diff) - threshold) if ev_diff < 0 else 0,
-        'Token ID': None,  # No token ID for expected value
-        'Market ID': None   # No market ID for expected value
-    }])
-    
-    df = pd.concat([df, summary_row], ignore_index=True)
+    # Create the summary row with same dtype as existing columns
+    # Create a copy of the data with one row to match dtypes
+    if len(df) > 0:
+        summary_data = {
+            'Range': 'EXPECTED VALUE',
+            'Pred (%)': pred_ev,
+            'Mkt (%)': market_ev,
+            'Bid (%)': np.nan,  # Use np.nan instead of None
+            'Ask (%)': np.nan,
+            'Spread (%)': np.nan,
+            'Diff (%)': ev_diff,
+            'Opp (%)': abs(ev_diff),
+            'Adj-Sp (%)': abs(ev_diff),  # No spread for expected value
+            f'Adj-Full ({threshold}%)': max(0, abs(ev_diff) - threshold),
+            f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0,
+            f'Sell-Only ({threshold}%)': max(0, abs(ev_diff) - threshold) if ev_diff < 0 else 0,
+            'Token ID': None,  # No token ID for expected value
+            'Market ID': None   # No market ID for expected value
+        }
+        
+        # Ensure all columns in summary_data exist in the DataFrame
+        for col in df.columns:
+            if col not in summary_data:
+                summary_data[col] = np.nan
+                
+        # Convert None values to np.nan for numeric columns
+        for col in ['Bid (%)', 'Ask (%)', 'Spread (%)']:
+            if col in summary_data:
+                summary_data[col] = np.nan
+        
+        # Append to DataFrame using loc to maintain dtypes
+        df.loc[len(df)] = summary_data
+    else:
+        # If the DataFrame is empty, create it from scratch with the summary row
+        df = pd.DataFrame([{
+            'Range': 'EXPECTED VALUE',
+            'Pred (%)': pred_ev,
+            'Mkt (%)': market_ev,
+            'Bid (%)': np.nan,
+            'Ask (%)': np.nan,
+            'Spread (%)': np.nan,
+            'Diff (%)': ev_diff,
+            'Opp (%)': abs(ev_diff),
+            'Adj-Sp (%)': abs(ev_diff),
+            f'Adj-Full ({threshold}%)': max(0, abs(ev_diff) - threshold),
+            f'Buy-Only ({threshold}%)': max(0, ev_diff - threshold) if ev_diff > 0 else 0,
+            f'Sell-Only ({threshold}%)': max(0, abs(ev_diff) - threshold) if ev_diff < 0 else 0,
+            'Token ID': None,
+            'Market ID': None
+        }])
     
     # Save to file if requested
     if output_path:
