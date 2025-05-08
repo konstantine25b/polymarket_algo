@@ -40,6 +40,11 @@ def print_stats_table(df):
     print("\nComparison Table:")
     print(df[display_cols].to_string(index=False))
     
+    # Show the threshold being used
+    buy_only_col = [col for col in df.columns if col.startswith('Buy-Only')][0]
+    threshold_value = float(buy_only_col.split('(')[1].split('%')[0])
+    print(f"\nUsing threshold: {threshold_value}%")
+    
     # Show token IDs in a cleaner format
     print("\nToken IDs:")
     data_rows = df[df['Range'] != 'EXPECTED VALUE']
@@ -112,7 +117,7 @@ def main():
         print(f"Range: {opportunity['range']}")
         print(f"Prediction: {opportunity['prediction']}%")
         print(f"Market Ask Price: {opportunity['ask']}%")
-        print(f"Edge: {opportunity['opportunity']}%")
+        print(f"Edge: {opportunity['opportunity']}% (after applying {args.threshold}% threshold)")
         print(f"Token ID: {opportunity['token_id']}")
         
         # Place the order if not a dry run

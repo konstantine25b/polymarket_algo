@@ -37,6 +37,11 @@ def print_stats_table(df):
     print("\nComparison Table:")
     print(df[display_cols].to_string(index=False))
     
+    # Show the threshold being used
+    sell_only_col = [col for col in df.columns if col.startswith('Sell-Only')][0]
+    threshold_value = float(sell_only_col.split('(')[1].split('%')[0])
+    print(f"\nUsing threshold: {threshold_value}%")
+    
     # Show token IDs in a cleaner format
     print("\nToken IDs:")
     data_rows = df[df['Range'] != 'EXPECTED VALUE']

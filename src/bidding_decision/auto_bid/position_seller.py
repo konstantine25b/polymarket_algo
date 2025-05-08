@@ -103,7 +103,7 @@ class PositionSeller:
                             'spread': row['Spread (%)'],
                             'buy_only_value': buy_only_value,
                             'sell_only_value': sell_only_value,
-                            'should_sell': buy_only_value == 0 and quantity > 0
+                            'should_sell': sell_only_value > 0 and quantity > 0
                         }
                         all_positions.append(position_info)
         
@@ -139,7 +139,7 @@ class PositionSeller:
             print("\nNo positions found in your account.")
             return
         
-        print("\nALL YOUR CURRENT POSITIONS:")
+        print(f"\nALL YOUR CURRENT POSITIONS (THRESHOLD: {self.threshold}%):")
         print("============================")
         
         # Sort positions by should_sell (true first), then by range name
@@ -158,15 +158,15 @@ class PositionSeller:
             print(f"  Current Price: Bid {position['bid_price']:.2f}% / Ask {position['ask_price']:.2f}% (Spread: {position['spread']:.2f}%)")
             print(f"  Your Model's Prediction: {position['prediction']:.2f}%")
             print(f"  Difference: {position['difference']:.2f}%")
-            print(f"  Buy-Only Opportunity: {position['buy_only_value']:.2f}%")
-            print(f"  Sell-Only Opportunity: {position['sell_only_value']:.2f}%")
+            print(f"  Buy-Only Opportunity: {position['buy_only_value']:.2f}% (after threshold)")
+            print(f"  Sell-Only Opportunity: {position['sell_only_value']:.2f}% (after threshold)")
         
         # Print a summary of positions to sell
         positions_to_sell = [pos for pos in sorted_positions if pos['should_sell']]
         if positions_to_sell:
-            print("\nSUMMARY: You have", len(positions_to_sell), "positions recommended for selling.")
+            print(f"\nSUMMARY: You have {len(positions_to_sell)} positions recommended for selling with threshold {self.threshold}%.")
         else:
-            print("\nSUMMARY: None of your positions are currently recommended for selling.")
+            print(f"\nSUMMARY: None of your positions are currently recommended for selling with threshold {self.threshold}%.")
     
     def print_sell_recommendations(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None) -> None:
         """
@@ -179,10 +179,10 @@ class PositionSeller:
             positions_to_sell = self.get_positions_to_sell()
         
         if not positions_to_sell:
-            print("\nNo positions recommended for selling.")
+            print(f"\nNo positions recommended for selling with threshold {self.threshold}%.")
             return
         
-        print("\nPOSITIONS RECOMMENDED FOR SELLING:")
+        print(f"\nPOSITIONS RECOMMENDED FOR SELLING (THRESHOLD: {self.threshold}%):")
         print("==================================")
         
         for position in positions_to_sell:
@@ -193,10 +193,11 @@ class PositionSeller:
             print(f"  Current Bid Price: {position['bid_price']:.2f}%")
             print(f"  Your Model's Prediction: {position['prediction']:.2f}%")
             print(f"  Difference: {position['difference']:.2f}%")
+            print(f"  Sell Opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
             
         print("\nNote: These positions are recommended for selling because they")
-        print("have zero buy opportunity in the comparison table, which suggests")
-        print("they are overvalued compared to your model's predictions.")
+        print(f"have positive sell opportunity above the {self.threshold}% threshold,")
+        print("which suggests they are overvalued compared to your model's predictions.")
 
 def main():
     """Command-line entry point"""

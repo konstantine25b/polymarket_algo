@@ -83,16 +83,16 @@ class AutoBidder:
                 logger.info("No specific range opportunities found.")
                 return None
             
-            # Check if all buy-only opportunities are 0
+            # Check if there are any meaningful buy opportunities above the threshold
             if data_rows[buy_only_col].max() <= 0:
-                logger.info("All buy-only opportunities are 0 or negative. No suitable trades available.")
+                logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
                 return None
                 
             # Find the row with the highest buy-only opportunity
             best_idx = data_rows[buy_only_col].idxmax()
             best_row = data_rows.loc[best_idx]
             
-            # Only proceed if there's a meaningful buy opportunity
+            # Only proceed if there's a meaningful buy opportunity above the threshold
             if best_row[buy_only_col] <= 0:
                 logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
                 return None
@@ -105,10 +105,11 @@ class AutoBidder:
                 'market': best_row['Mkt (%)'],
                 'ask': best_row['Ask (%)'],
                 'opportunity': best_row[buy_only_col],
-                'difference': best_row['Diff (%)']
+                'difference': best_row['Diff (%)'],
+                'threshold': self.threshold  # Add threshold for reference
             }
             
-            logger.info(f"Found best opportunity: {opportunity['range']} with {opportunity['opportunity']}% edge")
+            logger.info(f"Found best opportunity: {opportunity['range']} with {opportunity['opportunity']}% edge (threshold: {self.threshold}%)")
             return opportunity
             
         except Exception as e:

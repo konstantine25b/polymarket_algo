@@ -282,18 +282,13 @@ def generate_comparison_table(
         # Calculate spread-adjusted opportunity
         spread_adj_opportunity = max(0, opportunity - spread)
         
-        # Calculate fully adjusted opportunity (spread + threshold)
-        fully_adj_opportunity = max(0, opportunity - spread - threshold)
-        
-        # Calculate buy-only opportunity (only when prediction > ask)
-        buy_only_opportunity = max(0, opportunity - spread - threshold) if diff > 0 else 0
-        
         # Calculate sell-only opportunity (only when prediction < bid)
         sell_only_opportunity = max(0, opportunity - spread - threshold) if diff < 0 else 0
         
-        # Skip rows that don't meet the threshold
-        if opportunity < threshold and range_name != 'EXPECTED VALUE':
-            continue
+        # Calculate adjusted opportunities
+        fully_adj_opportunity_with_threshold = max(0, opportunity - spread - threshold) if opportunity >= threshold or range_name == 'EXPECTED VALUE' else 0
+        buy_only_opportunity_with_threshold = max(0, fully_adj_opportunity_with_threshold) if diff > 0 else 0
+        sell_only_opportunity_with_threshold = max(0, fully_adj_opportunity_with_threshold) if diff < 0 else 0
         
         comparison_data.append({
             'Range': range_name,
@@ -305,9 +300,9 @@ def generate_comparison_table(
             'Diff (%)': diff,
             'Opp (%)': opportunity,
             'Adj-Sp (%)': spread_adj_opportunity,
-            f'Adj-Full ({threshold}%)': fully_adj_opportunity,
-            f'Buy-Only ({threshold}%)': buy_only_opportunity,
-            f'Sell-Only ({threshold}%)': sell_only_opportunity,
+            f'Adj-Full ({threshold}%)': fully_adj_opportunity_with_threshold,
+            f'Buy-Only ({threshold}%)': buy_only_opportunity_with_threshold,
+            f'Sell-Only ({threshold}%)': sell_only_opportunity_with_threshold,
             'Token ID': token_id,
             'Market ID': market_id
         })
