@@ -26,6 +26,8 @@ This module provides an automated scheduler that periodically:
 - **Dry run mode**: Test the auto-bidder and auto-seller without placing actual orders
 - **Configurable bid amount**: Set the amount of USDC to use for each bid
 - **Statistical analysis**: View detailed stats on each market opportunity
+- **Balance checking**: Automatically checks wallet balance before placing buy orders, skipping if insufficient funds
+- **Conditional bidding**: Only runs auto-bidder if there's enough USDC balance (configurable minimum threshold)
 
 ## Command-Line Usage
 
@@ -87,8 +89,14 @@ python -m src.scheduler.scheduler --dry-run
 # Don't display the full statistics table
 python -m src.scheduler.scheduler --no-stats
 
+# Set the minimum USDC balance required for bidding
+python -m src.scheduler.scheduler --min-usdc 2.0
+
+# Skip balance checking (always attempt to place buy orders)
+python -m src.scheduler.scheduler --skip-balance-check
+
 # Combine multiple options
-python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run
+python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5
 ```
 
 ## Command-Line Options
@@ -112,6 +120,8 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--dry-run`: Run auto-bidder and auto-seller in dry run mode (don't place real orders)
 - `--no-stats`: Don't display the full statistics table with market opportunities
 - `--weighted-selection`: Use weighted probability selection for buy opportunities instead of always choosing the best opportunity
+- `--skip-balance-check`: Skip checking wallet balance before running auto-bidder
+- `--min-usdc`: Minimum USDC balance required to run auto-bidder (default: 1.0)
 
 ## Smart Incremental Fetching
 
@@ -136,12 +146,13 @@ You can customize the incremental fetching parameters using the `--initial-batch
 
 After running predictions, the scheduler automatically executes the Auto-Bidder, which:
 
-1. Compares Prophet model predictions with actual Polymarket order book data
-2. Calculates differences between predicted and actual market prices
-3. Measures the bid-ask spread on each market to determine real trading costs
-4. Identifies the best buying opportunities where the "buy-only" edge is highest
-5. Places a market buy order for the configured amount (default: 1 USDC)
-6. Provides detailed output about the selected opportunity and order status
+1. Checks the wallet balance to ensure sufficient USDC is available
+2. Compares Prophet model predictions with actual Polymarket order book data
+3. Calculates differences between predicted and actual market prices
+4. Measures the bid-ask spread on each market to determine real trading costs
+5. Identifies the best buying opportunities where the "buy-only" edge is highest
+6. Places a market buy order for the configured amount (default: 1 USDC)
+7. Provides detailed output about the selected opportunity and order status
 
 The auto-bidder is configured to place buy orders, focusing on opportunities with the highest edge after accounting for:
 
@@ -158,10 +169,19 @@ To customize the auto-bidder behavior:
 - `--dry-run`: Test the auto-bidder without placing actual orders
 - `--no-stats`: Skip displaying the full statistical comparison table
 - `--no-bidding`: Skip running the auto-bidder entirely
+- `--skip-balance-check`: Skip checking wallet balance before running auto-bidder
+- `--min-usdc`: Set the minimum USDC balance required to run auto-bidder (default: 1.0)
 
 Example output in dry run mode:
 
 ```
+==================================================
+WALLET BALANCE: 0x08E9Fa6d9De086eed6a83A8bE9A54ccC9478b776
+==================================================
+MATIC Balance: 2.9880 MATIC
+USDC Balance:  7.93 USDC
+==================================================
+
 Comparison Table:
 [Full statistics table showing all market opportunities]
 
@@ -183,6 +203,34 @@ Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569
 DRY RUN - No order placed.
 ```
 
+## Wallet Balance Checking
+
+The scheduler now includes automatic wallet balance checking before running the auto-bidder. This feature:
+
+1. Retrieves your MATIC and USDC balances from the Polygon network
+2. Displays the balances in a clear, formatted output
+3. Verifies that you have sufficient USDC to place buy orders
+4. Skips the auto-bidder if your USDC balance is below the configured minimum
+
+The balance checker:
+
+- Uses the wallet address from your `.env` file
+- Falls back to RPC queries if the Polymarket API fails
+- Will not affect the auto-seller, which runs regardless of balance
+- Can be disabled with the `--skip-balance-check` flag
+
+If your USDC balance is insufficient:
+
+- The auto-bidder will be skipped with a clear warning message
+- The auto-seller will still run as normal (selling does not require USDC)
+- In dry run mode, the auto-bidder will run regardless of balance
+
+To customize the balance checking behavior:
+
+- `--min-usdc`: Set the minimum required USDC balance (default: 1.0 USDC)
+- `--skip-balance-check`: Disable balance checking entirely
+- `--dry-run`: Run the auto-bidder regardless of balance (for testing)
+
 ## Automated Trading with Position Seller
 
 After running predictions, the scheduler also executes the Position Seller, which:
@@ -200,6 +248,7 @@ The position seller:
 - Only sells positions with sell opportunities above the configured threshold
 - Executes market sell orders at the current bid price
 - Provides comprehensive error handling and notifications
+- Runs regardless of your USDC balance (selling doesn't require USDC)
 
 To customize the position seller behavior:
 
@@ -253,7 +302,7 @@ nohup python -m src.scheduler.scheduler > /dev/null 2>&1 &
 Or with custom options:
 
 ```bash
-nohup python -m src.scheduler.scheduler --interval 10 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --dry-run > /dev/null 2>&1 &
+nohup python -m src.scheduler.scheduler --interval 10 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --dry-run --min-usdc 1.5 > /dev/null 2>&1 &
 ```
 
 To stop the scheduler running in the background:
@@ -278,3 +327,4 @@ Each process is monitored, and failures are logged. If the tweet fetching proces
 - **src.polymarket_predictor**: Module for running predictions
 - **src.bidding_decision.auto_bid.run**: Module for automated bidding based on predictions
 - **src.bidding_decision.auto_bid.run_seller**: Module for automated selling of positions
+- **src.polymarket.balance**: Module for checking wallet balances

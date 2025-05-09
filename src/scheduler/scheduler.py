@@ -31,6 +31,8 @@ Options:
     --dry-run              Run auto-bidder and auto-seller in dry run mode (don't place real orders)
     --no-stats             Don't show full statistics table
     --weighted-selection   Use weighted selection for buy opportunities instead of choosing the best
+    --skip-balance-check   Skip checking wallet balance before running auto-bidder
+    --min-usdc FLOAT       Minimum USDC balance required to run auto-bidder (default: 1.0)
 """
 
 import argparse
@@ -96,6 +98,10 @@ def setup_argparse():
                         help="Don't show full statistics table")
     parser.add_argument('--weighted-selection', action='store_true',
                         help='Use weighted selection for buy opportunities instead of choosing the best')
+    parser.add_argument('--skip-balance-check', action='store_true',
+                        help='Skip checking wallet balance before running auto-bidder')
+    parser.add_argument('--min-usdc', type=float, default=1.0,
+                        help='Minimum USDC balance required to run auto-bidder (default: 1.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -177,6 +183,52 @@ def run_prediction(quiet=False, use_prophet=True):
         return False
     
     return process.returncode == 0
+
+def check_wallet_balance():
+    """Check the wallet's MATIC and USDC balance.
+    
+    Returns:
+        dict: A dictionary containing wallet balance information
+    """
+    logger.info("Checking wallet balance...")
+    
+    cmd = [sys.executable, "-m", "src.polymarket.balance.balance_cli", "--json"]
+    
+    try:
+        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if process.returncode != 0:
+            logger.error(f"Balance checking failed with error: {process.stderr}")
+            return {"success": False, "error": process.stderr, "usdc_balance": 0, "matic_balance": 0}
+        
+        # Parse the JSON output
+        import json
+        balance_info = json.loads(process.stdout)
+        
+        # Log and return the balance info
+        logger.info(f"Wallet balance: {balance_info['matic_balance']} MATIC, {balance_info['usdc_balance']} USDC")
+        return balance_info
+    except Exception as e:
+        logger.error(f"Error checking wallet balance: {e}")
+        return {"success": False, "error": str(e), "usdc_balance": 0, "matic_balance": 0}
+
+def display_wallet_balance():
+    """Display the wallet balance in a formatted way."""
+    balance_info = check_wallet_balance()
+    
+    if balance_info["success"]:
+        print("\n" + "=" * 50)
+        print(f"WALLET BALANCE: {balance_info['wallet']}")
+        print("=" * 50)
+        print(f"MATIC Balance: {balance_info['matic_balance']} MATIC")
+        print(f"USDC Balance:  {balance_info['usdc_balance']} USDC")
+        print("=" * 50 + "\n")
+    else:
+        print("\n" + "=" * 50)
+        print("ERROR CHECKING WALLET BALANCE")
+        print(f"Error: {balance_info.get('error', 'Unknown error')}")
+        print("=" * 50 + "\n")
+    
+    return balance_info
 
 def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False):
     """Run the auto-bidder to place orders based on statistical opportunities.
@@ -314,8 +366,29 @@ def run_scheduled_jobs(args):
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
         )
         
-        # Run the auto-bidder if prediction succeeded and bidding not disabled
-        if prediction_success and not args.no_bidding:
+        # Check wallet balance if needed
+        if prediction_success and not args.no_bidding and not args.skip_balance_check:
+            balance_info = display_wallet_balance()
+            has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+            
+            if not has_sufficient_balance and not args.dry_run:
+                logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
+                logger.warning("Skipping auto-bidder due to insufficient USDC balance")
+                print(f"\n⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC)")
+                print(f"Minimum required: {args.min_usdc} USDC\n")
+            elif prediction_success and not args.no_bidding:
+                # Run the auto-bidder if we have sufficient balance or we're in dry run mode
+                if has_sufficient_balance or args.dry_run:
+                    run_auto_bidder(
+                        quiet=args.quiet,
+                        threshold=args.buy_threshold,
+                        amount=args.amount,
+                        dry_run=args.dry_run,
+                        show_stats=not args.no_stats,
+                        weighted_selection=args.weighted_selection
+                    )
+        elif prediction_success and not args.no_bidding:
+            # Skip balance check if requested
             run_auto_bidder(
                 quiet=args.quiet,
                 threshold=args.buy_threshold,
@@ -326,6 +399,7 @@ def run_scheduled_jobs(args):
             )
             
         # Run the auto-seller if prediction succeeded and selling not disabled
+        # (always run auto-seller regardless of balance)
         if prediction_success and not args.no_selling:
             run_auto_seller(
                 quiet=args.quiet,
@@ -362,6 +436,10 @@ def main():
     if not args.tweets_only and not args.no_bidding:
         logger.info(f"Will run auto-bidder with threshold: {args.buy_threshold}%")
         logger.info(f"Bid amount: {args.amount} USDC")
+        if not args.skip_balance_check:
+            logger.info(f"Will check USDC balance before bidding (min required: {args.min_usdc} USDC)")
+        else:
+            logger.info("Balance checking is disabled (--skip-balance-check)")
         if args.weighted_selection:
             logger.info("Using weighted selection for buy opportunities")
         if args.dry_run:
