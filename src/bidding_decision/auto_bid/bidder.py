@@ -25,7 +25,7 @@ class AutoBidder:
     Automated bidder that uses statistical opportunities to place market buy orders.
     """
     
-    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False):
+    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0):
         """
         Initialize the AutoBidder.
         
@@ -34,10 +34,12 @@ class AutoBidder:
             order_amount: Amount to bid in USDC
             use_weighted_selection: If True, use weighted probability to select from multiple positive opportunities
                                    rather than always selecting the best one
+            min_prediction: Minimum prediction percentage required to consider an opportunity (%)
         """
         self.threshold = threshold
         self.order_amount = order_amount
         self.use_weighted_selection = use_weighted_selection
+        self.min_prediction = min_prediction
         self.client = None
         
     def connect(self, private_key: Optional[str] = None):
@@ -96,6 +98,19 @@ class AutoBidder:
                 logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
                 return None
                 
+            # Apply minimum prediction filter if set
+            if self.min_prediction > 0:
+                prev_count = len(positive_opps)
+                positive_opps = positive_opps[positive_opps['Pred (%)'] >= self.min_prediction].copy()
+                filtered_count = prev_count - len(positive_opps)
+                
+                if filtered_count > 0:
+                    logger.info(f"Filtered out {filtered_count} opportunities below minimum prediction threshold of {self.min_prediction}%")
+                
+                if positive_opps.empty:
+                    logger.info(f"No opportunities meet the minimum prediction threshold of {self.min_prediction}%")
+                    return None
+                
             best_row = None
             
             # Use weighted selection if enabled and there are multiple positive opportunities
@@ -129,6 +144,7 @@ class AutoBidder:
                 'opportunity': best_row[buy_only_col],
                 'difference': best_row['Diff (%)'],
                 'threshold': self.threshold,  # Add threshold for reference
+                'min_prediction': self.min_prediction,  # Add min_prediction for reference
                 'selection_method': 'weighted' if self.use_weighted_selection else 'best',
                 'total_opportunities': len(positive_opps)
             }

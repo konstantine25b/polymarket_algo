@@ -12,6 +12,7 @@ A suite of tools for automating trading on Polymarket, including:
 - Automatically identifies the best buy opportunities using statistical analysis
 - Places market buy orders for a specified amount (default: 1 USDC)
 - Configurable minimum threshold for opportunities (default: 0.0%)
+- Supports minimum prediction percentage filter to focus on higher probability outcomes
 - Supports weighted selection from multiple opportunities (instead of always choosing the best one)
 - Displays full statistical comparison table
 - Safely skips bidding when no valid opportunities exist
@@ -43,6 +44,9 @@ python -m src.bidding_decision.auto_bid.run
 # Specify minimum opportunity threshold
 python -m src.bidding_decision.auto_bid.run --threshold 3.0
 
+# Only bid on opportunities with predictions above a minimum percentage
+python -m src.bidding_decision.auto_bid.run --min-prediction 10.0
+
 # Change the bid amount
 python -m src.bidding_decision.auto_bid.run --amount 2.5
 
@@ -57,6 +61,9 @@ python -m src.bidding_decision.auto_bid.run --no-stats
 
 # Provide private key directly (not recommended for security reasons)
 python -m src.bidding_decision.auto_bid.run --key YOUR_PRIVATE_KEY
+
+# Combine options for more control
+python -m src.bidding_decision.auto_bid.run --threshold 2.0 --min-prediction 15.0 --weighted-selection --dry-run
 ```
 
 #### Python API
@@ -68,7 +75,8 @@ from src.bidding_decision.auto_bid.bidder import AutoBidder
 bidder = AutoBidder(
     threshold=3.0,  # Minimum 3% edge required
     order_amount=1.0,  # 1 USDC per order
-    use_weighted_selection=True  # Use weighted probability selection instead of highest edge
+    use_weighted_selection=True,  # Use weighted probability selection instead of highest edge
+    min_prediction=10.0  # Only consider opportunities with predictions of at least 10%
 )
 
 # Complete automated process
@@ -387,6 +395,7 @@ The "buy-only" edge is calculated as:
 
 - **Threshold**: Minimum percentage edge required (default: 0.0%)
 - **Amount**: USDC amount to bid for Auto-Bidder (default: 1.0 USDC)
+- **Min Prediction**: Minimum prediction percentage to consider for bidding (default: 0.0%)
 - **Weighted Selection**: Whether to use weighted probability selection from multiple opportunities instead of always choosing the best one (default: false)
 - **Auto-Sell**: Whether to automatically execute sell orders for recommended positions (default: false)
 - **Sell-Below**: Sell positions with model prediction below this percentage (default: 0.0%)

@@ -35,6 +35,7 @@ Options:
     --min-usdc FLOAT       Minimum USDC balance required to run auto-bidder (default: 1.0)
     --no-tweet-verify      Skip verifying and displaying tweet counts after fetching
     --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
+    --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
 """
 
 import argparse
@@ -108,6 +109,8 @@ def setup_argparse():
                         help='Skip verifying and displaying tweet counts after fetching')
     parser.add_argument('--sell-below', type=float, default=0.0,
                         help='Automatically sell positions with prediction below this percentage (default: 0.0)')
+    parser.add_argument('--min-prediction', type=float, default=0.0,
+                        help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -292,7 +295,7 @@ def display_wallet_balance():
     
     return balance_info
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -302,6 +305,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
         weighted_selection: Whether to use weighted selection instead of choosing the best opportunity
+        min_prediction: Minimum prediction percentage required to consider an opportunity
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -327,6 +331,11 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     if weighted_selection:
         cmd.append("--weighted-selection")
         logger.info("Using weighted selection for buy opportunities")
+        
+    # Add minimum prediction threshold if specified
+    if min_prediction > 0:
+        cmd.append(f"--min-prediction={min_prediction}")
+        logger.info(f"Using minimum prediction threshold of {min_prediction}% for buy opportunities")
     
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
@@ -457,7 +466,8 @@ def run_scheduled_jobs(args):
                         amount=args.amount,
                         dry_run=args.dry_run,
                         show_stats=not args.no_stats,
-                        weighted_selection=args.weighted_selection
+                        weighted_selection=args.weighted_selection,
+                        min_prediction=args.min_prediction
                     )
         elif prediction_success and not args.no_bidding:
             # Skip balance check if requested
@@ -467,7 +477,8 @@ def run_scheduled_jobs(args):
                 amount=args.amount,
                 dry_run=args.dry_run,
                 show_stats=not args.no_stats,
-                weighted_selection=args.weighted_selection
+                weighted_selection=args.weighted_selection,
+                min_prediction=args.min_prediction
             )
             
         # Run the auto-seller if prediction succeeded and selling not disabled
@@ -515,6 +526,8 @@ def main():
     if not args.tweets_only and not args.no_bidding:
         logger.info(f"Will run auto-bidder with threshold: {args.buy_threshold}%")
         logger.info(f"Bid amount: {args.amount} USDC")
+        if args.min_prediction > 0:
+            logger.info(f"Will only bid on opportunities with prediction ≥ {args.min_prediction}%")
         if not args.skip_balance_check:
             logger.info(f"Will check USDC balance before bidding (min required: {args.min_usdc} USDC)")
         else:

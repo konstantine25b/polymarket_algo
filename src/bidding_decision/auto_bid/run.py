@@ -77,6 +77,8 @@ def main():
                         help='Do not print full statistics table')
     parser.add_argument('--weighted-selection', action='store_true',
                         help='Use weighted selection from multiple opportunities rather than always choosing the best one')
+    parser.add_argument('--min-prediction', type=float, default=0.0,
+                        help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     
     args = parser.parse_args()
     
@@ -88,7 +90,8 @@ def main():
     bidder = AutoBidder(
         threshold=args.threshold,
         order_amount=args.amount,
-        use_weighted_selection=args.weighted_selection
+        use_weighted_selection=args.weighted_selection,
+        min_prediction=args.min_prediction
     )
     
     try:
@@ -128,6 +131,9 @@ def main():
         
         if total_opps > 1:
             print(f"Selection method: {selection_method} from {total_opps} positive opportunities")
+        
+        if args.min_prediction > 0:
+            print(f"Prediction meets minimum threshold of {args.min_prediction}%")
         
         # Place the order if not a dry run
         if args.dry_run:

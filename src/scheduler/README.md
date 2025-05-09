@@ -21,6 +21,7 @@ This module provides an automated scheduler that periodically:
 - **Quiet mode**: Reduce output verbosity
 - **Automated trading**: Automatically places buy orders and sells positions on Polymarket based on prediction data
 - **Trading opportunities**: Identifies potential trading opportunities with customizable thresholds
+- **Minimum prediction filtering**: Only bid on opportunities with predictions above a specified percentage
 - **Weighted selection**: Option to use weighted probability selection for buy opportunities instead of always choosing the best one
 - **Separate thresholds**: Configure different thresholds for buying and selling positions
 - **Dry run mode**: Test the auto-bidder and auto-seller without placing actual orders
@@ -38,7 +39,10 @@ This module provides an automated scheduler that periodically:
 source venv/bin/activate
 
 # I use it commonly
-python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --weighted-selection --interval 30
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30
+
+# for testing
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30 --dry-run
 
 # Run with default settings (every 20 minutes)
 python -m src.scheduler.scheduler
@@ -78,6 +82,9 @@ python -m src.scheduler.scheduler --no-selling
 
 # Set minimum thresholds for buying and selling (e.g., 3% for buying, 2% for selling)
 python -m src.scheduler.scheduler --buy-threshold 3.0 --sell-threshold 2.0
+
+# Only bid on opportunities with predictions of at least 10%
+python -m src.scheduler.scheduler --min-prediction 10.0
 
 # Set the bid amount to 2.5 USDC
 python -m src.scheduler.scheduler --amount 2.5
@@ -124,6 +131,7 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-selling`: Don't run the auto-seller after predictions
 - `--buy-threshold`: Minimum opportunity percentage for placing buy orders (default: 0.0)
 - `--sell-threshold`: Minimum opportunity percentage for selling positions (default: 0.0)
+- `--min-prediction`: Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
 - `--amount`: Amount to bid in USDC (default: 1.0)
 - `--dry-run`: Run auto-bidder and auto-seller in dry run mode (don't place real orders)
 - `--no-stats`: Don't display the full statistics table with market opportunities
