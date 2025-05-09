@@ -38,10 +38,17 @@ This module provides an automated scheduler that periodically:
 # Activate virtual environment
 source venv/bin/activate
 
-# I use it commonly
+# I use it commonly - this setup provides a balanced automated trading approach:
 python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30
+# In this command:
+# --buy-threshold 1.0: Only bid on opportunities with at least 1% edge over market price
+# --sell-threshold 0.5: Sell positions with at least 0.5% sell opportunity
+# --sell-below 2.0: Automatically sell positions with predictions below 2%
+# --min-prediction 5.0: Only bid on opportunities where our model predicts at least 5% probability
+# --weighted-selection: Use weighted probability selection instead of always choosing the best opportunity
+# --interval 30: Run the scheduler every 30 minutes
 
-# for testing
+# For testing (same settings but in dry run mode - no real orders placed)
 python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30 --dry-run
 
 # Run with default settings (every 20 minutes)
