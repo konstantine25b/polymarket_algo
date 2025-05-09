@@ -28,6 +28,7 @@ This module provides an automated scheduler that periodically:
 - **Statistical analysis**: View detailed stats on each market opportunity
 - **Balance checking**: Automatically checks wallet balance before placing buy orders, skipping if insufficient funds
 - **Conditional bidding**: Only runs auto-bidder if there's enough USDC balance (configurable minimum threshold)
+- **Tweet verification**: Shows the total and daily tweet counts after fetching to track activity
 
 ## Command-Line Usage
 
@@ -95,6 +96,9 @@ python -m src.scheduler.scheduler --min-usdc 2.0
 # Skip balance checking (always attempt to place buy orders)
 python -m src.scheduler.scheduler --skip-balance-check
 
+# Skip tweet count verification after fetching
+python -m src.scheduler.scheduler --no-tweet-verify
+
 # Combine multiple options
 python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5
 ```
@@ -122,6 +126,7 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--weighted-selection`: Use weighted probability selection for buy opportunities instead of always choosing the best opportunity
 - `--skip-balance-check`: Skip checking wallet balance before running auto-bidder
 - `--min-usdc`: Minimum USDC balance required to run auto-bidder (default: 1.0)
+- `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
 
 ## Smart Incremental Fetching
 
@@ -141,6 +146,40 @@ This approach provides several benefits:
 
 You can customize the incremental fetching parameters using the `--initial-batch` and
 `--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
+
+## Tweet Count Verification
+
+After successfully fetching tweets, the scheduler automatically verifies and displays the tweet count for the current market week. This feature:
+
+1. Shows the total number of tweets for the current market week
+2. Displays a daily breakdown of tweets for each day of the week
+3. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
+
+The tweet verification feature provides valuable information for monitoring:
+- Whether the expected number of tweets are being collected
+- The daily pattern of tweet activity during the week
+- Progress toward the various tweet count ranges on Polymarket
+
+Example output:
+
+```
+==================================================
+TWEET COUNT VERIFICATION
+==================================================
+Total tweets this week: 235
+
+Daily tweet counts:
+  2025-05-02: 25 tweets
+  2025-05-03: 44 tweets
+  2025-05-04: 50 tweets
+  2025-05-05: 18 tweets
+  2025-05-06: 28 tweets
+  2025-05-07: 40 tweets
+  2025-05-08: 30 tweets
+==================================================
+```
+
+You can disable this feature with the `--no-tweet-verify` flag if you don't need the information.
 
 ## Automated Trading with Auto-Bidder
 
@@ -328,3 +367,4 @@ Each process is monitored, and failures are logged. If the tweet fetching proces
 - **src.bidding_decision.auto_bid.run**: Module for automated bidding based on predictions
 - **src.bidding_decision.auto_bid.run_seller**: Module for automated selling of positions
 - **src.polymarket.balance**: Module for checking wallet balances
+- **src.polymarket_predictor.tweet_predictor**: Module for tweet analysis and verification

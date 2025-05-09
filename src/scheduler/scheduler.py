@@ -33,6 +33,7 @@ Options:
     --weighted-selection   Use weighted selection for buy opportunities instead of choosing the best
     --skip-balance-check   Skip checking wallet balance before running auto-bidder
     --min-usdc FLOAT       Minimum USDC balance required to run auto-bidder (default: 1.0)
+    --no-tweet-verify      Skip verifying and displaying tweet counts after fetching
 """
 
 import argparse
@@ -102,6 +103,8 @@ def setup_argparse():
                         help='Skip checking wallet balance before running auto-bidder')
     parser.add_argument('--min-usdc', type=float, default=1.0,
                         help='Minimum USDC balance required to run auto-bidder (default: 1.0)')
+    parser.add_argument('--no-tweet-verify', action='store_true',
+                        help='Skip verifying and displaying tweet counts after fetching')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -148,6 +151,62 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, i
         return False
     
     return process.returncode == 0
+
+def verify_tweet_count(quiet=False):
+    """Verify and display the tweet count for the current market week.
+    
+    This runs a simplified version of the tweet_predictor --verify-count command
+    to show the total number of tweets for the current market week and the daily breakdown.
+    
+    Args:
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the verification was successful
+    """
+    logger.info("Verifying tweet count for current market week...")
+    
+    cmd = [sys.executable, "-m", "src.polymarket_predictor.tweet_predictor", "--verify-count"]
+    
+    try:
+        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if process.returncode != 0:
+            logger.error(f"Tweet count verification failed with error: {process.stderr}")
+            return False
+        
+        # Extract and display the relevant information about tweet counts
+        output = process.stdout
+        
+        # Parse the output to extract total tweet count and daily counts
+        total_count = None
+        daily_counts = []
+        
+        for line in output.split('\n'):
+            if "Total tweets in range:" in line:
+                total_count = line.split(":")[-1].strip()
+            elif "tweets" in line and line.startswith("  202"):
+                daily_counts.append(line.strip())
+        
+        # Display the tweet count information
+        if total_count:
+            print("\n" + "=" * 50)
+            print("TWEET COUNT VERIFICATION")
+            print("=" * 50)
+            print(f"Total tweets this week: {total_count}")
+            print("\nDaily tweet counts:")
+            for count in daily_counts:
+                print(f"  {count}")
+            print("=" * 50 + "\n")
+            
+            logger.info(f"Tweet count verification complete: {total_count} total tweets this week")
+            return True
+        else:
+            logger.warning("Could not extract tweet count information from verification output")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error verifying tweet count: {e}")
+        return False
 
 def run_prediction(quiet=False, use_prophet=True):
     """Run the Polymarket predictor to update predictions.
@@ -358,6 +417,10 @@ def run_scheduled_jobs(args):
             initial_batch=args.initial_batch,
             max_batch=args.max_batch
         )
+        
+        # Verify tweet count after fetching if enabled
+        if tweets_success and not args.no_tweet_verify:
+            verify_tweet_count(quiet=args.quiet)
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
@@ -431,6 +494,12 @@ def main():
         logger.info("Using Prophet-based prediction algorithm (--no-prophet to disable)")
     elif not args.tweets_only:
         logger.info("Using standard prediction algorithm")
+    
+    # Log tweet verification setting
+    if not args.predictions_only and not args.no_tweet_verify:
+        logger.info("Tweet count verification is enabled")
+    elif not args.predictions_only:
+        logger.info("Tweet count verification is disabled (--no-tweet-verify)")
     
     # Log auto-bidder configuration
     if not args.tweets_only and not args.no_bidding:
