@@ -6,6 +6,7 @@ This module provides functionality to periodically:
 1. Fetch Elon Musk's tweets and store them in the database
 2. Run the Polymarket predictor to update predictions
 3. Run the auto-bidder to place orders based on statistical opportunities
+4. Add the auto-seller to place sell orders based on statistical opportunities
 
 Usage:
     python -m src.scheduler.scheduler [options]
@@ -23,10 +24,18 @@ Options:
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
     --no-bidding           Don't run the auto-bidder
-    --threshold FLOAT      Minimum opportunity percentage to place bids (default: 0.0)
+    --no-selling           Don't run the auto-seller
+    --buy-threshold FLOAT  Minimum opportunity percentage to place buy orders (default: 0.0)
+    --sell-threshold FLOAT Minimum opportunity percentage to place sell orders (default: 0.0)
     --amount FLOAT         Amount to bid in USDC (default: 1.0)
-    --dry-run              Run auto-bidder in dry run mode (don't place real orders)
+    --dry-run              Run auto-bidder and auto-seller in dry run mode (don't place real orders)
     --no-stats             Don't show full statistics table
+    --weighted-selection   Use weighted selection for buy opportunities instead of choosing the best
+    --skip-balance-check   Skip checking wallet balance before running auto-bidder
+    --min-usdc FLOAT       Minimum USDC balance required to run auto-bidder (default: 1.0)
+    --no-tweet-verify      Skip verifying and displaying tweet counts after fetching
+    --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
+    --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
 """
 
 import argparse
@@ -78,14 +87,30 @@ def setup_argparse():
                         help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
     parser.add_argument('--no-bidding', action='store_true',
                         help="Don't run the auto-bidder")
-    parser.add_argument('--threshold', type=float, default=0.0,
-                        help='Minimum opportunity percentage to place bids (default: 0.0)')
+    parser.add_argument('--no-selling', action='store_true',
+                        help="Don't run the auto-seller")
+    parser.add_argument('--buy-threshold', type=float, default=0.0,
+                        help='Minimum opportunity percentage to place buy orders (default: 0.0)')
+    parser.add_argument('--sell-threshold', type=float, default=0.0,
+                        help='Minimum opportunity percentage to place sell orders (default: 0.0)')
     parser.add_argument('--amount', type=float, default=1.0,
                         help='Amount to bid in USDC (default: 1.0)')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Run auto-bidder in dry run mode (don\'t place real orders)')
+                        help='Run auto-bidder and auto-seller in dry run mode (don\'t place real orders)')
     parser.add_argument('--no-stats', action='store_true',
                         help="Don't show full statistics table")
+    parser.add_argument('--weighted-selection', action='store_true',
+                        help='Use weighted selection for buy opportunities instead of choosing the best')
+    parser.add_argument('--skip-balance-check', action='store_true',
+                        help='Skip checking wallet balance before running auto-bidder')
+    parser.add_argument('--min-usdc', type=float, default=1.0,
+                        help='Minimum USDC balance required to run auto-bidder (default: 1.0)')
+    parser.add_argument('--no-tweet-verify', action='store_true',
+                        help='Skip verifying and displaying tweet counts after fetching')
+    parser.add_argument('--sell-below', type=float, default=0.0,
+                        help='Automatically sell positions with prediction below this percentage (default: 0.0)')
+    parser.add_argument('--min-prediction', type=float, default=0.0,
+                        help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -133,6 +158,62 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, i
     
     return process.returncode == 0
 
+def verify_tweet_count(quiet=False):
+    """Verify and display the tweet count for the current market week.
+    
+    This runs a simplified version of the tweet_predictor --verify-count command
+    to show the total number of tweets for the current market week and the daily breakdown.
+    
+    Args:
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the verification was successful
+    """
+    logger.info("Verifying tweet count for current market week...")
+    
+    cmd = [sys.executable, "-m", "src.polymarket_predictor.tweet_predictor", "--verify-count"]
+    
+    try:
+        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if process.returncode != 0:
+            logger.error(f"Tweet count verification failed with error: {process.stderr}")
+            return False
+        
+        # Extract and display the relevant information about tweet counts
+        output = process.stdout
+        
+        # Parse the output to extract total tweet count and daily counts
+        total_count = None
+        daily_counts = []
+        
+        for line in output.split('\n'):
+            if "Total tweets in range:" in line:
+                total_count = line.split(":")[-1].strip()
+            elif "tweets" in line and line.startswith("  202"):
+                daily_counts.append(line.strip())
+        
+        # Display the tweet count information
+        if total_count:
+            print("\n" + "=" * 50)
+            print("TWEET COUNT VERIFICATION")
+            print("=" * 50)
+            print(f"Total tweets this week: {total_count}")
+            print("\nDaily tweet counts:")
+            for count in daily_counts:
+                print(f"  {count}")
+            print("=" * 50 + "\n")
+            
+            logger.info(f"Tweet count verification complete: {total_count} total tweets this week")
+            return True
+        else:
+            logger.warning("Could not extract tweet count information from verification output")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error verifying tweet count: {e}")
+        return False
+
 def run_prediction(quiet=False, use_prophet=True):
     """Run the Polymarket predictor to update predictions.
     
@@ -168,7 +249,53 @@ def run_prediction(quiet=False, use_prophet=True):
     
     return process.returncode == 0
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True):
+def check_wallet_balance():
+    """Check the wallet's MATIC and USDC balance.
+    
+    Returns:
+        dict: A dictionary containing wallet balance information
+    """
+    logger.info("Checking wallet balance...")
+    
+    cmd = [sys.executable, "-m", "src.polymarket.balance.balance_cli", "--json"]
+    
+    try:
+        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if process.returncode != 0:
+            logger.error(f"Balance checking failed with error: {process.stderr}")
+            return {"success": False, "error": process.stderr, "usdc_balance": 0, "matic_balance": 0}
+        
+        # Parse the JSON output
+        import json
+        balance_info = json.loads(process.stdout)
+        
+        # Log and return the balance info
+        logger.info(f"Wallet balance: {balance_info['matic_balance']} MATIC, {balance_info['usdc_balance']} USDC")
+        return balance_info
+    except Exception as e:
+        logger.error(f"Error checking wallet balance: {e}")
+        return {"success": False, "error": str(e), "usdc_balance": 0, "matic_balance": 0}
+
+def display_wallet_balance():
+    """Display the wallet balance in a formatted way."""
+    balance_info = check_wallet_balance()
+    
+    if balance_info["success"]:
+        print("\n" + "=" * 50)
+        print(f"WALLET BALANCE: {balance_info['wallet']}")
+        print("=" * 50)
+        print(f"MATIC Balance: {balance_info['matic_balance']} MATIC")
+        print(f"USDC Balance:  {balance_info['usdc_balance']} USDC")
+        print("=" * 50 + "\n")
+    else:
+        print("\n" + "=" * 50)
+        print("ERROR CHECKING WALLET BALANCE")
+        print(f"Error: {balance_info.get('error', 'Unknown error')}")
+        print("=" * 50 + "\n")
+    
+    return balance_info
+
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -177,6 +304,8 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         amount: Amount to bid in USDC
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
+        weighted_selection: Whether to use weighted selection instead of choosing the best opportunity
+        min_prediction: Minimum prediction percentage required to consider an opportunity
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -197,6 +326,16 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     # Add no-stats flag if requested
     if not show_stats:
         cmd.append("--no-stats")
+        
+    # Add weighted selection if requested
+    if weighted_selection:
+        cmd.append("--weighted-selection")
+        logger.info("Using weighted selection for buy opportunities")
+        
+    # Add minimum prediction threshold if specified
+    if min_prediction > 0:
+        cmd.append(f"--min-prediction={min_prediction}")
+        logger.info(f"Using minimum prediction threshold of {min_prediction}% for buy opportunities")
     
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
@@ -220,6 +359,63 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
+def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True):
+    """Run the auto-seller to sell positions based on statistical opportunities.
+    
+    Args:
+        quiet: Whether to suppress output
+        threshold: Minimum opportunity percentage to sell positions
+        sell_below: Sell positions with prediction below this percentage
+        dry_run: Whether to run in dry run mode (don't place real orders)
+        show_stats: Whether to show full statistics table
+    """
+    logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
+    
+    # Build the command to run
+    cmd = [
+        sys.executable, 
+        "-m", 
+        "src.bidding_decision.auto_bid.run_seller", 
+        f"--threshold={threshold}",
+        "--auto-sell"
+    ]
+    
+    # Add sell-below parameter if specified
+    if sell_below > 0.0:
+        cmd.append(f"--sell-below={sell_below}")
+        logger.info(f"Configured to sell positions with prediction below {sell_below}%")
+    
+    # Add dry run mode if requested
+    if dry_run:
+        cmd.append("--dry-run")
+        logger.info("Running auto-seller in dry run mode (no real orders will be placed)")
+    
+    # Add no-stats flag if requested
+    if not show_stats:
+        cmd.append("--no-stats")
+    
+    try:
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Auto-seller failed with error: {process.stderr.decode()}")
+            else:
+                # Print the output even in quiet mode since this is the key result
+                logger.info("Auto-seller completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Auto-seller failed")
+            else:
+                logger.info("Auto-seller completed successfully")
+    except Exception as e:
+        logger.error(f"Error running auto-seller: {e}")
+        return False
+    
+    return process.returncode == 0
+
 def run_scheduled_jobs(args):
     """Run the configured jobs based on command-line arguments."""
     tweets_success = True
@@ -239,6 +435,10 @@ def run_scheduled_jobs(args):
             initial_batch=args.initial_batch,
             max_batch=args.max_batch
         )
+        
+        # Verify tweet count after fetching if enabled
+        if tweets_success and not args.no_tweet_verify:
+            verify_tweet_count(quiet=args.quiet)
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
@@ -247,12 +447,47 @@ def run_scheduled_jobs(args):
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
         )
         
-        # Run the auto-bidder if prediction succeeded and bidding not disabled
-        if prediction_success and not args.no_bidding:
+        # Check wallet balance if needed
+        if prediction_success and not args.no_bidding and not args.skip_balance_check:
+            balance_info = display_wallet_balance()
+            has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+            
+            if not has_sufficient_balance and not args.dry_run:
+                logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
+                logger.warning("Skipping auto-bidder due to insufficient USDC balance")
+                print(f"\n⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC)")
+                print(f"Minimum required: {args.min_usdc} USDC\n")
+            elif prediction_success and not args.no_bidding:
+                # Run the auto-bidder if we have sufficient balance or we're in dry run mode
+                if has_sufficient_balance or args.dry_run:
+                    run_auto_bidder(
+                        quiet=args.quiet,
+                        threshold=args.buy_threshold,
+                        amount=args.amount,
+                        dry_run=args.dry_run,
+                        show_stats=not args.no_stats,
+                        weighted_selection=args.weighted_selection,
+                        min_prediction=args.min_prediction
+                    )
+        elif prediction_success and not args.no_bidding:
+            # Skip balance check if requested
             run_auto_bidder(
                 quiet=args.quiet,
-                threshold=args.threshold,
+                threshold=args.buy_threshold,
                 amount=args.amount,
+                dry_run=args.dry_run,
+                show_stats=not args.no_stats,
+                weighted_selection=args.weighted_selection,
+                min_prediction=args.min_prediction
+            )
+            
+        # Run the auto-seller if prediction succeeded and selling not disabled
+        # (always run auto-seller regardless of balance)
+        if prediction_success and not args.no_selling:
+            run_auto_seller(
+                quiet=args.quiet,
+                threshold=args.sell_threshold,
+                sell_below=args.sell_below,
                 dry_run=args.dry_run,
                 show_stats=not args.no_stats
             )
@@ -281,16 +516,40 @@ def main():
     elif not args.tweets_only:
         logger.info("Using standard prediction algorithm")
     
+    # Log tweet verification setting
+    if not args.predictions_only and not args.no_tweet_verify:
+        logger.info("Tweet count verification is enabled")
+    elif not args.predictions_only:
+        logger.info("Tweet count verification is disabled (--no-tweet-verify)")
+    
     # Log auto-bidder configuration
     if not args.tweets_only and not args.no_bidding:
-        logger.info(f"Will run auto-bidder with threshold: {args.threshold}%")
+        logger.info(f"Will run auto-bidder with threshold: {args.buy_threshold}%")
         logger.info(f"Bid amount: {args.amount} USDC")
+        if args.min_prediction > 0:
+            logger.info(f"Will only bid on opportunities with prediction ≥ {args.min_prediction}%")
+        if not args.skip_balance_check:
+            logger.info(f"Will check USDC balance before bidding (min required: {args.min_usdc} USDC)")
+        else:
+            logger.info("Balance checking is disabled (--skip-balance-check)")
+        if args.weighted_selection:
+            logger.info("Using weighted selection for buy opportunities")
         if args.dry_run:
             logger.info("Auto-bidder running in DRY RUN mode - no real orders will be placed")
         else:
             logger.info("Auto-bidder will place REAL orders - use --dry-run to test without placing orders")
         if args.no_stats:
             logger.info("Full statistics table display is disabled")
+            
+    # Log auto-seller configuration
+    if not args.tweets_only and not args.no_selling:
+        logger.info(f"Will run auto-seller with threshold: {args.sell_threshold}%")
+        if args.sell_below > 0.0:
+            logger.info(f"Will sell positions with prediction below {args.sell_below}%")
+        if args.dry_run:
+            logger.info("Auto-seller running in DRY RUN mode - no real orders will be placed")
+        else:
+            logger.info("Auto-seller will place REAL orders - use --dry-run to test without placing orders")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")

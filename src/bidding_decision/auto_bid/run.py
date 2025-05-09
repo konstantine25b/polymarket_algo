@@ -40,6 +40,11 @@ def print_stats_table(df):
     print("\nComparison Table:")
     print(df[display_cols].to_string(index=False))
     
+    # Show the threshold being used
+    buy_only_col = [col for col in df.columns if col.startswith('Buy-Only')][0]
+    threshold_value = float(buy_only_col.split('(')[1].split('%')[0])
+    print(f"\nUsing threshold: {threshold_value}%")
+    
     # Show token IDs in a cleaner format
     print("\nToken IDs:")
     data_rows = df[df['Range'] != 'EXPECTED VALUE']
@@ -70,6 +75,10 @@ def main():
                         help='Find opportunities but do not place orders')
     parser.add_argument('--no-stats', action='store_true',
                         help='Do not print full statistics table')
+    parser.add_argument('--weighted-selection', action='store_true',
+                        help='Use weighted selection from multiple opportunities rather than always choosing the best one')
+    parser.add_argument('--min-prediction', type=float, default=0.0,
+                        help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     
     args = parser.parse_args()
     
@@ -80,7 +89,9 @@ def main():
     # Create the auto-bidder
     bidder = AutoBidder(
         threshold=args.threshold,
-        order_amount=args.amount
+        order_amount=args.amount,
+        use_weighted_selection=args.weighted_selection,
+        min_prediction=args.min_prediction
     )
     
     try:
@@ -108,12 +119,21 @@ def main():
             sys.exit(0)
         
         # Print opportunity details
-        print("\nBest Buy Opportunity:")
+        selection_method = "weighted selection" if opportunity.get('selection_method') == 'weighted' else "highest edge"
+        total_opps = opportunity.get('total_opportunities', 1)
+        
+        print("\nSelected Buy Opportunity:")
         print(f"Range: {opportunity['range']}")
         print(f"Prediction: {opportunity['prediction']}%")
         print(f"Market Ask Price: {opportunity['ask']}%")
-        print(f"Edge: {opportunity['opportunity']}%")
+        print(f"Edge: {opportunity['opportunity']}% (after applying {args.threshold}% threshold)")
         print(f"Token ID: {opportunity['token_id']}")
+        
+        if total_opps > 1:
+            print(f"Selection method: {selection_method} from {total_opps} positive opportunities")
+        
+        if args.min_prediction > 0:
+            print(f"Prediction meets minimum threshold of {args.min_prediction}%")
         
         # Place the order if not a dry run
         if args.dry_run:

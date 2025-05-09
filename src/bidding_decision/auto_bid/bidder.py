@@ -6,6 +6,8 @@ Analyzes statistical opportunities and places orders based on the highest buy-on
 import logging
 import pandas as pd
 from typing import Optional, Dict, Any
+import random
+import numpy as np
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.polymarket.bidding import PolymarketClient
@@ -23,16 +25,21 @@ class AutoBidder:
     Automated bidder that uses statistical opportunities to place market buy orders.
     """
     
-    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0):
+    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0):
         """
         Initialize the AutoBidder.
         
         Args:
             threshold: Minimum opportunity percentage required to place an order (%)
             order_amount: Amount to bid in USDC
+            use_weighted_selection: If True, use weighted probability to select from multiple positive opportunities
+                                   rather than always selecting the best one
+            min_prediction: Minimum prediction percentage required to consider an opportunity (%)
         """
         self.threshold = threshold
         self.order_amount = order_amount
+        self.use_weighted_selection = use_weighted_selection
+        self.min_prediction = min_prediction
         self.client = None
         
     def connect(self, private_key: Optional[str] = None):
@@ -83,20 +90,50 @@ class AutoBidder:
                 logger.info("No specific range opportunities found.")
                 return None
             
-            # Check if all buy-only opportunities are 0
-            if data_rows[buy_only_col].max() <= 0:
-                logger.info("All buy-only opportunities are 0 or negative. No suitable trades available.")
-                return None
-                
-            # Find the row with the highest buy-only opportunity
-            best_idx = data_rows[buy_only_col].idxmax()
-            best_row = data_rows.loc[best_idx]
+            # Filter for positive buy opportunities above the threshold
+            positive_opps = data_rows[data_rows[buy_only_col] > 0].copy()
             
-            # Only proceed if there's a meaningful buy opportunity
-            if best_row[buy_only_col] <= 0:
+            # Check if there are any meaningful buy opportunities above the threshold
+            if positive_opps.empty or positive_opps[buy_only_col].max() <= 0:
                 logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
                 return None
                 
+            # Apply minimum prediction filter if set
+            if self.min_prediction > 0:
+                prev_count = len(positive_opps)
+                positive_opps = positive_opps[positive_opps['Pred (%)'] >= self.min_prediction].copy()
+                filtered_count = prev_count - len(positive_opps)
+                
+                if filtered_count > 0:
+                    logger.info(f"Filtered out {filtered_count} opportunities below minimum prediction threshold of {self.min_prediction}%")
+                
+                if positive_opps.empty:
+                    logger.info(f"No opportunities meet the minimum prediction threshold of {self.min_prediction}%")
+                    return None
+                
+            best_row = None
+            
+            # Use weighted selection if enabled and there are multiple positive opportunities
+            if self.use_weighted_selection and len(positive_opps) > 1:
+                # Calculate weights based on opportunity values
+                weights = positive_opps[buy_only_col].values
+                # Normalize weights to probabilities
+                probs = weights / weights.sum()
+                
+                # Select a row using weighted probabilities
+                selected_idx = np.random.choice(positive_opps.index, p=probs)
+                best_row = positive_opps.loc[selected_idx]
+                
+                logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
+                logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
+                           f"(probability: {probs[positive_opps.index.get_loc(selected_idx)]:.2f})")
+            else:
+                # Find the row with the highest buy-only opportunity (original behavior)
+                best_idx = positive_opps[buy_only_col].idxmax()
+                best_row = positive_opps.loc[best_idx]
+                
+                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
+            
             # Extract information about the opportunity
             opportunity = {
                 'range': best_row['Range'],
@@ -105,10 +142,13 @@ class AutoBidder:
                 'market': best_row['Mkt (%)'],
                 'ask': best_row['Ask (%)'],
                 'opportunity': best_row[buy_only_col],
-                'difference': best_row['Diff (%)']
+                'difference': best_row['Diff (%)'],
+                'threshold': self.threshold,  # Add threshold for reference
+                'min_prediction': self.min_prediction,  # Add min_prediction for reference
+                'selection_method': 'weighted' if self.use_weighted_selection else 'best',
+                'total_opportunities': len(positive_opps)
             }
             
-            logger.info(f"Found best opportunity: {opportunity['range']} with {opportunity['opportunity']}% edge")
             return opportunity
             
         except Exception as e:

@@ -7,6 +7,13 @@ __pycache__/
 *.so
 *.pyd
 
+# Virtual environments
+venv/
+.venv/
+ENV/
+.Python
+env/
+
 # Package Distribution
 .eggs/
 dist/
@@ -89,7 +96,6 @@ src/graphs/
 *_comparison.png
 *_orderbook_*.png
 tweet_prediction.png
-venv/
 
 # Polymarket Order Book data
 src/polymarket/data/
@@ -112,7 +118,6 @@ eggs/
 lib/
 lib64/
 parts/
-sdist/
 var/
 *.egg-info/
 .installed.cfg
@@ -129,13 +134,11 @@ ENV/
 *.sublime-workspace
 
 # OS
-.DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db
 
 # Project specific
 *.log
