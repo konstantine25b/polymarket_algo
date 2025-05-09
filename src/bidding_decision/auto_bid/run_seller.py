@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Command-line script for running the PositionSeller to identify positions to sell.
+Command-line tool to print all sell opportunities from the comparison table
+and execute automatic sell orders for positions that should be sold.
 """
 
 import argparse
@@ -57,78 +58,50 @@ def print_stats_table(df):
     print(f"Difference: {ev_row['Diff (%)']}%")
 
 def main():
-    """
-    Command-line entry point for the position seller.
-    """
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Identify which positions should be sold based on comparison data')
+    """Main entry point for the auto seller."""
+    parser = argparse.ArgumentParser(description='Identify positions to sell and execute sell orders')
     parser.add_argument('--threshold', type=float, default=0.0,
-                        help='Minimum opportunity percentage required (default: 0.0)')
-    parser.add_argument('--no-stats', action='store_true',
-                        help='Do not print full statistics table')
-    parser.add_argument('--verbose', '-v', action='store_true', 
-                        help='Enable verbose logging')
-    parser.add_argument('--sell-only', action='store_true',
-                        help='Show only positions to sell, not all positions')
+                        help='Minimum opportunity percentage (default: 0.0)')
     parser.add_argument('--auto-sell', action='store_true',
                         help='Automatically execute sell orders for recommended positions')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be sold but don\'t execute actual sell orders')
+    parser.add_argument('--no-stats', action='store_true',
+                        help='Don\'t show the full statistical comparison table')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable verbose logging')
+    parser.add_argument('--sell-below', type=float, default=0.0,
+                        help='Sell positions with prediction below this percentage (default: 0.0)')
     
     args = parser.parse_args()
     
-    # Set logging level
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(level=log_level)
-    
-    # Create the position seller
-    seller = PositionSeller(threshold=args.threshold)
-    
     try:
-        # Generate the comparison table directly for displaying full stats
-        comparison_df = None
-        if not args.no_stats:
-            comparison_df = generate_comparison_table(
-                refresh=True,
-                use_prophet=True,
-                threshold=args.threshold
-            )
-            
-            if not comparison_df.empty:
-                print_stats_table(comparison_df)
+        # Create the position seller
+        seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below)
         
-        # Retrieve all positions with stats
-        all_positions, _ = seller.get_all_positions_with_stats()
+        # Get all recommended positions to sell
+        positions_to_sell = seller.get_positions_to_sell()
         
-        # Get positions to sell
-        positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
-        
-        # Execute automatic selling if requested
         if args.auto_sell:
+            # Execute all sell orders (with dry run mode if requested)
             seller.execute_sell_orders(positions_to_sell, dry_run=args.dry_run)
-        # Display positions based on command line option
-        elif args.sell_only:
-            # Get and print only positions to sell
-            seller.print_sell_recommendations(positions_to_sell)
-            
-            if not positions_to_sell:
-                print("\nNo positions recommended for selling at this time.")
-            else:
-                print(f"\nFound {len(positions_to_sell)} positions to sell based on current market conditions.")
         else:
-            # Print all positions with recommendations
-            seller.print_all_positions(all_positions)
+            # Just show recommendations
+            seller.print_sell_recommendations(positions_to_sell)
+        
+        # Log the number of positions found
+        num_positions = len(positions_to_sell)
+        if num_positions > 0:
+            logger.info(f"Found {num_positions} positions to sell")
+        else:
+            logger.info("No positions found to sell")
             
-            # Count positions to sell for the summary
-            if positions_to_sell:
-                print(f"\nFound {len(positions_to_sell)} positions to sell out of {len(all_positions)} total positions.")
+        # Always return 0 for success
+        return 0
     
-    except KeyboardInterrupt:
-        print("\nOperation canceled by user.")
-        sys.exit(0)
     except Exception as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
+        logger.error(f"Error in auto-seller: {e}")
+        return 1
 
-if __name__ == '__main__':
-    main() 
+if __name__ == "__main__":
+    sys.exit(main()) 

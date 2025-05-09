@@ -24,14 +24,16 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0):
         """
         Initialize the PositionSeller.
         
         Args:
             threshold: Minimum opportunity percentage (%)
+            sell_below: Sell positions with prediction below this percentage (%)
         """
         self.threshold = threshold
+        self.sell_below = sell_below
         self.position_tracker = PolymarketPositionTracker()
         
     def get_all_positions_with_stats(self) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
@@ -80,6 +82,7 @@ class PositionSeller:
             buy_only_value = row[buy_only_col]
             sell_only_value = row[sell_only_col]
             token_id = row['Token ID']
+            prediction = row['Pred (%)']
             
             # Check for all range_name entries in position names
             for market_id, outcomes in positions.items():
@@ -88,6 +91,12 @@ class PositionSeller:
                 # Check if the market name contains the range
                 if range_name in market_name:
                     for outcome, quantity in outcomes.items():
+                        # Determine if the position should be sold based on criteria:
+                        # 1. Has a positive sell opportunity (after threshold)
+                        # 2. OR model prediction is below sell_below threshold
+                        should_sell = (sell_only_value > 0 and quantity > 0) or \
+                                     (self.sell_below > 0 and prediction < self.sell_below and quantity > 0)
+                        
                         # Add position to the list regardless of opportunity value
                         position_info = {
                             'market_id': market_id,
@@ -97,14 +106,16 @@ class PositionSeller:
                             'quantity': quantity,
                             'token_id': token_id,
                             'market_price': row['Mkt (%)'],
-                            'prediction': row['Pred (%)'],
+                            'prediction': prediction,
                             'difference': row['Diff (%)'],
                             'bid_price': row['Bid (%)'],
                             'ask_price': row['Ask (%)'],
                             'spread': row['Spread (%)'],
                             'buy_only_value': buy_only_value,
                             'sell_only_value': sell_only_value,
-                            'should_sell': sell_only_value > 0 and quantity > 0
+                            'should_sell': should_sell,
+                            'sell_reason': 'Positive sell opportunity' if sell_only_value > 0 else 
+                                        ('Low prediction below threshold' if prediction < self.sell_below else None)
                         }
                         all_positions.append(position_info)
         
@@ -113,8 +124,9 @@ class PositionSeller:
     def get_positions_to_sell(self) -> List[Dict[str, Any]]:
         """
         Identify positions that should be sold based on comparison table data.
-        Positions are recommended for selling when they have Buy-Only = 0.0, meaning
-        they have no buy opportunity and should likely be sold.
+        Positions are recommended for selling when they have:
+        1. A positive sell opportunity (Buy-Only = 0.0, indicating they have no buy opportunity), or
+        2. A model prediction below the sell_below threshold
         
         Returns:
             List of dictionaries with details about positions to sell
@@ -141,6 +153,8 @@ class PositionSeller:
             return
         
         print(f"\nALL YOUR CURRENT POSITIONS (THRESHOLD: {self.threshold}%):")
+        if self.sell_below > 0:
+            print(f"SELL BELOW: {self.sell_below}%")
         print("============================")
         
         # Sort positions by should_sell (true first), then by range name
@@ -151,7 +165,10 @@ class PositionSeller:
         
         for position in sorted_positions:
             # Highlight positions that should be sold
-            highlight = " (RECOMMENDED TO SELL)" if position['should_sell'] else ""
+            highlight = ""
+            if position['should_sell']:
+                highlight = f" (RECOMMENDED TO SELL - {position['sell_reason']})"
+                
             print(f"\n{position['market_name']} ({position['range']}){highlight}:")
             print(f"  Outcome: {position['outcome']}")
             print(f"  Quantity: {position['quantity']:.6f} shares")
@@ -165,9 +182,16 @@ class PositionSeller:
         # Print a summary of positions to sell
         positions_to_sell = [pos for pos in sorted_positions if pos['should_sell']]
         if positions_to_sell:
-            print(f"\nSUMMARY: You have {len(positions_to_sell)} positions recommended for selling with threshold {self.threshold}%.")
+            print(f"\nSUMMARY: You have {len(positions_to_sell)} positions recommended for selling.")
+            # Count by reason
+            by_opportunity = sum(1 for pos in positions_to_sell if pos['sell_reason'] == 'Positive sell opportunity')
+            by_low_pred = sum(1 for pos in positions_to_sell if pos['sell_reason'] == 'Low prediction below threshold')
+            if by_opportunity > 0:
+                print(f"  - {by_opportunity} positions with positive sell opportunity above {self.threshold}% threshold")
+            if by_low_pred > 0:
+                print(f"  - {by_low_pred} positions with prediction below {self.sell_below}% threshold")
         else:
-            print(f"\nSUMMARY: None of your positions are currently recommended for selling with threshold {self.threshold}%.")
+            print(f"\nSUMMARY: None of your positions are currently recommended for selling.")
     
     def print_sell_recommendations(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None) -> None:
         """
@@ -180,11 +204,20 @@ class PositionSeller:
             positions_to_sell = self.get_positions_to_sell()
         
         if not positions_to_sell:
-            print(f"\nNo positions recommended for selling with threshold {self.threshold}%.")
+            print(f"\nNo positions recommended for selling with threshold {self.threshold}%")
+            if self.sell_below > 0:
+                print(f"or prediction below {self.sell_below}%.")
             return
         
-        print(f"\nPOSITIONS RECOMMENDED FOR SELLING (THRESHOLD: {self.threshold}%):")
+        print(f"\nPOSITIONS RECOMMENDED FOR SELLING:")
+        if self.threshold > 0:
+            print(f"Threshold for sell opportunity: {self.threshold}%")
+        if self.sell_below > 0:
+            print(f"Threshold for low prediction: {self.sell_below}%")
         print("==================================")
+        
+        # Sort by reason
+        positions_to_sell = sorted(positions_to_sell, key=lambda pos: pos['sell_reason'])
         
         for position in positions_to_sell:
             print(f"\n{position['market_name']} ({position['range']}):")
@@ -194,11 +227,23 @@ class PositionSeller:
             print(f"  Current Bid Price: {position['bid_price']:.2f}%")
             print(f"  Your Model's Prediction: {position['prediction']:.2f}%")
             print(f"  Difference: {position['difference']:.2f}%")
-            print(f"  Sell Opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
             
-        print("\nNote: These positions are recommended for selling because they")
-        print(f"have positive sell opportunity above the {self.threshold}% threshold,")
-        print("which suggests they are overvalued compared to your model's predictions.")
+            # Print reason-specific details
+            if position['sell_reason'] == 'Positive sell opportunity':
+                print(f"  Sell Opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
+                print(f"  Reason: Position is overvalued compared to your model's prediction")
+            elif position['sell_reason'] == 'Low prediction below threshold':
+                print(f"  Reason: Model prediction ({position['prediction']:.2f}%) is below the {self.sell_below}% threshold")
+            
+        # Print summary by reason
+        by_opportunity = sum(1 for pos in positions_to_sell if pos['sell_reason'] == 'Positive sell opportunity')
+        by_low_pred = sum(1 for pos in positions_to_sell if pos['sell_reason'] == 'Low prediction below threshold')
+        
+        print("\nSELL RECOMMENDATION SUMMARY:")
+        if by_opportunity > 0:
+            print(f"  - {by_opportunity} positions with positive sell opportunity (overvalued)")
+        if by_low_pred > 0:
+            print(f"  - {by_low_pred} positions with prediction below the {self.sell_below}% threshold")
         
     def execute_sell_orders(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None, dry_run: bool = False) -> List[Dict[str, Any]]:
         """
@@ -215,7 +260,7 @@ class PositionSeller:
             positions_to_sell = self.get_positions_to_sell()
             
         if not positions_to_sell:
-            print(f"\nNo positions to sell with threshold {self.threshold}%.")
+            print(f"\nNo positions to sell.")
             return []
         
         # Filter out positions with quantities less than 0.01
@@ -249,7 +294,12 @@ class PositionSeller:
             
             print(f"\nSelling {quantity:.6f} shares of {position['range']} (Token ID: {token_id})")
             print(f"Expected sale price: {position['bid_price']:.2f}%")
-            print(f"Sell opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
+            print(f"Reason: {position['sell_reason']}")
+            
+            if position['sell_reason'] == 'Positive sell opportunity':
+                print(f"Sell opportunity: {position['sell_only_value']:.2f}% (after applying {self.threshold}% threshold)")
+            elif position['sell_reason'] == 'Low prediction below threshold':
+                print(f"Model prediction ({position['prediction']:.2f}%) is below the {self.sell_below}% threshold")
             
             if dry_run:
                 print("DRY RUN - No actual sell order executed")
@@ -317,6 +367,8 @@ def main():
                       help='Automatically execute sell orders for recommended positions')
     parser.add_argument('--dry-run', action='store_true',
                       help='Show what would be sold but don\'t execute actual sell orders')
+    parser.add_argument('--sell-below', type=float, default=0.0,
+                      help='Sell positions with prediction below this percentage (default: 0.0)')
     
     args = parser.parse_args()
     
@@ -325,7 +377,7 @@ def main():
     logging.basicConfig(level=log_level)
     
     # Create the position seller
-    seller = PositionSeller(threshold=args.threshold)
+    seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below)
     
     # Get positions to sell
     positions_to_sell = seller.get_positions_to_sell()

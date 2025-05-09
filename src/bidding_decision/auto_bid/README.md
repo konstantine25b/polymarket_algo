@@ -23,6 +23,7 @@ A suite of tools for automating trading on Polymarket, including:
 - Highlights positions that are recommended for selling
 - Identifies positions where Buy-Only value is 0, indicating they should be sold
 - **Automatically executes sell orders for recommended positions**
+- Sells positions with model predictions below a specified threshold
 - Shows current market prices (bid/ask), spread, and your model's predictions for each position
 - Provides token IDs needed for programmatic selling
 - Shows Buy-Only and Sell-Only opportunity values for every position
@@ -107,6 +108,9 @@ python -m src.bidding_decision.auto_bid.run_seller --auto-sell --dry-run
 # Specify minimum opportunity threshold
 python -m src.bidding_decision.auto_bid.run_seller --threshold 3.0
 
+# Automatically sell positions with prediction below 5%
+python -m src.bidding_decision.auto_bid.run_seller --auto-sell --sell-below 5.0
+
 # Skip displaying the full stats table
 python -m src.bidding_decision.auto_bid.run_seller --no-stats
 
@@ -120,7 +124,7 @@ python -m src.bidding_decision.auto_bid.run_seller --verbose
 from src.bidding_decision.auto_bid.position_seller import PositionSeller
 
 # Initialize with custom parameters
-seller = PositionSeller(threshold=3.0)  # Minimum 3% edge required
+seller = PositionSeller(threshold=3.0, sell_below=5.0)  # 3% edge required, sell below 5% prediction
 
 # Get all positions with statistical information
 all_positions, comparison_df = seller.get_all_positions_with_stats()
@@ -278,43 +282,63 @@ Found 1 positions to sell based on current market conditions.
 
 #### Auto-Sell Output
 
-Using the `--auto-sell` flag will execute sell orders for all recommended positions:
+Using the `--auto-sell --sell-below 5.0 --dry-run` flags will show which positions would be sold based on low prediction:
 
 ```
-POSITIONS RECOMMENDED FOR SELLING (THRESHOLD: 3.0%):
+POSITIONS RECOMMENDED FOR SELLING:
+Threshold for sell opportunity: 0.0%
+Threshold for low prediction: 5.0%
 ==================================
 
-Will Elon tweet 250–274 times May 2–9? (250–274):
+Will Elon tweet 300–324 times May 2–9? (300–324):
   Outcome: Yes
-  Quantity: 1.492536 shares
-  Token ID: 93124055671959869958037846065354081314545895099992000276527130498502400601286
-  Current Bid Price: 59.00%
-  Your Model's Prediction: 35.41%
-  Difference: -23.59%
-  Sell Opportunity: 20.59% (after applying 3.0% threshold)
+  Quantity: 0.554505 shares
+  Token ID: 65797596156986552520681751081841163827397285360337892026989663816422180341953
+  Current Bid Price: 0.70%
+  Your Model's Prediction: 1.5X%
+  Difference: 0.8X%
+  Reason: Model prediction (1.5X%) is below the 5.0% threshold
 
-Skipping 0 positions with quantity less than 0.01 (Polymarket minimum):
+Will Elon tweet 325–349 times May 2–9? (325–349):
+  Outcome: Yes
+  Quantity: 128.615000 shares
+  Token ID: 63763014879028996551101083827875019681826101444515365120772529536860324618159
+  Current Bid Price: 0.20%
+  Your Model's Prediction: 0.5X%
+  Difference: 0.3X%
+  Reason: Low prediction below threshold
 
-Executing sell orders for 1 positions...
+SELL RECOMMENDATION SUMMARY:
+  - 0 positions with positive sell opportunity (overvalued)
+  - 2 positions with prediction below the 5.0% threshold
 
-Selling 1.492536 shares of 250–274 (Token ID: 93124055671959869958037846065354081314545895099992000276527130498502400601286)
-Expected sale price: 59.00%
-Sell opportunity: 20.59% (after applying 3.0% threshold)
-Connected with wallet: 0x08E9Fa...
+Skipping 2 positions with quantity less than 0.01 (Polymarket minimum):
+  - 250–274: 0.002536 shares (below minimum)
+  - 275–299: 0.000345 shares (below minimum)
+
+Executing sell orders for 2 positions...
+
+Selling 0.554505 shares of 300–324 (Token ID: 65797596156986552520681751081841163827397285360337892026989663816422180341953)
+Expected sale price: 0.70%
+Reason: Low prediction below threshold
+Model prediction (1.5X%) is below the 5.0% threshold
+DRY RUN - No actual sell order executed
+
+Selling 128.615000 shares of 325–349 (Token ID: 63763014879028996551101083827875019681826101444515365120772529536860324618159)
+Expected sale price: 0.20%
+Reason: Low prediction below threshold
+Model prediction (0.5X%) is below the 5.0% threshold
+DRY RUN - No actual sell order executed
+
+DRY RUN SUMMARY: Would have sold 2 positions
+```
+
+If you run without the `--dry-run` flag, real orders will be executed and you'll see confirmation messages:
+
+```
 Sell order executed successfully!
-Response: {'orderId': '123456789', 'status': 'filled', 'price': '0.59', 'fillAmount': '1.492536'}
-
-SELL ORDER SUMMARY: Successfully sold 1 out of 1 positions
+Response: {'orderId': '123456789', 'status': 'filled', 'price': '0.007', 'fillAmount': '0.554505'}
 ```
-
-If you have positions with quantities below the minimum:
-
-```
-Skipping 1 positions with quantity less than 0.01 (Polymarket minimum):
-  - 325–349: 0.002536 shares (below minimum)
-```
-
-If you prefer to see what would be sold without executing actual orders, use `--auto-sell --dry-run`.
 
 ## How It Works
 
@@ -345,9 +369,11 @@ The "buy-only" edge is calculated as:
    - Current bid/ask prices and spread
    - Your model's prediction and the difference from market price
    - Buy-Only and Sell-Only opportunity values
-4. It identifies positions where the Sell-Only value is positive, indicating they should be sold
+4. It identifies positions that should be sold based on two criteria:
+   - Positions with a positive sell-only opportunity exceeding your threshold
+   - Positions where the model's prediction is below your specified sell-below threshold
 5. If auto-sell is enabled:
-   - It filters out positions with quantities less than 0.01 (Polymarket's minimum order size)
+   - It filters out positions with less than 0.01 shares (Polymarket's minimum order size)
    - It automatically executes market sell orders for the remaining valid positions
 6. For positions recommended for selling, it provides:
    - The quantity you currently own
@@ -355,6 +381,7 @@ The "buy-only" edge is calculated as:
    - The current bid price (what you'd get if you sold)
    - The model's prediction vs. the market
    - The difference between your prediction and the market
+   - The reason for the sell recommendation (opportunity or low prediction)
 
 ## Configuration
 
@@ -362,6 +389,7 @@ The "buy-only" edge is calculated as:
 - **Amount**: USDC amount to bid for Auto-Bidder (default: 1.0 USDC)
 - **Weighted Selection**: Whether to use weighted probability selection from multiple opportunities instead of always choosing the best one (default: false)
 - **Auto-Sell**: Whether to automatically execute sell orders for recommended positions (default: false)
+- **Sell-Below**: Sell positions with model prediction below this percentage (default: 0.0%)
 - **Dry Run**: Show what would be done but don't execute actual orders (default: false)
 - **Wallet**: Uses the `WALLET_PRIVATE_KEY` from your `.env` file by default
 - **Stats Display**: Displays full statistics by default, can be disabled with `--no-stats`

@@ -34,6 +34,7 @@ Options:
     --skip-balance-check   Skip checking wallet balance before running auto-bidder
     --min-usdc FLOAT       Minimum USDC balance required to run auto-bidder (default: 1.0)
     --no-tweet-verify      Skip verifying and displaying tweet counts after fetching
+    --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
 """
 
 import argparse
@@ -105,6 +106,8 @@ def setup_argparse():
                         help='Minimum USDC balance required to run auto-bidder (default: 1.0)')
     parser.add_argument('--no-tweet-verify', action='store_true',
                         help='Skip verifying and displaying tweet counts after fetching')
+    parser.add_argument('--sell-below', type=float, default=0.0,
+                        help='Automatically sell positions with prediction below this percentage (default: 0.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -347,12 +350,13 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True):
+def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True):
     """Run the auto-seller to sell positions based on statistical opportunities.
     
     Args:
         quiet: Whether to suppress output
         threshold: Minimum opportunity percentage to sell positions
+        sell_below: Sell positions with prediction below this percentage
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
     """
@@ -366,6 +370,11 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True):
         f"--threshold={threshold}",
         "--auto-sell"
     ]
+    
+    # Add sell-below parameter if specified
+    if sell_below > 0.0:
+        cmd.append(f"--sell-below={sell_below}")
+        logger.info(f"Configured to sell positions with prediction below {sell_below}%")
     
     # Add dry run mode if requested
     if dry_run:
@@ -467,6 +476,7 @@ def run_scheduled_jobs(args):
             run_auto_seller(
                 quiet=args.quiet,
                 threshold=args.sell_threshold,
+                sell_below=args.sell_below,
                 dry_run=args.dry_run,
                 show_stats=not args.no_stats
             )
@@ -521,6 +531,8 @@ def main():
     # Log auto-seller configuration
     if not args.tweets_only and not args.no_selling:
         logger.info(f"Will run auto-seller with threshold: {args.sell_threshold}%")
+        if args.sell_below > 0.0:
+            logger.info(f"Will sell positions with prediction below {args.sell_below}%")
         if args.dry_run:
             logger.info("Auto-seller running in DRY RUN mode - no real orders will be placed")
         else:

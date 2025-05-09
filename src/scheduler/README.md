@@ -29,6 +29,7 @@ This module provides an automated scheduler that periodically:
 - **Balance checking**: Automatically checks wallet balance before placing buy orders, skipping if insufficient funds
 - **Conditional bidding**: Only runs auto-bidder if there's enough USDC balance (configurable minimum threshold)
 - **Tweet verification**: Shows the total and daily tweet counts after fetching to track activity
+- **Auto-sell low probability positions**: Automatically sells positions where your model's prediction is below a specified threshold
 
 ## Command-Line Usage
 
@@ -99,8 +100,11 @@ python -m src.scheduler.scheduler --skip-balance-check
 # Skip tweet count verification after fetching
 python -m src.scheduler.scheduler --no-tweet-verify
 
+# Automatically sell positions with prediction below 5%
+python -m src.scheduler.scheduler --sell-below 5.0
+
 # Combine multiple options
-python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5
+python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5 --sell-below 3.0
 ```
 
 ## Command-Line Options
@@ -127,6 +131,7 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--skip-balance-check`: Skip checking wallet balance before running auto-bidder
 - `--min-usdc`: Minimum USDC balance required to run auto-bidder (default: 1.0)
 - `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
+- `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
 
 ## Smart Incremental Fetching
 
@@ -156,6 +161,7 @@ After successfully fetching tweets, the scheduler automatically verifies and dis
 3. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
 
 The tweet verification feature provides valuable information for monitoring:
+
 - Whether the expected number of tweets are being collected
 - The daily pattern of tweet activity during the week
 - Progress toward the various tweet count ranges on Polymarket
@@ -278,28 +284,38 @@ After running predictions, the scheduler also executes the Position Seller, whic
 2. Generates a statistical comparison between predictions and market prices
 3. Identifies positions where the model predicts a lower probability than the market price
 4. Calculates the "sell-only" opportunity for each position, accounting for spread and threshold
-5. Executes market sell orders for positions with positive sell opportunities
-6. Provides detailed output about positions sold and execution status
+5. Automatically sells positions with model predictions below the specified threshold
+6. Executes market sell orders for positions meeting the sell criteria
+7. Provides detailed output about positions sold and execution status
+
+The position seller can sell positions based on two criteria:
+
+- **Sell-only opportunity**: Positions that have a positive sell opportunity exceeding your threshold
+- **Low prediction percentage**: Positions where the model's prediction is below a specified threshold
 
 The position seller:
 
 - Filters out positions with less than 0.01 shares (Polymarket's minimum order size)
-- Only sells positions with sell opportunities above the configured threshold
+- Only sells positions meeting at least one of the sell criteria
 - Executes market sell orders at the current bid price
 - Provides comprehensive error handling and notifications
 - Runs regardless of your USDC balance (selling doesn't require USDC)
+- Provides detailed reasons for each sell recommendation
 
 To customize the position seller behavior:
 
 - `--sell-threshold`: Set the minimum opportunity percentage for selling (default: 0.0%)
+- `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0%)
 - `--dry-run`: Test the position seller without placing actual sell orders
 - `--no-stats`: Skip displaying the full statistical comparison table
 - `--no-selling`: Skip running the position seller entirely
 
-Example output in production mode:
+Example output in production mode with both sell criteria:
 
 ```
-POSITIONS RECOMMENDED FOR SELLING (THRESHOLD: 2.0%):
+POSITIONS RECOMMENDED FOR SELLING:
+Threshold for sell opportunity: 2.0%
+Threshold for low prediction: 5.0%
 ==================================
 
 Will Elon tweet 275–299 times May 2–9? (275–299):
@@ -310,17 +326,40 @@ Will Elon tweet 275–299 times May 2–9? (275–299):
   Your Model's Prediction: 14.02%
   Difference: -7.98%
   Sell Opportunity: 5.98% (after applying 2.0% threshold)
+  Reason: Position is overvalued compared to your model's prediction
 
-Executing sell orders for 1 positions...
+Will Elon tweet 325–349 times May 2–9? (325–349):
+  Outcome: Yes
+  Quantity: 128.615000 shares
+  Token ID: 63763014879028996551101083827875019681826101444515365120772529536860324618159
+  Current Bid Price: 0.20%
+  Your Model's Prediction: 0.53%
+  Difference: 0.13%
+  Reason: Model prediction (0.53%) is below the 5.0% threshold
+
+SELL RECOMMENDATION SUMMARY:
+  - 1 positions with positive sell opportunity (overvalued)
+  - 1 positions with prediction below the 5.0% threshold
+
+Executing sell orders for 2 positions...
 
 Selling 1.492536 shares of 275–299 (Token ID: 5849114830323971859545968867850599485291880179559009959941081693582569720720)
 Expected sale price: 22.00%
+Reason: Positive sell opportunity
 Sell opportunity: 5.98% (after applying 2.0% threshold)
 Connected with wallet: 0x08E9Fa...
 Sell order executed successfully!
 Response: {'orderId': '987654321', 'status': 'filled', 'price': '0.22', 'fillAmount': '1.492536'}
 
-SELL ORDER SUMMARY: Successfully sold 1 out of 1 positions
+Selling 128.615000 shares of 325–349 (Token ID: 63763014879028996551101083827875019681826101444515365120772529536860324618159)
+Expected sale price: 0.20%
+Reason: Low prediction below threshold
+Model prediction (0.53%) is below the 5.0% threshold
+Connected with wallet: 0x08E9Fa...
+Sell order executed successfully!
+Response: {'orderId': '987654322', 'status': 'filled', 'price': '0.002', 'fillAmount': '128.615000'}
+
+SELL ORDER SUMMARY: Successfully sold 2 out of 2 positions
 ```
 
 ## Logs
@@ -341,7 +380,7 @@ nohup python -m src.scheduler.scheduler > /dev/null 2>&1 &
 Or with custom options:
 
 ```bash
-nohup python -m src.scheduler.scheduler --interval 10 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --dry-run --min-usdc 1.5 > /dev/null 2>&1 &
+nohup python -m src.scheduler.scheduler --interval 10 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --dry-run --min-usdc 1.5 --sell-below 3.0 > /dev/null 2>&1 &
 ```
 
 To stop the scheduler running in the background:
