@@ -38,7 +38,7 @@ This module provides an automated scheduler that periodically:
 source venv/bin/activate
 
 # I use it commonly
-python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --weighted-selection --interval 30
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --weighted-selection --interval 30
 
 # Run with default settings (every 20 minutes)
 python -m src.scheduler.scheduler
