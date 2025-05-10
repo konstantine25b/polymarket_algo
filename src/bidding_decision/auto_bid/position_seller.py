@@ -6,12 +6,15 @@ Analyzes your current positions and the comparison table to identify which posit
 import logging
 import pandas as pd
 from typing import Optional, Dict, Any, List, Tuple
+import json
+import datetime
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
 from src.polymarket.bidding.sell.market.run import run_market_sell
 
 # Configure logging
+# Default to INFO level, but this can be overridden in the main function
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -24,16 +27,18 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False):
         """
         Initialize the PositionSeller.
         
         Args:
             threshold: Minimum opportunity percentage (%)
             sell_below: Sell positions with prediction below this percentage (%)
+            debug: Whether to show detailed debugging information
         """
         self.threshold = threshold
         self.sell_below = sell_below
+        self.debug = debug
         self.position_tracker = PolymarketPositionTracker()
         
     def get_all_positions_with_stats(self) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
@@ -48,11 +53,38 @@ class PositionSeller:
         # Get current positions
         positions = self.position_tracker.get_simple_positions()
         
-        if not positions:
-            logger.info("No positions found in your account.")
+        # Debug: Print out the raw positions data
+        logger.debug(f"Raw positions from position_tracker: {json.dumps(positions, indent=2)}")
+        if self.debug:
+            print(f"\nDEBUG - Raw positions from API:\n{json.dumps(positions, indent=2)}")
+        
+        # Filter positions with values <= 0.01 (Polymarket's minimum order size)
+        non_zero_positions = {}
+        filtered_out = {}
+        for market_id, outcomes in positions.items():
+            valid_outcomes = {outcome: qty for outcome, qty in outcomes.items() if qty >= 0.01}
+            filtered_outcomes = {outcome: qty for outcome, qty in outcomes.items() if 0 < qty < 0.01}
+            
+            if valid_outcomes:
+                non_zero_positions[market_id] = valid_outcomes
+            
+            if filtered_outcomes:
+                filtered_out[market_id] = filtered_outcomes
+        
+        # Debug: Print positions after filtering out too small quantities
+        logger.debug(f"Positions after filtering for minimum size (>= 0.01): {json.dumps(non_zero_positions, indent=2)}")
+        if self.debug:
+            print(f"\nDEBUG - Positions after filtering (qty >= 0.01):\n{json.dumps(non_zero_positions, indent=2)}")
+            if filtered_out:
+                print(f"\nDEBUG - Positions filtered out (0 < qty < 0.01):\n{json.dumps(filtered_out, indent=2)}")
+        
+        if not non_zero_positions:
+            if self.debug:
+                print("No positions with quantity >= 0.01 found in your account.")
             return [], pd.DataFrame()
             
         # Generate comparison table with the specified threshold
+        logger.info(f"Generating comparison table with threshold: {self.threshold}%")
         df = generate_comparison_table(
             refresh=True,
             use_prophet=True,
@@ -74,6 +106,12 @@ class PositionSeller:
             logger.info("No specific range opportunities found in comparison table.")
             return [], df
         
+        # Debug: print the comparison table ranges
+        comparison_ranges = data_rows['Range'].tolist()
+        logger.debug(f"Ranges in comparison table: {comparison_ranges}")
+        if self.debug:
+            print(f"\nDEBUG - Ranges in comparison table: {comparison_ranges}")
+        
         # Collect all positions with their stats
         all_positions = []
         
@@ -84,18 +122,39 @@ class PositionSeller:
             token_id = row['Token ID']
             prediction = row['Pred (%)']
             
+            # Debug info for this range
+            logger.debug(f"Processing range: {range_name}, token_id: {token_id}, prediction: {prediction}%")
+            
             # Check for all range_name entries in position names
-            for market_id, outcomes in positions.items():
+            for market_id, outcomes in non_zero_positions.items():
                 market_name = self.position_tracker.get_market_name(market_id)
                 
-                # Check if the market name contains the range
+                # Debug: Check if the market name contains the range
                 if range_name in market_name:
+                    logger.debug(f"Found match for range '{range_name}' in market '{market_name}' (ID: {market_id})")
+                    if self.debug:
+                        print(f"\nDEBUG - Found match: Range '{range_name}' in market '{market_name}'")
+                    
                     for outcome, quantity in outcomes.items():
+                        logger.debug(f"  Position: {outcome}, quantity: {quantity}")
+                        if self.debug:
+                            print(f"DEBUG - Position details: {outcome}, quantity: {quantity}")
+                        
                         # Determine if the position should be sold based on criteria:
                         # 1. Has a positive sell opportunity (after threshold)
                         # 2. OR model prediction is below sell_below threshold
                         should_sell = (sell_only_value > 0 and quantity > 0) or \
                                      (self.sell_below > 0 and prediction < self.sell_below and quantity > 0)
+                        
+                        sell_reason = None
+                        if sell_only_value > 0 and quantity > 0:
+                            sell_reason = 'Positive sell opportunity'
+                        elif self.sell_below > 0 and prediction < self.sell_below and quantity > 0:
+                            sell_reason = 'Low prediction below threshold'
+                            
+                        # Debug the selling decision
+                        logger.debug(f"  Should sell: {should_sell}, Reason: {sell_reason}")
+                        logger.debug(f"  Sell criteria: sell_only_value={sell_only_value}, prediction={prediction}, sell_below={self.sell_below}")
                         
                         # Add position to the list regardless of opportunity value
                         position_info = {
@@ -114,10 +173,24 @@ class PositionSeller:
                             'buy_only_value': buy_only_value,
                             'sell_only_value': sell_only_value,
                             'should_sell': should_sell,
-                            'sell_reason': 'Positive sell opportunity' if sell_only_value > 0 else 
-                                        ('Low prediction below threshold' if prediction < self.sell_below else None)
+                            'sell_reason': sell_reason
                         }
                         all_positions.append(position_info)
+                        
+                        # Debug the added position
+                        logger.debug(f"  Added position to list: {outcome}, quantity: {quantity}, should_sell: {should_sell}")
+                else:
+                    logger.debug(f"No match for range '{range_name}' in market '{market_name}'")
+        
+        # Debug summary
+        logger.debug(f"Total positions processed: {len(all_positions)}")
+        sell_positions = [p for p in all_positions if p['should_sell']]
+        logger.info(f"Positions marked for selling: {len(sell_positions)}")
+        
+        if self.debug:
+            print(f"\nDEBUG - Summary: Found {len(all_positions)} positions, {len(sell_positions)} recommended for selling")
+            for pos in all_positions:
+                print(f"DEBUG - Position: {pos['range']} ({pos['outcome']}), qty: {pos['quantity']}, should_sell: {pos['should_sell']}")
         
         return all_positions, df
     
@@ -135,6 +208,12 @@ class PositionSeller:
         
         # Filter for positions that should be sold
         positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
+        
+        # Debug: List positions that will be sold
+        logger.info(f"Positions marked for selling: {len(positions_to_sell)}")
+        if positions_to_sell:
+            for pos in positions_to_sell:
+                logger.debug(f"Will sell: {pos['range']} ({pos['outcome']}), qty: {pos['quantity']}, reason: {pos['sell_reason']}")
         
         return positions_to_sell
     
@@ -178,6 +257,8 @@ class PositionSeller:
             print(f"  Difference: {position['difference']:.2f}%")
             print(f"  Buy-Only Opportunity: {position['buy_only_value']:.2f}% (after threshold)")
             print(f"  Sell-Only Opportunity: {position['sell_only_value']:.2f}% (after threshold)")
+            if self.debug:
+                print(f"  Last Updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Print a summary of positions to sell
         positions_to_sell = [pos for pos in sorted_positions if pos['should_sell']]
@@ -336,6 +417,10 @@ class PositionSeller:
                     elif "slippage" in error_message.lower() or "price" in error_message.lower():
                         print("Note: The market price may have changed since the order was generated.")
                         print("Try again or adjust your threshold to account for market volatility.")
+                    # Check for not enough balance / allowance error
+                    elif "not enough balance" in error_message.lower() or "allowance" in error_message.lower():
+                        print("Note: You may have sold this position elsewhere or the position may have been closed.")
+                        print("This error indicates that your available position balance has changed since it was last checked.")
                     
                     results.append({
                         'position': position,
@@ -369,15 +454,21 @@ def main():
                       help='Show what would be sold but don\'t execute actual sell orders')
     parser.add_argument('--sell-below', type=float, default=0.0,
                       help='Sell positions with prediction below this percentage (default: 0.0)')
+    parser.add_argument('--debug', action='store_true',
+                      help='Show detailed debugging information')
     
     args = parser.parse_args()
     
     # Set logging level
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(level=log_level)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+        logging.getLogger().setLevel(logging.INFO)
     
-    # Create the position seller
-    seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below)
+    # Create the position seller with debug flag
+    seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below, debug=args.debug)
     
     # Get positions to sell
     positions_to_sell = seller.get_positions_to_sell()

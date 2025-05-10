@@ -30,6 +30,7 @@ A suite of tools for automating trading on Polymarket, including:
 - Shows Buy-Only and Sell-Only opportunity values for every position
 - Includes a summary of which positions should be sold and why
 - Supports dry run mode to test without placing actual sell orders
+- Includes optional debugging mode to show detailed position data analysis
 
 ## Usage
 
@@ -124,6 +125,9 @@ python -m src.bidding_decision.auto_bid.run_seller --no-stats
 
 # Enable verbose logging
 python -m src.bidding_decision.auto_bid.run_seller --verbose
+
+# Show detailed debugging information (useful for troubleshooting)
+python -m src.bidding_decision.auto_bid.run_seller --debug
 ```
 
 #### Python API
@@ -132,7 +136,11 @@ python -m src.bidding_decision.auto_bid.run_seller --verbose
 from src.bidding_decision.auto_bid.position_seller import PositionSeller
 
 # Initialize with custom parameters
-seller = PositionSeller(threshold=3.0, sell_below=5.0)  # 3% edge required, sell below 5% prediction
+seller = PositionSeller(
+    threshold=3.0,  # 3% edge required
+    sell_below=5.0,  # Sell below 5% prediction
+    debug=False  # Enable/disable debugging output
+)
 
 # Get all positions with statistical information
 all_positions, comparison_df = seller.get_all_positions_with_stats()
@@ -341,6 +349,43 @@ DRY RUN - No actual sell order executed
 DRY RUN SUMMARY: Would have sold 2 positions
 ```
 
+#### Debug Output
+
+When running with the `--debug` flag, you'll see additional diagnostic information to help troubleshoot issues:
+
+```
+DEBUG - Raw positions from API:
+{
+  "0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6": {
+    "Yes": 0.00450500000000531
+  },
+  ...other positions...
+}
+
+DEBUG - Positions after filtering (qty >= 0.01):
+{
+  "0x820cb7e640e07ba871c249db6d17ec0a56c2a6c866fcf5167ceb7e2b3faa6b02": {
+    "Yes": 62.5
+  },
+  "0x9e5c5153c2c65a6336c553a17cacff8b1424bf21eece00cab5e0f7718e09ae95": {
+    "Yes": 7.142856
+  }
+}
+
+DEBUG - Positions filtered out (0 < qty < 0.01):
+{
+  "0x594df4f4d61ebafbd334fc5f3af9fe5ad382daccbf99dc83eeac8f33d1810ef6": {
+    "Yes": 0.00450500000000531
+  },
+  ...other small positions...
+}
+
+DEBUG - Ranges in comparison table: ['less than 100', '100–124', '125–149', '150–174', '175–199', '200–224', '225–249', '250–274', '275–299', '300–324', '325–349', '350 or more']
+
+DEBUG - Found match: Range '200–224' in market 'Will Elon tweet 200–224 times May 2–9?'
+DEBUG - Position details: Yes, quantity: 62.5
+```
+
 If you run without the `--dry-run` flag, real orders will be executed and you'll see confirmation messages:
 
 ```
@@ -400,6 +445,7 @@ The "buy-only" edge is calculated as:
 - **Auto-Sell**: Whether to automatically execute sell orders for recommended positions (default: false)
 - **Sell-Below**: Sell positions with model prediction below this percentage (default: 0.0%)
 - **Dry Run**: Show what would be done but don't execute actual orders (default: false)
+- **Debug**: Show detailed debugging information for troubleshooting issues (default: false)
 - **Wallet**: Uses the `WALLET_PRIVATE_KEY` from your `.env` file by default
 - **Stats Display**: Displays full statistics by default, can be disabled with `--no-stats`
 - **Position Display**: Shows all positions by default, can be limited to sell recommendations with `--sell-only`
@@ -419,3 +465,4 @@ The "buy-only" edge is calculated as:
 - **Invalid Amounts**: This error occurs when trying to execute an order that's too small, typically below 0.01 shares.
 - **Insufficient Funds**: Make sure your wallet has enough USDC to cover transaction fees.
 - **Price Slippage**: Sometimes market prices change between the time of analysis and order execution, causing slippage errors. Try again or adjust your threshold.
+- **Position Not Found**: If you see positions listed that you no longer hold, try running with the `--debug` flag to see detailed position data for troubleshooting.

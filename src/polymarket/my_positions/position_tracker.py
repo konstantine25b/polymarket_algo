@@ -93,7 +93,7 @@ class PolymarketPositionTracker:
                 if response.status_code == 200:
                     market_data = response.json()
                     self.market_info_cache[market_id] = market_data
-                    self.logger.info(f"Successfully fetched market info for {market_id[:10]}...")
+                    self.logger.debug(f"Successfully fetched market info for {market_id[:10]}...")
                     return market_data
                     
             # If we reach here, none of the endpoints worked
