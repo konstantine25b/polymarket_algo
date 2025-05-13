@@ -72,12 +72,19 @@ def main():
                         help='Enable verbose logging')
     parser.add_argument('--sell-below', type=float, default=0.0,
                         help='Sell positions with prediction below this percentage (default: 0.0)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Show detailed debugging information')
     
     args = parser.parse_args()
     
+    # Set up logging levels based on verbosity
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
+    
     try:
-        # Create the position seller
-        seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below)
+        # Create the position seller with debug flag
+        seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below, debug=args.debug)
         
         # Get all recommended positions to sell
         positions_to_sell = seller.get_positions_to_sell()

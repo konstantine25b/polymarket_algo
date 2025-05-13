@@ -36,6 +36,7 @@ Options:
     --no-tweet-verify      Skip verifying and displaying tweet counts after fetching
     --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
     --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
+    --debug-seller         Show detailed debugging information for position seller
 """
 
 import argparse
@@ -111,6 +112,8 @@ def setup_argparse():
                         help='Automatically sell positions with prediction below this percentage (default: 0.0)')
     parser.add_argument('--min-prediction', type=float, default=0.0,
                         help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
+    parser.add_argument('--debug-seller', action='store_true',
+                        help='Show detailed debugging information for position seller')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -359,7 +362,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True):
+def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True, debug=False):
     """Run the auto-seller to sell positions based on statistical opportunities.
     
     Args:
@@ -368,6 +371,7 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
         sell_below: Sell positions with prediction below this percentage
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
+        debug: Whether to show detailed debugging information
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
@@ -393,6 +397,11 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
     # Add no-stats flag if requested
     if not show_stats:
         cmd.append("--no-stats")
+    
+    # Add debug flag if requested
+    if debug:
+        cmd.append("--debug")
+        logger.info("Running auto-seller with detailed debugging information")
     
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
@@ -489,7 +498,8 @@ def run_scheduled_jobs(args):
                 threshold=args.sell_threshold,
                 sell_below=args.sell_below,
                 dry_run=args.dry_run,
-                show_stats=not args.no_stats
+                show_stats=not args.no_stats,
+                debug=args.debug_seller
             )
     
     return tweets_success and prediction_success
@@ -550,6 +560,8 @@ def main():
             logger.info("Auto-seller running in DRY RUN mode - no real orders will be placed")
         else:
             logger.info("Auto-seller will place REAL orders - use --dry-run to test without placing orders")
+        if args.debug_seller:
+            logger.info("Detailed debugging is enabled for position seller")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")

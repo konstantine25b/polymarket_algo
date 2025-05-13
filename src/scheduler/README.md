@@ -117,6 +117,9 @@ python -m src.scheduler.scheduler --no-tweet-verify
 # Automatically sell positions with prediction below 5%
 python -m src.scheduler.scheduler --sell-below 5.0
 
+# Show detailed debugging information for the position seller
+python -m src.scheduler.scheduler --debug-seller
+
 # Combine multiple options
 python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5 --sell-below 3.0
 ```
@@ -147,6 +150,7 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--min-usdc`: Minimum USDC balance required to run auto-bidder (default: 1.0)
 - `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
 - `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
+- `--debug-seller`: Show detailed debugging information for the position seller
 
 ## Smart Incremental Fetching
 
@@ -324,6 +328,7 @@ To customize the position seller behavior:
 - `--dry-run`: Test the position seller without placing actual sell orders
 - `--no-stats`: Skip displaying the full statistical comparison table
 - `--no-selling`: Skip running the position seller entirely
+- `--debug-seller`: Show detailed debugging information to help troubleshoot position issues
 
 Example output in production mode with both sell criteria:
 
