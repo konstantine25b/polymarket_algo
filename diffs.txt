@@ -1,0 +1,11 @@
+Entries in src/data/website_elonmusk_reformatted.csv but not in src/data/elonmusk_reformatted.csv: 6
+"1918892192577327436","RT @iruletheworldmo: @FlowAltDelete it’s the first genuine artificial intelligence imo.","2025:05:04:00:55:24"
+"1919114335542038979","RT @iruletheworldmo: this is an early checkpoint lol, grok is going to get better and better until it blows right on by super intelligence…","2025:05:04:15:38:07"
+"1918852383976656938","RT @spacesudoer: S T A R B A S E https://t.co/GCMZAecjnH","2025:05:03:22:17:13"
+"1858532026732724422","RT @KonstantinKisin: 'If opposing this insanity makes me 'right-wing","2024:11:18:10:25:39"
+"1919146821982597387","Grōk https://t.co/p0UkeMkttH","2025:05:04:17:47:13"
+"1918891783536148562","Grok 3.5 is something special https://t.co/wxHEYltRKn","2025:05:04:00:53:47"
+
+Entries in src/data/elonmusk_reformatted.csv but not in src/data/website_elonmusk_reformatted.csv: 2
+"1920443496357326969","RT @gailalfaratx: Many people buy a Tesla because of the confidence they have in the reliable Tesla Supercharging network. It is the best!","2025:05:08:07:39:44"
+"1919046207365611730","@gork, which would win: 100 guerrillas or 1 gorilla?","2025:05:04:11:07:24"

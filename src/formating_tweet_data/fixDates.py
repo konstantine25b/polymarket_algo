@@ -8,9 +8,9 @@ import re
 script_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(script_dir)  # Go up one level from src/formating to src
 
-input_filename = os.path.join(src_dir, 'data', 'elonmusk (6).csv')
-output_filename = os.path.join(src_dir, 'data', 'elonmusk_reformatted.csv')
-error_log_filename = os.path.join(src_dir, 'data', 'elonmusk_parsing_errors.log')
+input_filename = os.path.join(src_dir, 'data', 'elonmusk (9).csv')
+output_filename = os.path.join(src_dir, 'data', 'website_elonmusk_reformatted.csv')
+error_log_filename = os.path.join(src_dir, 'data', 'website_elonmusk_parsing_errors.log')
 
 print("Starting script...")
 print(f"Input file: {input_filename}")
