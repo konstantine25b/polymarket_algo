@@ -50,8 +50,7 @@ class PolymarketPositionTracker:
         if not key:
             load_dotenv()
             key = os.getenv("WALLET_PRIVATE_KEY")
-        key = "0xce0bfa9ca4fb4d80459172c711609cce995188b40215b8652f656e801ea60daf"
-            
+
         if not key:
             raise ValueError("Wallet private key is required. Please provide it or set WALLET_PRIVATE_KEY in .env")
             
