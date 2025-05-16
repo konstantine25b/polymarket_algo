@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 class TweetCSVGetter:
     def __init__(self):
-        self.download_dir = "temp"
+        self.download_dir = os.path.join("src", "xpath_scraper", "temp")
         os.makedirs(self.download_dir, exist_ok=True)
 
     def getCSV(self):
