@@ -1,8 +1,13 @@
 import os
+# Force matplotlib to not use any Xwindows backend before importing pyplot
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend that doesn't require a display
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 import json
 import logging
-import matplotlib.pyplot as plt
 import numpy as np
 import requests
 from datetime import datetime
@@ -45,7 +50,7 @@ class PolymarketPositionTracker:
         if not key:
             load_dotenv()
             key = os.getenv("WALLET_PRIVATE_KEY")
-            
+
         if not key:
             raise ValueError("Wallet private key is required. Please provide it or set WALLET_PRIVATE_KEY in .env")
             
@@ -2070,3 +2075,259 @@ class PolymarketPositionTracker:
                 print(f"  ROI: {overall_roi:+.2f}%")
         
         return df
+
+    def print_positions_summary(self, positions_dict):
+        """
+        Visualize important metrics from Polymarket trading data.
+
+        Args:
+            positions_dict (dict): Dictionary containing trading data with the structure
+                                   provided in the example.
+        """
+        # Extract basic metrics
+        wallet_address = positions_dict.get('wallet_address', 'Unknown')
+        total_markets = positions_dict.get('total_markets', 0)
+        total_trades = positions_dict.get('total_trades', 0)
+        total_pl = positions_dict.get('pl_metrics', {}).get('total_pl', 0)
+        realized_pl = positions_dict.get('pl_metrics', {}).get('total_realized_pl', 0)
+        unrealized_pl = positions_dict.get('pl_metrics', {}).get('total_unrealized_pl', 0)
+        total_position_value = float(positions_dict.get('total_position_value', 0))
+
+        # Extract market positions
+        markets_data = positions_dict.get('positions', {})
+
+        # Create figure with subplots
+        plt.style.use('ggplot')
+        fig = plt.figure(figsize=(15, 12))
+        fig.suptitle(f"Polymarket Trading Dashboard - {wallet_address[:6]}...{wallet_address[-4:]}",
+                    fontsize=16, fontweight='bold')
+
+        # 1. Overview metrics
+        ax1 = fig.add_subplot(3, 2, 1)
+        metrics = ['Total Markets', 'Total Trades', 'Total P&L', 'Realized P&L', 'Unrealized P&L']
+        values = [total_markets, total_trades, total_pl, realized_pl, unrealized_pl]
+
+        colors = ['#3778bf' if v >= 0 else '#e15759' for v in values]
+        ax1.bar(metrics, values, color=colors)
+        ax1.set_title('Account Overview')
+        ax1.set_ylabel('Value')
+        plt.xticks(rotation=45, ha='right')
+
+        # 2. P&L by market
+        ax2 = fig.add_subplot(3, 2, 2)
+        market_names = []
+        market_pls = []
+
+        for market_id, market_data in markets_data.items():
+            market_names.append(market_data.get('name', market_id)[:20] + '...')
+            market_pls.append(market_data.get('pl_metrics', {}).get('total_pl', 0))
+
+        # Sort by P&L
+        sorted_indices = np.argsort(market_pls)
+        sorted_names = [market_names[i] for i in sorted_indices]
+        sorted_pls = [market_pls[i] for i in sorted_indices]
+
+        colors = ['#3778bf' if pl >= 0 else '#e15759' for pl in sorted_pls]
+        ax2.barh(sorted_names, sorted_pls, color=colors)
+        ax2.set_title('P&L by Market')
+        ax2.set_xlabel('Profit/Loss')
+
+        # 3. Position sizes by market
+        ax3 = fig.add_subplot(3, 2, 3)
+        market_names = []
+        position_sizes = []
+
+        for market_id, market_data in markets_data.items():
+            name = market_data.get('name', market_id)[:20] + '...'
+
+            # Get the position size (assuming 'Yes' position for simplicity)
+            pos_size = 0
+            if 'positions' in market_data and 'Yes' in market_data['positions']:
+                pos_size = float(market_data['positions']['Yes'].get('size', 0))
+
+            market_names.append(name)
+            position_sizes.append(pos_size)
+
+        # Sort by position size
+        sorted_indices = np.argsort(position_sizes)[-10:]  # Top 10 positions
+        sorted_names = [market_names[i] for i in sorted_indices]
+        sorted_sizes = [position_sizes[i] for i in sorted_indices]
+
+        ax3.barh(sorted_names, sorted_sizes)
+        ax3.set_title('Top Position Sizes (Yes positions)')
+        ax3.set_xlabel('Position Size')
+
+        # 4. Trade activity over time
+        ax4 = fig.add_subplot(3, 2, 4)
+        trade_dates = []
+        trade_counts = {}
+
+        for market_id, market_data in markets_data.items():
+            if 'positions' in market_data and 'Yes' in market_data['positions']:
+                trade_time_str = market_data['positions']['Yes'].get('last_trade_time', '')
+                if trade_time_str:
+                    trade_date = datetime.strptime(trade_time_str.split('T')[0], '%Y-%m-%d').date()
+                    trade_dates.append(trade_date)
+                    trade_counts[trade_date] = trade_counts.get(trade_date, 0) + 1
+
+        if trade_dates:
+            dates = sorted(list(trade_counts.keys()))
+            counts = [trade_counts[date] for date in dates]
+
+            ax4.plot(dates, counts, marker='o', linestyle='-')
+            ax4.set_title('Trading Activity by Date')
+            ax4.set_xlabel('Date')
+            ax4.set_ylabel('Number of Trades')
+            ax4.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            plt.xticks(rotation=45, ha='right')
+
+        # 5. Pie chart of position values
+        ax5 = fig.add_subplot(3, 2, 5)
+        market_names = []
+        position_values = []
+
+        for market_id, market_data in markets_data.items():
+            pos_value = float(market_data.get('position_value', 0))
+            if pos_value > 0.001:  # Filter out very small positions
+                name = market_data.get('name', market_id).split('?')[0][:15] + '...'
+                market_names.append(name)
+                position_values.append(pos_value)
+
+        # If there are too many markets, group smaller ones
+        if len(market_names) > 7:
+            sorted_indices = np.argsort(position_values)
+            top_indices = sorted_indices[-6:]
+            other_value = sum(position_values[i] for i in sorted_indices[:-6])
+
+            pie_names = [market_names[i] for i in top_indices] + ['Other Markets']
+            pie_values = [position_values[i] for i in top_indices] + [other_value]
+        else:
+            pie_names = market_names
+            pie_values = position_values
+
+        ax5.pie(pie_values, labels=pie_names, autopct='%1.1f%%', startangle=90)
+        ax5.set_title('Portfolio Composition by Position Value')
+
+        # 6. Market type distribution (extracting from market names)
+        ax6 = fig.add_subplot(3, 2, 6)
+        market_types = {}
+
+        for market_id, market_data in markets_data.items():
+            name = market_data.get('name', '')
+            if "Elon tweet" in name:
+                market_types["Elon Tweets"] = market_types.get("Elon Tweets", 0) + 1
+            # Add more categories as needed
+            else:
+                market_types["Other"] = market_types.get("Other", 0) + 1
+
+        types = list(market_types.keys())
+        counts = list(market_types.values())
+
+        ax6.bar(types, counts)
+        ax6.set_title('Market Type Distribution')
+        ax6.set_ylabel('Count')
+
+        # Save plots to files instead of displaying them
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        output_path1 = os.path.join(os.getcwd(), "polymarket_dashboard.png")
+        fig.savefig(output_path1, dpi=300, bbox_inches='tight')
+        print(f"Saved dashboard visualization to: {output_path1}")
+        plt.close(fig)
+
+        # Create second figure for trade details
+        fig2 = plt.figure(figsize=(12, 8))
+        fig2.suptitle("Trade Details Analysis", fontsize=16, fontweight='bold')
+
+        # 1. Trades per market
+        ax1 = fig2.add_subplot(2, 2, 1)
+        market_names = []
+        trade_counts = []
+
+        for market_id, market_data in markets_data.items():
+            name = market_data.get('name', market_id)[:20] + '...'
+            market_names.append(name)
+            trade_counts.append(market_data.get('total_trades', 0))
+
+        # Sort by trade count
+        sorted_indices = np.argsort(trade_counts)[-10:]  # Top 10 by trades
+        sorted_names = [market_names[i] for i in sorted_indices]
+        sorted_counts = [trade_counts[i] for i in sorted_indices]
+
+        ax1.barh(sorted_names, sorted_counts)
+        ax1.set_title('Markets by Number of Trades')
+        ax1.set_xlabel('Number of Trades')
+
+        # 2. Avg P&L per trade by market
+        ax2 = fig2.add_subplot(2, 2, 2)
+        market_names = []
+        avg_pls = []
+
+        for market_id, market_data in markets_data.items():
+            name = market_data.get('name', market_id)[:20] + '...'
+            trades = market_data.get('total_trades', 0)
+            pl = market_data.get('pl_metrics', {}).get('total_pl', 0)
+
+            if trades > 0:
+                avg_pl = pl / trades
+                market_names.append(name)
+                avg_pls.append(avg_pl)
+
+        # Sort by avg P&L
+        sorted_indices = np.argsort(avg_pls)
+        sorted_names = [market_names[i] for i in sorted_indices]
+        sorted_avg_pls = [avg_pls[i] for i in sorted_indices]
+
+        colors = ['#3778bf' if pl >= 0 else '#e15759' for pl in sorted_avg_pls]
+        ax2.barh(sorted_names, sorted_avg_pls, color=colors)
+        ax2.set_title('Average P&L per Trade by Market')
+        ax2.set_xlabel('Avg P&L per Trade')
+
+        # 3. Scatter plot of position size vs P&L
+        ax3 = fig2.add_subplot(2, 2, 3)
+        sizes = []
+        pls = []
+        labels = []
+
+        for market_id, market_data in markets_data.items():
+            name = market_data.get('name', market_id).split('?')[0][:15]
+            if 'positions' in market_data and 'Yes' in market_data['positions']:
+                size = float(market_data['positions']['Yes'].get('size', 0))
+                pl = market_data.get('pl_metrics', {}).get('total_pl', 0)
+
+                sizes.append(size)
+                pls.append(pl)
+                labels.append(name)
+
+        colors = ['#3778bf' if p >= 0 else '#e15759' for p in pls]
+        ax3.scatter(sizes, pls, c=colors, alpha=0.7)
+
+        # Annotate points with large P&L or size
+        for i, (x, y, label) in enumerate(zip(sizes, pls, labels)):
+            if abs(y) > max(abs(np.array(pls))) * 0.3 or x > max(sizes) * 0.3:
+                ax3.annotate(label, (x, y), fontsize=8)
+
+        ax3.set_title('Position Size vs P&L')
+        ax3.set_xlabel('Position Size')
+        ax3.set_ylabel('P&L')
+        ax3.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+
+        # 4. P&L distribution histogram
+        ax4 = fig2.add_subplot(2, 2, 4)
+        all_pls = [market_data.get('pl_metrics', {}).get('total_pl', 0)
+                   for market_id, market_data in markets_data.items()]
+
+        ax4.hist(all_pls, bins=10, alpha=0.7, color='#3778bf')
+        ax4.set_title('P&L Distribution')
+        ax4.set_xlabel('P&L')
+        ax4.set_ylabel('Frequency')
+
+        # Save second figure to file
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        output_path2 = os.path.join(os.getcwd(), "polymarket_trade_details.png")
+        fig2.savefig(output_path2, dpi=300, bbox_inches='tight')
+        print(f"Saved trade details visualization to: {output_path2}")
+        plt.close(fig2)
+
+        print("Visualization complete! Check the output files in your current directory.")
+        print(output_path1, output_path2)
+        return output_path1, output_path2

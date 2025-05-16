@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
+from src.pinned_checker.pinnedChecker import PinnedChecker
 # Import Polymarket API client to get the count frames
 from src.polymarket.api_client import PolymarketAPIClient
 
@@ -41,7 +42,7 @@ from src.constants import (
 def get_current_et_time():
     """
     Get the current time in Eastern Time (ET) timezone.
-    
+
     Returns:
         datetime: Current datetime in ET timezone
     """
@@ -51,10 +52,10 @@ def convert_to_et(dt):
     """
     Convert a naive datetime to Eastern Time (ET) timezone.
     If the datetime is already timezone-aware, convert it to ET.
-    
+
     Args:
         dt: A datetime object
-        
+
     Returns:
         datetime: The datetime in ET timezone
     """
@@ -69,13 +70,13 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
     """
     Utility function to verify the exact tweet count within a date range
     by manually counting and displaying detailed information.
-    
+
     Args:
         start_date_str: Start date/time in 'YYYY-MM-DD HH:MM:SS' format (ET timezone)
         end_date_str: End date/time in 'YYYY-MM-DD HH:MM:SS' format (ET timezone)
         data_file: Path to the tweet data file
         logger: Logger instance
-    
+
     Returns:
         int: The count of tweets within the specified range
     """
@@ -87,15 +88,15 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
             handler = logging.StreamHandler(sys.stdout)
             handler.setFormatter(logging.Formatter('%(message)s'))
             logger.addHandler(handler)
-    
+
     # Parse dates with ET timezone
     try:
         start_datetime = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M:%S')
         start_datetime = ET_TIMEZONE.localize(start_datetime, is_dst=None)
-        
+
         end_datetime = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M:%S')
         end_datetime = ET_TIMEZONE.localize(end_datetime, is_dst=None)
-        
+
         logger.info(f"Using Eastern Time (ET) for start: {start_datetime} and end: {end_datetime}")
     except ValueError as e:
         logger.error(f"Invalid date format: {e}. Please use 'YYYY-MM-DD HH:MM:SS'")
@@ -108,50 +109,78 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
         logger.error(f"Non-existent time during DST transition: {e}")
         logger.info("Please specify a time that is not during the DST 'spring forward' transition")
         return 0
-    
+
     # Load data
     if data_file is None:
         data_path = get_data_path('elonmusk_reformatted.csv')
     else:
         data_path = data_file
-        
+
     logger.info(f"Loading tweet data from: {data_path}")
-    
+
     # Read the CSV file
     try:
         df = pd.read_csv(data_path)
         logger.info(f"Loaded {len(df)} total tweets")
-        
+
         # Parse created_at timestamps and properly handle timezone
         logger.info("Parsing timestamps with custom function to handle timezone properly...")
-        
+
         # First, convert timestamps with our robust parser
+        # print("AAAA")
+        # print(df['created_at'])
         df['created_at_dt'] = df['created_at'].apply(parse_timestamp)
-        
+
         # Drop entries with invalid timestamps
         invalid_count = df['created_at_dt'].isna().sum()
         if invalid_count > 0:
             logger.warning(f"Found {invalid_count} tweets with invalid timestamps")
             df = df.dropna(subset=['created_at_dt'])
-        
+
         # IMPORTANT: Compare timezone-aware datetime objects directly
         # This is safer than converting to naive datetime objects
+
+        # WRYMP'S CHANGES
+        # ================================
+        # pinChecker = PinnedChecker()
+        # pinChecker.checkForNewPinnedTweets()
+        # pinned_rows = pinChecker.get_all_pinned()
+        #
+        # if pinned_rows:
+        #     pinned_df = pd.DataFrame(pinned_rows, columns=["id", "text", "created_at"])
+        #
+        #     pinned_df["created_at_dt"] = pd.to_datetime(pinned_df["created_at"], format="%Y:%m:%d:%H:%M:%S", errors="coerce")
+        #     pinned_df["created_at_dt"] = pinned_df["created_at_dt"].dt.tz_localize("UTC").dt.tz_convert(ET_TIMEZONE)
+        #
+        #     for col in df.columns:
+        #         if col not in pinned_df.columns:
+        #             pinned_df[col] = None
+        #
+        #     pinned_df = pinned_df[df.columns]
+        #
+        #     df = pd.concat([df, pinned_df], ignore_index=True)
+        #     logger.info(f"Added {len(pinned_df)} pinned tweets to dataset")
+        # else:
+        #     logger.info("No pinned tweets found to add")
+        # ================================
+
         filtered_df = df[(df['created_at_dt'] >= start_datetime) & (df['created_at_dt'] <= end_datetime)]
         total_count = len(filtered_df)
-        
+
+
         logger.info(f"\n=== Tweet Count Verification ===")
         logger.info(f"Time range (ET): {start_datetime} to {end_datetime}")
         logger.info(f"Total tweets in range: {total_count}")
-        
+
         # Show counts by day
         if not filtered_df.empty:
             filtered_df['date'] = filtered_df['created_at_dt'].dt.date
             daily_counts = filtered_df.groupby('date').size()
-            
+
             logger.info(f"\nDaily tweet counts (ET):")
             for date, count in daily_counts.items():
                 logger.info(f"  {date}: {count} tweets")
-            
+
             # Show a few sample tweets from the range
             logger.info(f"\nSample tweets from this range:")
             sample = filtered_df.sample(min(5, len(filtered_df)))
@@ -161,9 +190,9 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
                 if len(text) > 50:
                     text = text[:50] + "..."
                 logger.info(f"  [{date_str}] {text}")
-        
+
         return total_count
-    
+
     except Exception as e:
         logger.error(f"Error verifying tweet count: {e}")
         import traceback
@@ -172,26 +201,29 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
 
 def parse_timestamp(timestamp_str: str) -> datetime:
     """
-    Parse a timestamp string in YYYY:MM:DD:HH:MM:SS format and convert to timezone-aware 
+    Parse a timestamp string in YYYY:MM:DD:HH:MM:SS format and convert to timezone-aware
     Eastern Time datetime, carefully handling DST transitions.
-    
+
     Args:
         timestamp_str: Timestamp string in YYYY:MM:DD:HH:MM:SS format
-        
+
     Returns:
         datetime: Timezone-aware datetime object in Eastern Time, or None if parsing fails
     """
     try:
         parts = timestamp_str.split(':')
+        # print(parts)
         if len(parts) != 6:
+            print(parts)
+            print(timestamp_str)
             print(f"Warning: Invalid timestamp format '{timestamp_str}' - expected YYYY:MM:DD:HH:MM:SS")
             return None
-            
+
         year, month, day, hour, minute, second = map(int, parts)
-        
+
         # Create naive datetime
         naive_dt = datetime(year, month, day, hour, minute, second)
-        
+
         # Try to localize to Eastern Time, safely handling DST transitions
         try:
             # First attempt with is_dst=None (let pytz figure it out)
@@ -204,9 +236,9 @@ def parse_timestamp(timestamp_str: str) -> datetime:
             # During DST "spring forward", there's a missing hour - adjust forward
             print(f"Note: Non-existent time during DST transition: {naive_dt}. Adding 1 hour.")
             dt = ET_TIMEZONE.localize(naive_dt + timedelta(hours=1))
-            
+
         return dt
-        
+
     except Exception as e:
         print(f"Error parsing timestamp {timestamp_str}: {e}")
         return None
@@ -228,7 +260,7 @@ def parse_count_frames(market_details):
     """Parse tweet count frames from market details"""
     if not market_details:
         return []
-    
+
     count_frames = []
     markets = market_details.get("markets", [])
     for market in markets:
@@ -237,29 +269,31 @@ def parse_count_frames(market_details):
             title = outcome.get("title", "")
             token_id = outcome.get("tokenId", "")
             print(f"  [Debug] Pairing outcome: {title} with token_id: {token_id}")
-    
+
     print(f"[Debug] Finished processing markets. market_details count: {len(markets)}")
-    
+
     # Process by finding the event details
     events = market_details.get("events", [])
     if events:
         print(f"Retrieved {len(events)} count frames from Polymarket")
         # Assuming the first event is the one we want
         return events
-    
+
     return []
 
 def preprocess_tweets(df):
     """Preprocess tweets data for analysis"""
     # Filter out tweets with invalid timestamps
     df = df.dropna(subset=['created_at'])
-    
+
     # Convert timestamp strings to datetime objects
+    print("BBB")
+    print(df['created_at'])
     df['created_at_dt'] = df['created_at'].apply(parse_timestamp)
-    
+
     # Filter out rows with invalid timestamps
     df = df.dropna(subset=['created_at_dt'])
-    
+
     return df
 
 def analyze_tweet_patterns(df):
@@ -268,23 +302,23 @@ def analyze_tweet_patterns(df):
     df['date'] = df['created_at_dt'].dt.date
     df['weekday'] = df['created_at_dt'].dt.weekday
     df['hour'] = df['created_at_dt'].dt.hour
-    
+
     # Analyze tweets by weekday
     weekday_counts = df.groupby('weekday').size()
     weekday_unique_dates = df.groupby('weekday')['date'].nunique()
     weekday_avg = weekday_counts / weekday_unique_dates
-    
+
     weekday_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     print("\nAverage tweets by weekday:")
     for i in range(7):
         if i in weekday_avg.index:
             print(f"{weekday_names[i]}: {weekday_avg[i]:.2f} tweets per day")
-    
+
     # Analyze tweets by hour
     hour_counts = df.groupby('hour').size()
     hour_unique_dates = df.groupby('hour')['date'].nunique()
     hour_avg = hour_counts / hour_unique_dates
-    
+
     print("\nAverage hourly tweets (top 5):")
     top_hours = hour_avg.sort_values(ascending=False).head(5)
     for hour, avg in top_hours.items():
@@ -293,32 +327,32 @@ def analyze_tweet_patterns(df):
         if display_hour == 0:
             display_hour = 12
         print(f"{display_hour} {am_pm}: {avg:.3f} tweets per day")
-    
+
     # Overall average
     total_days = (df['date'].max() - df['date'].min()).days + 1
     total_tweets = len(df)
     overall_avg = total_tweets / total_days
-    
+
     print(f"\nOverall average: {overall_avg:.2f} tweets per day")
-    
+
     # Recent average (last 7 days)
     last_date = df['date'].max()
     week_ago = last_date - timedelta(days=7)
     recent_tweets = df[(df['date'] > week_ago) & (df['date'] <= last_date)]
     recent_avg = len(recent_tweets) / 7
-    
+
     print(f"Recent average (last 7 days): {recent_avg:.2f} tweets per day")
-    
+
     return overall_avg, recent_avg
 
-def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH, 
-                                start_date_str=None, end_date_str=None, 
-                                data_file=None, use_trend=True, 
+def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
+                                start_date_str=None, end_date_str=None,
+                                data_file=None, use_trend=True,
                                 num_simulations=5000, current_tweet_count=None,
                                 override_auto_count=False):
     """
     Predict probabilities for tweet count frames with robust timezone handling
-    
+
     Args:
         data_path: Path to the tweet data CSV file (default path used if not provided)
         start_date_str: Start date/time string in format 'YYYY-MM-DD HH:MM:SS' (ET timezone)
@@ -328,24 +362,24 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
         num_simulations: Number of Monte Carlo simulations to run
         current_tweet_count: Manual override for current tweet count
         override_auto_count: Whether to use the provided current_tweet_count instead of auto-counting
-        
+
     Returns:
         Dictionary mapping tweet count frames to probabilities
     """
     # Use data_file parameter if provided (for backward compatibility)
     if data_file is not None:
         data_path = data_file
-        
+
     # Use provided date strings if available, otherwise use constants
     start_time = start_date_str if start_date_str is not None else POLYMARKET_START_TIME
     end_time = end_date_str if end_date_str is not None else POLYMARKET_END_TIME
-    
+
     # Load and preprocess tweet data
     print(f"Loading data from: {data_path}")
     try:
         df = pd.read_csv(data_path)
         print(f"Loaded {len(df)} tweets")
-        
+
         # Add data validation step to filter out rows with improperly formatted timestamps
         # We expect the timestamp format to be YYYY:MM:DD:HH:MM:SS
         print("Validating timestamp format...")
@@ -353,31 +387,34 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
         invalid_count = (~valid_format).sum()
         if invalid_count > 0:
             print(f"Warning: Found {invalid_count} tweets with invalid timestamp format, removing them from analysis")
-            
+
             # Print a few examples of invalid timestamps for debugging
             invalid_examples = df[~valid_format]['created_at'].head(5)
             print("Examples of invalid timestamps:")
             for i, example in enumerate(invalid_examples):
                 print(f"  {i+1}. '{example}'")
-                
+
             # Filter out invalid timestamps
             df = df[valid_format]
             print(f"Continuing with {len(df)} valid tweets")
-        
+
         # Proceed with datetime processing
         print("\nAnalyzing tweeting patterns...")
-        
+
         # Parse timestamps using our robust handler
         print("Parsing timestamps with robust timezone handling...")
+
+        print("CCCC")
+        print(df['created_at'])
         df['created_at_dt'] = df['created_at'].apply(parse_timestamp)
-        
+
         # Filter out rows with invalid timestamps
         invalid_dt_count = df['created_at_dt'].isna().sum()
         if invalid_dt_count > 0:
             print(f"Warning: Found {invalid_dt_count} tweets with parsing errors, removing from analysis")
             df = df.dropna(subset=['created_at_dt'])
             print(f"Continuing with {len(df)} valid tweets")
-            
+
         # Auto-count tweets in the Polymarket timeframe
         try:
             # Use the provided start_time value
@@ -389,7 +426,7 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
             print(f"Warning: Start time {start_time} is non-existent (during DST transition). Adjusting forward 1 hour.")
             nonexistent_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
             polymarket_start = ET_TIMEZONE.localize(nonexistent_dt + timedelta(hours=1))
-            
+
         try:
             # Use the provided end_time value
             polymarket_end = ET_TIMEZONE.localize(datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S"), is_dst=None)
@@ -400,21 +437,21 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
             print(f"Warning: End time {end_time} is non-existent (during DST transition). Adjusting forward 1 hour.")
             nonexistent_dt = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
             polymarket_end = ET_TIMEZONE.localize(nonexistent_dt + timedelta(hours=1))
-            
+
         now = datetime.now(ET_TIMEZONE)
-        
+
         print(f"Current time (ET): {now}")
         print(f"Analysis time range (ET): {polymarket_start} to {polymarket_end}")
-        
+
         # Continue with existing analysis logic
         if now < polymarket_end:
             elapsed_days = (now - polymarket_start).total_seconds() / (24 * 3600)
             remaining_days = (polymarket_end - now).total_seconds() / (24 * 3600)
-            
+
             # Count tweets so far (comparing timezone-aware datetimes)
             tweets_so_far = df[(df['created_at_dt'] >= polymarket_start) & (df['created_at_dt'] <= now)]
             auto_tweet_count = len(tweets_so_far)
-            
+
             # Use the manual override if provided and override flag is set
             if override_auto_count and current_tweet_count is not None:
                 tweet_count = current_tweet_count
@@ -422,47 +459,47 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
             else:
                 tweet_count = auto_tweet_count
                 print(f"Using current tweet count of {tweet_count} tweets")
-            
+
             # Add historical context by preparing the data for time series analysis
             # Convert created_at_dt to date for daily aggregation
             df['date'] = df['created_at_dt'].dt.date
-            
+
             # Calculate daily counts
             daily_counts = df.groupby('date').size().reset_index(name='count')
             daily_counts['date'] = pd.to_datetime(daily_counts['date'])
             daily_counts = daily_counts.sort_values('date')
-            
+
             # Calculate moving averages of different windows
             daily_counts['MA_7'] = daily_counts['count'].rolling(window=7).mean()
             daily_counts['MA_14'] = daily_counts['count'].rolling(window=14).mean()
             daily_counts['MA_30'] = daily_counts['count'].rolling(window=30).mean()
-            
+
             # Calculate current daily rate from elapsed period
             if elapsed_days > 0:
                 current_rate = tweet_count / elapsed_days
                 print(f"Current daily rate: {current_rate:.2f} tweets per day")
-                
+
                 # Calculate tweeting rate for different time periods
                 last_7_days = now - timedelta(days=7)
                 last_14_days = now - timedelta(days=14)
                 last_30_days = now - timedelta(days=30)
-                
+
                 recent_7d_tweets = df[(df['created_at_dt'] >= last_7_days) & (df['created_at_dt'] <= now)]
                 recent_14d_tweets = df[(df['created_at_dt'] >= last_14_days) & (df['created_at_dt'] <= now)]
                 recent_30d_tweets = df[(df['created_at_dt'] >= last_30_days) & (df['created_at_dt'] <= now)]
-                
+
                 rate_7d = len(recent_7d_tweets) / 7 if now > last_7_days else current_rate
                 rate_14d = len(recent_14d_tweets) / 14 if now > last_14_days else current_rate
                 rate_30d = len(recent_30d_tweets) / 30 if now > last_30_days else current_rate
-                
+
                 # Get the average daily tweet count from full history
                 historical_avg = daily_counts['count'].mean()
-                
+
                 # Calculate trend indicators
                 trend_7d = rate_7d / historical_avg if historical_avg > 0 else 1.0
                 trend_14d = rate_14d / historical_avg if historical_avg > 0 else 1.0
                 trend_30d = rate_30d / historical_avg if historical_avg > 0 else 1.0
-                
+
                 # Calculate spread for Monte Carlo simulation
                 if use_trend:
                     weighted_trend = (trend_7d * 0.6) + (trend_14d * 0.3) + (trend_30d * 0.1)
@@ -471,35 +508,35 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
                     # Disable trend adjustment if requested
                     weighted_trend = 1.0
                     print("Trend adjustment disabled by user")
-                
+
                 print("\n--- Advanced Prediction Analysis ---")
                 print(f"Prediction window (ET): {polymarket_start} to {polymarket_end} ({(polymarket_end - polymarket_start).total_seconds() / (24 * 3600):.1f} days)")
                 print(f"Current tweet count: {tweet_count} tweets ({elapsed_days:.2f} days elapsed, {remaining_days:.2f} days remaining)")
                 print(f"Historical daily average: {historical_avg:.1f} tweets per day")
                 print(f"Recent rates: 7-day: {rate_7d:.1f}, 14-day: {rate_14d:.1f}, 30-day: {rate_30d:.1f} tweets/day")
                 print(f"Trend factors: 7-day: {trend_7d:.2f}, 14-day: {trend_14d:.2f}, 30-day: {trend_30d:.2f}")
-                
+
                 # Analyze hourly and day-of-week patterns
                 df['hour'] = df['created_at_dt'].dt.hour
                 df['weekday'] = df['created_at_dt'].dt.weekday
-                
+
                 # Check if there's a day-of-week or hourly pattern to consider
                 weekday_counts = df.groupby('weekday').size()
                 weekday_unique_dates = df.groupby('weekday')['date'].nunique()
                 weekday_avg = weekday_counts / weekday_unique_dates
-                
+
                 # Calculate which weekdays are in the remaining period
                 remaining_start = now
                 remaining_end = polymarket_end
                 remaining_weekdays = []
-                
+
                 current_day = remaining_start
                 while current_day <= remaining_end:
                     remaining_weekdays.append(current_day.weekday())
                     current_day += timedelta(days=1)
-                
+
                 remaining_weekdays = list(set(remaining_weekdays))  # Unique weekdays
-                
+
                 # Calculate expected daily rate for remaining period based on weekday patterns
                 expected_weekday_rate = 0
                 if len(remaining_weekdays) > 0:
@@ -509,34 +546,34 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
                     expected_weekday_rate /= len(remaining_weekdays)
                 else:
                     expected_weekday_rate = current_rate
-                
+
                 # Adjust based on weekday patterns
                 weekday_adjustment = expected_weekday_rate / historical_avg if historical_avg > 0 else 1.0
-                
+
                 # Now calculate multiple prediction models
-                
+
                 # 1. Simple linear extrapolation (base prediction)
                 base_prediction = tweet_count + (current_rate * remaining_days)
-                
+
                 # 2. Trend-adjusted prediction
                 trend_adjusted_prediction = tweet_count + (current_rate * remaining_days * weighted_trend)
-                
+
                 # 3. Weekday-adjusted prediction
                 weekday_adjusted_prediction = tweet_count + (current_rate * remaining_days * weekday_adjustment)
-                
+
                 # 4. Combined model (ensemble)
                 if use_trend:
                     ensemble_prediction = tweet_count + (current_rate * remaining_days * weighted_trend * weekday_adjustment)
                 else:
                     # Skip trend factor if trend adjustment is disabled
                     ensemble_prediction = tweet_count + (current_rate * remaining_days * weekday_adjustment)
-                
+
                 # Safety check: predictions can never be less than current count
                 base_prediction = max(tweet_count, base_prediction)
                 trend_adjusted_prediction = max(tweet_count, trend_adjusted_prediction)
                 weekday_adjusted_prediction = max(tweet_count, weekday_adjusted_prediction)
                 ensemble_prediction = max(tweet_count, ensemble_prediction)
-                
+
                 print("\n--- Prediction Models ---")
                 print(f"Current count (lower bound): {tweet_count:.1f} tweets")
                 print(f"Simple linear prediction: {base_prediction:.1f} tweets")
