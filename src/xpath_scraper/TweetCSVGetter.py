@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 class TweetCSVGetter:
     def __init__(self):
-        self.download_dir = os.path.join("src", "data")
+        self.download_dir = "temp"
         os.makedirs(self.download_dir, exist_ok=True)
 
     def getCSV(self):
@@ -26,9 +26,16 @@ class TweetCSVGetter:
             download.save_as(save_path)
 
             print(f"Downloaded and saved to: {save_path}")
-            subprocess.run(["python3", "src/formating_tweet_data/fixDates.py"], check=True)
+            self.fromat()
+            self.merge()
 
             browser.close()
+
+    def fromat(self):
+        subprocess.run(["python3", "src/formating_tweet_data/secondFixDates.py"], check=True)
+
+    def merge(self):
+        subprocess.run(["python3", "src/xpath_scraper/combiner.py"], check=True)
 
 
 if __name__ == '__main__':

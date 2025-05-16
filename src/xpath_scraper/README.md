@@ -5,7 +5,7 @@ A tool that gets how many tweets has elon tweeted on the latest market on polyma
 ## Count Getter Overview
 
 1. Gets current date
-2. Iterates over 7 days to see which markets are real.
+2. gets url from constants.
 3. Reads the count from polymarkets own website using a generalized xpath
 
 ## CSV Getter Overview
@@ -13,6 +13,7 @@ A tool that gets how many tweets has elon tweeted on the latest market on polyma
 1. Gets CSV From xtracker
 2. Downloads to local data dir
 3. Runs fixDates.py on the csv
+4. merge into existing reformatted csv
 
 ## Dependencies
 playwright is needed
