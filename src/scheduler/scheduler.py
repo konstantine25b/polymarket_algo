@@ -37,6 +37,7 @@ Options:
     --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
     --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
     --debug-seller         Show detailed debugging information for position seller
+    --use-csv-getter       Use TweetCSVGetter instead of Apify for fetching tweets
 """
 
 import argparse
@@ -115,6 +116,8 @@ def setup_argparse():
                         help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     parser.add_argument('--debug-seller', action='store_true',
                         help='Show detailed debugging information for position seller')
+    parser.add_argument('--use-csv-getter', action='store_true',
+                        help='Use TweetCSVGetter instead of Apify for fetching tweets')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -492,14 +495,20 @@ def run_scheduled_jobs(args):
     
     # Run the tweet fetching job if configured
     if not args.predictions_only:
-        tweets_success = fetch_tweets(
-            max_tweets=args.max_tweets,
-            debug=not args.no_debug,
-            quiet=args.quiet,
-            use_incremental=not args.no_incremental,
-            initial_batch=args.initial_batch,
-            max_batch=args.max_batch
-        )
+        if args.use_csv_getter:
+            # Use TweetCSVGetter method
+            logger.info("Using TweetCSVGetter method for tweet fetching")
+            tweets_success = fetch_tweets_csv(quiet=args.quiet)
+        else:
+            # Use default Apify method
+            tweets_success = fetch_tweets(
+                max_tweets=args.max_tweets,
+                debug=not args.no_debug,
+                quiet=args.quiet,
+                use_incremental=not args.no_incremental,
+                initial_batch=args.initial_batch,
+                max_batch=args.max_batch
+            )
         
         # Verify tweet count after fetching if enabled
         if tweets_success and not args.no_tweet_verify:
@@ -586,6 +595,40 @@ def run_scheduled_jobs(args):
     
     return tweets_success and prediction_success
 
+def fetch_tweets_csv(quiet=False):
+    """Fetch tweets using the TweetCSVGetter.
+    
+    This uses the XTracker.io method to download tweets as CSV and process them.
+    
+    Args:
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the tweet fetching was successful
+    """
+    logger.info(f"Starting tweet fetching with TweetCSVGetter at {datetime.datetime.now()}")
+    
+    cmd = [sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"]
+    
+    try:
+        if quiet:
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Tweet CSV fetching failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Tweet CSV fetching completed successfully")
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Tweet CSV fetching failed")
+            else:
+                logger.info("Tweet CSV fetching completed successfully")
+    except Exception as e:
+        logger.error(f"Error running tweet CSV fetching: {e}")
+        return False
+    
+    return process.returncode == 0
+
 def main():
     """Main entry point for the scheduler."""
     args = setup_argparse()
@@ -601,6 +644,13 @@ def main():
         logger.info("Configured to run tweet fetching only")
     elif args.predictions_only:
         logger.info("Configured to run predictions only")
+    
+    # Log tweet fetching method
+    if not args.predictions_only:
+        if args.use_csv_getter:
+            logger.info("Using TweetCSVGetter for tweet fetching (XTracker.io method)")
+        else:
+            logger.info("Using Apify method for tweet fetching")
     
     # Log which prediction algorithm will be used
     if not args.tweets_only and not args.no_prophet:

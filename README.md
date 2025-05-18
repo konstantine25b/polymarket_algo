@@ -32,13 +32,13 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 dAYS
-python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 60 --dry-run
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
 
 # Run the automated scheduler with reasonable defaults when 1-2 days 
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --dry-run
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
 
 # Run the automated scheduler with reasonable defaults when 6-7 days 
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --dry-run
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
 ```
 
 ## Directory Structure
