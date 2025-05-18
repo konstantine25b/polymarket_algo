@@ -19,10 +19,20 @@ The `TweetCountGetter` class scrapes the current tweet count from Polymarket's E
 
 ## CSV Getter Overview
 
-1. Gets CSV From xtracker
-2. Downloads to local data dir
-3. Runs fixDates.py on the csv
-4. merge into existing reformatted csv
+The `TweetCSVGetter` class manages downloading and processing Elon Musk's tweet data:
+
+1. Downloads the CSV file from XTracker using Playwright
+2. Saves the file to the local temp directory (`src/xpath_scraper/temp/`)
+3. Reformats tweet dates using `secondFixDates.py`
+4. Merges new tweets with existing data in `src/data/elonmusk_reformatted.csv`
+
+### Features:
+
+- Preserves CSV headers during processing
+- Prevents duplicate tweets when merging
+- Sorts tweets by timestamp
+- Comprehensive logging for debugging and monitoring
+- Error handling for subprocess calls
 
 ## Dependencies
 
@@ -53,6 +63,15 @@ To get the tweets in CSV format:
 
 ```bash
 python -m src.xpath_scraper.TweetCSVGetter
+```
+
+Example output:
+
+```
+2023-06-01 14:35:10 - TweetCSVGetter - INFO - Starting CSV download process
+2023-06-01 14:35:12 - TweetCSVGetter - INFO - Downloaded and saved to: src/xpath_scraper/temp/elonmusk.csv
+...
+2023-06-01 14:35:45 - TweetCSVCombiner - INFO - CSV merge complete
 ```
 
 Alternatively, you can run the scripts directly:
