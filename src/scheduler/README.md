@@ -29,7 +29,7 @@ This module provides an automated scheduler that periodically:
 - **Statistical analysis**: View detailed stats on each market opportunity
 - **Balance checking**: Automatically checks wallet balance before placing buy orders, skipping if insufficient funds
 - **Conditional bidding**: Only runs auto-bidder if there's enough USDC balance (configurable minimum threshold)
-- **Tweet verification**: Shows the total and daily tweet counts after fetching to track activity
+- **Tweet verification**: Shows the total and daily tweet counts after fetching and validates against Polymarket's website
 - **Auto-sell low probability positions**: Automatically sells positions where your model's prediction is below a specified threshold
 
 ## Command-Line Usage
@@ -178,12 +178,15 @@ After successfully fetching tweets, the scheduler automatically verifies and dis
 1. Shows the total number of tweets for the current market week
 2. Displays a daily breakdown of tweets for each day of the week
 3. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
+4. Cross-checks the local database count with Polymarket's official count
+5. Alerts you if there's a discrepancy between your database and Polymarket
 
 The tweet verification feature provides valuable information for monitoring:
 
 - Whether the expected number of tweets are being collected
 - The daily pattern of tweet activity during the week
 - Progress toward the various tweet count ranges on Polymarket
+- Potential gaps in data collection if counts don't match
 
 Example output:
 
@@ -201,6 +204,26 @@ Daily tweet counts:
   2025-05-06: 28 tweets
   2025-05-07: 40 tweets
   2025-05-08: 30 tweets
+==================================================
+
+==================================================
+✅ TWEET COUNT MATCH
+==================================================
+Both local database and Polymarket site show 235 tweets
+==================================================
+```
+
+If a discrepancy is detected:
+
+```
+==================================================
+⚠️ TWEET COUNT MISMATCH
+==================================================
+Local database:   232 tweets
+Polymarket site:  235 tweets
+Difference:       3 tweets
+==================================================
+This might indicate missing tweets in your database or counting differences.
 ==================================================
 ```
 
@@ -427,3 +450,4 @@ Each process is monitored, and failures are logged. If the tweet fetching proces
 - **src.bidding_decision.auto_bid.run_seller**: Module for automated selling of positions
 - **src.polymarket.balance**: Module for checking wallet balances
 - **src.polymarket_predictor.tweet_predictor**: Module for tweet analysis and verification
+- **src.xpath_scraper.NumberGetter**: Module for getting the current tweet count from Polymarket
