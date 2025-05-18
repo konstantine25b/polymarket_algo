@@ -37,6 +37,7 @@ Options:
     --sell-below FLOAT     Automatically sell positions with prediction below this percentage (default: 0.0)
     --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
     --debug-seller         Show detailed debugging information for position seller
+    --use-csv-getter       Use TweetCSVGetter instead of Apify for fetching tweets
 """
 
 import argparse
@@ -46,6 +47,7 @@ import sys
 import logging
 import datetime
 import os
+import re
 from pathlib import Path
 
 # Set up logging
@@ -114,6 +116,8 @@ def setup_argparse():
                         help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
     parser.add_argument('--debug-seller', action='store_true',
                         help='Show detailed debugging information for position seller')
+    parser.add_argument('--use-csv-getter', action='store_true',
+                        help='Use TweetCSVGetter instead of Apify for fetching tweets')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -161,6 +165,36 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, i
     
     return process.returncode == 0
 
+def get_polymarket_tweet_count():
+    """Get the current tweet count from Polymarket website.
+    
+    Returns:
+        int: The current tweet count or -1 if retrieval failed
+    """
+    logger.info("Getting tweet count from Polymarket...")
+    
+    cmd = [sys.executable, "-m", "src.xpath_scraper.NumberGetter"]
+    
+    try:
+        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if process.returncode != 0:
+            logger.error(f"Failed to get tweet count: {process.stderr}")
+            return -1
+        
+        output = process.stdout
+        # Extract the tweet count using regex
+        match = re.search(r"Tweet count: (\d+)", output)
+        if match:
+            count = int(match.group(1))
+            logger.info(f"Retrieved tweet count from Polymarket: {count}")
+            return count
+        else:
+            logger.error(f"Failed to parse tweet count from output: {output}")
+            return -1
+    except Exception as e:
+        logger.error(f"Error getting tweet count: {e}")
+        return -1
+
 def verify_tweet_count(quiet=False):
     """Verify and display the tweet count for the current market week.
     
@@ -172,6 +206,7 @@ def verify_tweet_count(quiet=False):
     
     Returns:
         bool: Whether the verification was successful
+        int: The total tweet count from the database or -1 if not found
     """
     logger.info("Verifying tweet count for current market week...")
     
@@ -181,7 +216,7 @@ def verify_tweet_count(quiet=False):
         process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if process.returncode != 0:
             logger.error(f"Tweet count verification failed with error: {process.stderr}")
-            return False
+            return False, -1
         
         # Extract and display the relevant information about tweet counts
         output = process.stdout
@@ -192,12 +227,16 @@ def verify_tweet_count(quiet=False):
         
         for line in output.split('\n'):
             if "Total tweets in range:" in line:
-                total_count = line.split(":")[-1].strip()
+                total_count_str = line.split(":")[-1].strip()
+                try:
+                    total_count = int(total_count_str)
+                except ValueError:
+                    total_count = -1
             elif "tweets" in line and line.startswith("  202"):
                 daily_counts.append(line.strip())
         
         # Display the tweet count information
-        if total_count:
+        if total_count is not None:
             print("\n" + "=" * 50)
             print("TWEET COUNT VERIFICATION")
             print("=" * 50)
@@ -208,14 +247,34 @@ def verify_tweet_count(quiet=False):
             print("=" * 50 + "\n")
             
             logger.info(f"Tweet count verification complete: {total_count} total tweets this week")
-            return True
+            return True, total_count
         else:
             logger.warning("Could not extract tweet count information from verification output")
-            return False
+            return False, -1
             
     except Exception as e:
         logger.error(f"Error verifying tweet count: {e}")
-        return False
+        return False, -1
+
+def check_tweet_count_consistency():
+    """Compare the tweet count from local DB with Polymarket website.
+    
+    Returns:
+        tuple: (bool, int, int) - Whether counts match, DB count, Polymarket count
+    """
+    logger.info("Checking tweet count consistency between local DB and Polymarket...")
+    
+    # Get count from Polymarket website
+    polymarket_count = get_polymarket_tweet_count()
+    
+    if polymarket_count == -1:
+        logger.error("Failed to get tweet count from Polymarket website")
+        return False, -1, -1
+    
+    # Just display the count for now, we'll compare in the verify_tweet_count function
+    logger.info(f"Polymarket website tweet count: {polymarket_count}")
+    
+    return True, -1, polymarket_count
 
 def run_prediction(quiet=False, use_prophet=True):
     """Run the Polymarket predictor to update predictions.
@@ -436,18 +495,50 @@ def run_scheduled_jobs(args):
     
     # Run the tweet fetching job if configured
     if not args.predictions_only:
-        tweets_success = fetch_tweets(
-            max_tweets=args.max_tweets,
-            debug=not args.no_debug,
-            quiet=args.quiet,
-            use_incremental=not args.no_incremental,
-            initial_batch=args.initial_batch,
-            max_batch=args.max_batch
-        )
+        if args.use_csv_getter:
+            # Use TweetCSVGetter method
+            logger.info("Using TweetCSVGetter method for tweet fetching")
+            tweets_success = fetch_tweets_csv(quiet=args.quiet)
+        else:
+            # Use default Apify method
+            tweets_success = fetch_tweets(
+                max_tweets=args.max_tweets,
+                debug=not args.no_debug,
+                quiet=args.quiet,
+                use_incremental=not args.no_incremental,
+                initial_batch=args.initial_batch,
+                max_batch=args.max_batch
+            )
         
         # Verify tweet count after fetching if enabled
         if tweets_success and not args.no_tweet_verify:
-            verify_tweet_count(quiet=args.quiet)
+            verification_success, db_count = verify_tweet_count(quiet=args.quiet)
+            
+            # Get the tweet count from Polymarket for comparison
+            if verification_success and db_count > 0:
+                polymarket_count = get_polymarket_tweet_count()
+                
+                if polymarket_count > 0:
+                    # Compare the counts
+                    if db_count != polymarket_count:
+                        diff = abs(db_count - polymarket_count)
+                        logger.warning(f"Tweet count mismatch: DB has {db_count}, Polymarket has {polymarket_count} (difference: {diff})")
+                        print("\n" + "=" * 50)
+                        print("⚠️ TWEET COUNT MISMATCH")
+                        print("=" * 50)
+                        print(f"Local database:   {db_count} tweets")
+                        print(f"Polymarket site:  {polymarket_count} tweets")
+                        print(f"Difference:       {diff} tweets")
+                        print("=" * 50)
+                        print("This might indicate missing tweets in your database or counting differences.")
+                        print("=" * 50 + "\n")
+                    else:
+                        logger.info(f"Tweet counts match: Both DB and Polymarket show {db_count} tweets")
+                        print("\n" + "=" * 50)
+                        print("✅ TWEET COUNT MATCH")
+                        print("=" * 50)
+                        print(f"Both local database and Polymarket site show {db_count} tweets")
+                        print("=" * 50 + "\n")
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and tweets_success:
@@ -504,6 +595,40 @@ def run_scheduled_jobs(args):
     
     return tweets_success and prediction_success
 
+def fetch_tweets_csv(quiet=False):
+    """Fetch tweets using the TweetCSVGetter.
+    
+    This uses the XTracker.io method to download tweets as CSV and process them.
+    
+    Args:
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the tweet fetching was successful
+    """
+    logger.info(f"Starting tweet fetching with TweetCSVGetter at {datetime.datetime.now()}")
+    
+    cmd = [sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"]
+    
+    try:
+        if quiet:
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Tweet CSV fetching failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Tweet CSV fetching completed successfully")
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Tweet CSV fetching failed")
+            else:
+                logger.info("Tweet CSV fetching completed successfully")
+    except Exception as e:
+        logger.error(f"Error running tweet CSV fetching: {e}")
+        return False
+    
+    return process.returncode == 0
+
 def main():
     """Main entry point for the scheduler."""
     args = setup_argparse()
@@ -519,6 +644,13 @@ def main():
         logger.info("Configured to run tweet fetching only")
     elif args.predictions_only:
         logger.info("Configured to run predictions only")
+    
+    # Log tweet fetching method
+    if not args.predictions_only:
+        if args.use_csv_getter:
+            logger.info("Using TweetCSVGetter for tweet fetching (XTracker.io method)")
+        else:
+            logger.info("Using Apify method for tweet fetching")
     
     # Log which prediction algorithm will be used
     if not args.tweets_only and not args.no_prophet:

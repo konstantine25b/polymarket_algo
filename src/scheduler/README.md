@@ -16,6 +16,7 @@ This module provides an automated scheduler that periodically:
 - **Configurable interval**: Set how often to run the process (default: 20 minutes)
 - **Selective execution**: Run only tweet fetching or only predictions
 - **Smart incremental fetching**: Uses advanced incremental fetching strategy by default to ensure continuous tweet collection
+- **Alternative data sources**: Option to use either Apify (default) or TweetCSVGetter (XTracker.io) for fetching tweets
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
@@ -29,7 +30,7 @@ This module provides an automated scheduler that periodically:
 - **Statistical analysis**: View detailed stats on each market opportunity
 - **Balance checking**: Automatically checks wallet balance before placing buy orders, skipping if insufficient funds
 - **Conditional bidding**: Only runs auto-bidder if there's enough USDC balance (configurable minimum threshold)
-- **Tweet verification**: Shows the total and daily tweet counts after fetching to track activity
+- **Tweet verification**: Shows the total and daily tweet counts after fetching and validates against Polymarket's website
 - **Auto-sell low probability positions**: Automatically sells positions where your model's prediction is below a specified threshold
 
 ## Command-Line Usage
@@ -74,6 +75,9 @@ python -m src.scheduler.scheduler --no-debug
 
 # Run in quiet mode with less output
 python -m src.scheduler.scheduler --quiet
+
+# Use TweetCSVGetter (XTracker.io) instead of Apify for tweet fetching
+python -m src.scheduler.scheduler --use-csv-getter
 
 # Customize incremental fetching parameters
 python -m src.scheduler.scheduler --initial-batch 60 --max-batch 300
@@ -133,6 +137,7 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-debug`: Disable debug mode for tweet fetching
 - `--run-once`: Run jobs once and exit
 - `--quiet`: Reduce output verbosity
+- `--use-csv-getter`: Use TweetCSVGetter (XTracker.io) instead of Apify for tweet fetching
 - `--no-incremental`: Disable incremental fetching (not recommended)
 - `--initial-batch`: Initial batch size for incremental fetching (default: 40)
 - `--max-batch`: Maximum batch size for incremental fetching (default: 200)
@@ -151,6 +156,35 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
 - `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
 - `--debug-seller`: Show detailed debugging information for the position seller
+
+## Tweet Fetching Methods
+
+The scheduler supports two methods for fetching tweets:
+
+### 1. Apify Method (Default)
+
+Uses the `src.apify.get_elon_tweets` module to fetch tweets from Twitter/X using the Apify platform:
+
+- Supports incremental fetching to ensure no gaps in tweet collection
+- Configurable batch sizes with automatic retry logic
+- Adds tweets directly to the database
+
+### 2. TweetCSVGetter Method (XTracker.io)
+
+Uses the `src.xpath_scraper.TweetCSVGetter` module to fetch tweets from XTracker.io as a CSV file:
+
+- Downloads tweets from XTracker.io website
+- Automatically reformats dates to the required format
+- Merges new tweets with existing ones in the database
+- Preserves CSV headers
+
+To use the TweetCSVGetter method, add the `--use-csv-getter` flag to your command:
+
+```bash
+python -m src.scheduler.scheduler --use-csv-getter
+```
+
+Note that when using TweetCSVGetter, the `--max-tweets`, `--initial-batch`, and other incremental fetching parameters are not applicable as the CSV download contains the full tweet history.
 
 ## Smart Incremental Fetching
 
@@ -171,6 +205,8 @@ This approach provides several benefits:
 You can customize the incremental fetching parameters using the `--initial-batch` and
 `--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
 
+Note: Incremental fetching only applies when using the default Apify method, not when using `--use-csv-getter`.
+
 ## Tweet Count Verification
 
 After successfully fetching tweets, the scheduler automatically verifies and displays the tweet count for the current market week. This feature:
@@ -178,12 +214,15 @@ After successfully fetching tweets, the scheduler automatically verifies and dis
 1. Shows the total number of tweets for the current market week
 2. Displays a daily breakdown of tweets for each day of the week
 3. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
+4. Cross-checks the local database count with Polymarket's official count
+5. Alerts you if there's a discrepancy between your database and Polymarket
 
 The tweet verification feature provides valuable information for monitoring:
 
 - Whether the expected number of tweets are being collected
 - The daily pattern of tweet activity during the week
 - Progress toward the various tweet count ranges on Polymarket
+- Potential gaps in data collection if counts don't match
 
 Example output:
 
@@ -201,6 +240,26 @@ Daily tweet counts:
   2025-05-06: 28 tweets
   2025-05-07: 40 tweets
   2025-05-08: 30 tweets
+==================================================
+
+==================================================
+✅ TWEET COUNT MATCH
+==================================================
+Both local database and Polymarket site show 235 tweets
+==================================================
+```
+
+If a discrepancy is detected:
+
+```
+==================================================
+⚠️ TWEET COUNT MISMATCH
+==================================================
+Local database:   232 tweets
+Polymarket site:  235 tweets
+Difference:       3 tweets
+==================================================
+This might indicate missing tweets in your database or counting differences.
 ==================================================
 ```
 
@@ -427,3 +486,4 @@ Each process is monitored, and failures are logged. If the tweet fetching proces
 - **src.bidding_decision.auto_bid.run_seller**: Module for automated selling of positions
 - **src.polymarket.balance**: Module for checking wallet balances
 - **src.polymarket_predictor.tweet_predictor**: Module for tweet analysis and verification
+- **src.xpath_scraper.NumberGetter**: Module for getting the current tweet count from Polymarket
