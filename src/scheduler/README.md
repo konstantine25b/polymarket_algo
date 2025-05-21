@@ -189,15 +189,24 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 ```bash
 # Show all positions and active market positions when running
 python -m src.scheduler.scheduler --show-positions --show-active-positions
+# --show-positions         : Display all your current positions across all markets
+# --show-active-positions  : Display only positions for the active market week
 
 # Only show active market positions, not all positions
 python -m src.scheduler.scheduler --show-active-positions
+# --show-active-positions  : Display only positions for the active market week (May 16-23, etc.)
 
 # Don't show any positions (default behavior)
 python -m src.scheduler.scheduler
+# By default, no positions are displayed to keep the output clean
 
 # Combined with other options
 python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --dry-run --show-active-positions
+# --buy-threshold 1.5      : Only bid on opportunities with at least 1.5% edge over market price
+# --sell-threshold 0.5     : Sell positions with at least 0.5% sell opportunity
+# --sell-below 2.0         : Automatically sell positions with predictions below 2%
+# --dry-run                : Test without placing actual orders
+# --show-active-positions  : Display only positions for the active market week
 ```
 
 ## Tweet Count Verification

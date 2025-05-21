@@ -31,14 +31,30 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your actual credentials
 
-# Run the automated scheduler with reasonable defaults when 2-6 dAYS
+# Run the automated scheduler with reasonable defaults when 2-6 days remain in the market
 python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+# Option explanations:
+# --buy-threshold 1.5      : Only bid on opportunities with at least 1.5% edge over market price
+# --sell-threshold 0.5     : Sell positions with at least 0.5% sell opportunity
+# --sell-below 2.0         : Automatically sell positions with predictions below 2%
+# --min-prediction 7.0     : Only bid on opportunities where our model predicts at least 7% probability
+# --weighted-selection     : Use weighted probability selection instead of always choosing the best opportunity
+# --interval 60            : Run the scheduler every 60 minutes
+# --use-csv-getter         : Use XTracker.io CSV method for tweet fetching instead of Apify
+# --get-tweet-count-first  : Check tweet count from Polymarket before fetching to avoid unnecessary fetching
+# --show-positions         : Display all your current positions when running
+# --show-active-positions  : Display only positions for the active market week
+# --dry-run                : Test without placing actual orders (remove this for real trading)
 
-# Run the automated scheduler with reasonable defaults when 1-2 days
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
+# Run the automated scheduler with reasonable defaults when 1-2 days remain in the market
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+# Key difference:
+# --min-prediction 9.0     : Higher threshold (9% vs 7%) as less time remains in the market
 
-# Run the automated scheduler with reasonable defaults when 6-7 days
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
+# Run the automated scheduler with reasonable defaults when 6-7 days remain in the market
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+# Key difference:
+# --min-prediction 15.0    : Much higher threshold (15%) when almost the entire week remains
 ```
 
 ## Directory Structure
