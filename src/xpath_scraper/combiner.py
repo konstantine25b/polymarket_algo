@@ -17,8 +17,8 @@ def parse_line(line):
     text = parts[1]
     timestamp_str = parts[2].strip('"')
     try:
-        timestamp = datetime.strptime(timestamp_str, "%Y:%m:%d:%H:%M:%S")
-        return (tweet_id, text, timestamp_str, timestamp)
+    timestamp = datetime.strptime(timestamp_str, "%Y:%m:%d:%H:%M:%S")
+    return (tweet_id, text, timestamp_str, timestamp)
     except ValueError:
         # This could be the header or malformed date
         logger.warning(f"Could not parse timestamp from line: {line[:50]}...")
@@ -45,10 +45,10 @@ def read_entries(filename):
                 logger.info(f"Header found: {header.strip()}")
                 continue
                 
-            parsed = parse_line(line)
-            if parsed and parsed[0] not in seen_ids:
-                entries.append(parsed)
-                seen_ids.add(parsed[0])
+                parsed = parse_line(line)
+                if parsed and parsed[0] not in seen_ids:
+                    entries.append(parsed)
+                    seen_ids.add(parsed[0])
 
     logger.info(f"Read {len(entries)} unique entries from {filename}")
     return entries, seen_ids, header
@@ -81,7 +81,7 @@ def merge_files(source_file, target_file, output_file=None):
         f.write(header)
         # Then write data
         f.writelines(formatted_lines)
-    
+
     logger.info(f"Merged data written to {output_path}")
 
 

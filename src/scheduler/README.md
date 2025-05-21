@@ -55,6 +55,15 @@ python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sel
 # For testing (same settings but in dry run mode - no real orders placed)
 python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30 --dry-run
 
+# Run with only buy opportunities shown but no actual buying (sell orders still execute)
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --min-prediction 5.0 --no-buy
+
+# Run with only sell opportunities shown but no actual selling (buy orders still execute)
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --min-prediction 5.0 --no-sell
+
+# Show both buy and sell opportunities without executing any orders
+python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --min-prediction 5.0 --no-buy --no-sell
+
 # Run with default settings (every 20 minutes)
 python -m src.scheduler.scheduler
 
@@ -158,6 +167,8 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-prophet`: Disable Prophet algorithm for predictions (use standard algorithm instead)
 - `--no-bidding`: Don't run the auto-bidder after predictions
 - `--no-selling`: Don't run the auto-seller after predictions
+- `--no-buy`: Run auto-bidder but don't execute buy orders (show opportunities only)
+- `--no-sell`: Run auto-seller but don't execute sell orders (show opportunities only)
 - `--buy-threshold`: Minimum opportunity percentage for placing buy orders (default: 0.0)
 - `--sell-threshold`: Minimum opportunity percentage for selling positions (default: 0.0)
 - `--min-prediction`: Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
@@ -569,3 +580,16 @@ Each process is monitored, and failures are logged. If the tweet fetching proces
 - **src.polymarket.balance**: Module for checking wallet balances
 - **src.polymarket_predictor.tweet_predictor**: Module for tweet analysis and verification
 - **src.xpath_scraper.NumberGetter**: Module for getting the current tweet count from Polymarket
+
+## Key Features
+
+- **Automated Tweet Fetching**: Automatically fetches Elon Musk's tweets from Polymarket using either Apify or XTracker.io (CSV method)
+- **Tweet Count Verification**: Compares tweet counts with Polymarket's website to ensure data consistency
+- **Incremental Fetching**: Only fetches new tweets since the last run to minimize API usage
+- **Automated Prediction**: Runs the prediction model to forecast tweet probabilities
+- **Automated Bidding**: Places bids on markets with favorable opportunities
+- **Automated Selling**: Sells positions based on statistical opportunities
+- **Prediction Table Display**: Shows the current prediction table after selling positions
+- **Dry Run Mode**: Tests the system without placing real orders
+- **No-Buy/No-Sell Modes**: Shows trading opportunities without executing trades
+- **Flexible Scheduling**: Configurable interval between runs

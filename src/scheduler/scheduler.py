@@ -25,6 +25,8 @@ Options:
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
     --no-bidding           Don't run the auto-bidder
     --no-selling           Don't run the auto-seller
+    --no-buy               Run auto-bidder but don't execute buy orders (show opportunities only)
+    --no-sell              Run auto-seller but don't execute sell orders (show opportunities only)
     --buy-threshold FLOAT  Minimum opportunity percentage to place buy orders (default: 0.0)
     --sell-threshold FLOAT Minimum opportunity percentage to place sell orders (default: 0.0)
     --amount FLOAT         Amount to bid in USDC (default: 1.0)
@@ -94,6 +96,10 @@ def setup_argparse():
                         help="Don't run the auto-bidder")
     parser.add_argument('--no-selling', action='store_true',
                         help="Don't run the auto-seller")
+    parser.add_argument('--no-buy', action='store_true',
+                        help="Run auto-bidder but don't execute buy orders (show opportunities only)")
+    parser.add_argument('--no-sell', action='store_true',
+                        help="Run auto-seller but don't execute sell orders (show opportunities only)")
     parser.add_argument('--buy-threshold', type=float, default=0.0,
                         help='Minimum opportunity percentage to place buy orders (default: 0.0)')
     parser.add_argument('--sell-threshold', type=float, default=0.0,
@@ -475,55 +481,68 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
+    # First show the prediction table to provide context for sell decisions
+    print("\n" + "=" * 50)
+    print("CURRENT PREDICTION TABLE")
+    print("=" * 50)
+    
+    # Run the comparison table generator to show current predictions
+    comparison_cmd = [
+        sys.executable,
+        "-m",
+        "src.bidding_decision.stats.comparison",
+        "--threshold=0.0"  # Show all ranges regardless of opportunity
+    ]
+    
+    if not quiet:
+        subprocess.run(comparison_cmd, check=True)
+    else:
+        subprocess.run(comparison_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    
+    print("\n" + "=" * 50)
+    print("SELL RECOMMENDATIONS")
+    print("=" * 50)
+    
     # Build the command to run
     cmd = [
         sys.executable, 
         "-m", 
-        "src.bidding_decision.auto_bid.run_seller", 
-        f"--threshold={threshold}",
-        "--auto-sell"
+        "src.bidding_decision.auto_bid.run_seller",
+        f"--threshold={threshold}"
     ]
     
-    # Add sell-below parameter if specified
+    # Add the auto-sell flag to execute orders
+    if not dry_run:
+        cmd.append("--auto-sell")
+    else:
+        cmd.append("--dry-run")
+    
+    # Add sell-below threshold if specified
     if sell_below > 0.0:
         cmd.append(f"--sell-below={sell_below}")
-        logger.info(f"Configured to sell positions with prediction below {sell_below}%")
     
-    # Add dry run mode if requested
-    if dry_run:
-        cmd.append("--dry-run")
-        logger.info("Running auto-seller in dry run mode (no real orders will be placed)")
-    
-    # Add no-stats flag if requested
-    if not show_stats:
-        cmd.append("--no-stats")
+    # Only add verbose flag if explicitly requested with debug
+    if debug:
+        cmd.append("--verbose")
     
     # Add debug flag if requested
     if debug:
         cmd.append("--debug")
-        logger.info("Running auto-seller with detailed debugging information")
     
+    # Disable stats if requested
+    if not show_stats:
+        cmd.append("--no-stats")
+    
+    # Run the command
     try:
-        if quiet and not dry_run:  # Always show output in dry run mode
-            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if process.returncode != 0:
-                logger.error(f"Auto-seller failed with error: {process.stderr.decode()}")
-            else:
-                # Print the output even in quiet mode since this is the key result
-                logger.info("Auto-seller completed successfully")
-                output = process.stdout.decode()
-                print("\n" + output)
-        else:
-            process = subprocess.run(cmd)
-            if process.returncode != 0:
-                logger.error("Auto-seller failed")
-            else:
-                logger.info("Auto-seller completed successfully")
-    except Exception as e:
-        logger.error(f"Error running auto-seller: {e}")
+        subprocess.run(cmd, check=True)
+        logger.info("Auto-seller completed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Auto-seller failed with error code {e.returncode}")
+        if not quiet and e.stderr:
+            logger.error(f"Error output: {e.stderr}")
         return False
-    
-    return process.returncode == 0
 
 def run_scheduled_jobs(args):
     """Run the configured jobs based on command-line arguments."""
@@ -721,30 +740,44 @@ def run_scheduled_jobs(args):
             balance_info = display_wallet_balance()
             has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
             
-            if not has_sufficient_balance and not args.dry_run:
+            if not has_sufficient_balance and not args.dry_run and not args.no_buy:
                 logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
                 logger.warning("Skipping auto-bidder due to insufficient USDC balance")
                 print(f"\n⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC)")
                 print(f"Minimum required: {args.min_usdc} USDC\n")
             elif prediction_success and not args.no_bidding:
-                # Run the auto-bidder if we have sufficient balance or we're in dry run mode
-                if has_sufficient_balance or args.dry_run:
+                # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
+                if has_sufficient_balance or args.dry_run or args.no_buy:
+                    # If --no-buy is specified, force dry run mode
+                    effective_dry_run = args.dry_run or args.no_buy
+                    
+                    # Log the appropriate mode
+                    if args.no_buy and not args.dry_run:
+                        logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                    
                     run_auto_bidder(
                         quiet=args.quiet,
                         threshold=args.buy_threshold,
                         amount=args.amount,
-                        dry_run=args.dry_run,
+                        dry_run=effective_dry_run,
                         show_stats=not args.no_stats,
                         weighted_selection=args.weighted_selection,
                         min_prediction=args.min_prediction
                     )
         elif prediction_success and not args.no_bidding:
             # Skip balance check if requested
+            # If --no-buy is specified, force dry run mode
+            effective_dry_run = args.dry_run or args.no_buy
+            
+            # Log the appropriate mode
+            if args.no_buy and not args.dry_run:
+                logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
+            
             run_auto_bidder(
                 quiet=args.quiet,
                 threshold=args.buy_threshold,
                 amount=args.amount,
-                dry_run=args.dry_run,
+                dry_run=effective_dry_run,
                 show_stats=not args.no_stats,
                 weighted_selection=args.weighted_selection,
                 min_prediction=args.min_prediction
@@ -753,11 +786,18 @@ def run_scheduled_jobs(args):
         # Run the auto-seller if prediction succeeded and selling not disabled
         # (always run auto-seller regardless of balance)
         if prediction_success and not args.no_selling:
+            # If --no-sell is specified, force dry run mode
+            effective_dry_run = args.dry_run or args.no_sell
+            
+            # Log the appropriate mode
+            if args.no_sell and not args.dry_run:
+                logger.info("Running auto-seller in no-sell mode (opportunities will be shown but no orders placed)")
+            
             run_auto_seller(
                 quiet=args.quiet,
                 threshold=args.sell_threshold,
                 sell_below=args.sell_below,
-                dry_run=args.dry_run,
+                dry_run=effective_dry_run,
                 show_stats=not args.no_stats,
                 debug=args.debug_seller
             )
@@ -879,8 +919,10 @@ def main():
             logger.info("Using weighted selection for buy opportunities")
         if args.dry_run:
             logger.info("Auto-bidder running in DRY RUN mode - no real orders will be placed")
+        elif args.no_buy:
+            logger.info("Auto-bidder running in NO-BUY mode - opportunities will be shown but no orders placed")
         else:
-            logger.info("Auto-bidder will place REAL orders - use --dry-run to test without placing orders")
+            logger.info("Auto-bidder will place REAL orders - use --dry-run or --no-buy to test without placing orders")
         if args.no_stats:
             logger.info("Full statistics table display is disabled")
             
@@ -891,8 +933,10 @@ def main():
             logger.info(f"Will sell positions with prediction below {args.sell_below}%")
         if args.dry_run:
             logger.info("Auto-seller running in DRY RUN mode - no real orders will be placed")
+        elif args.no_sell:
+            logger.info("Auto-seller running in NO-SELL mode - opportunities will be shown but no orders placed")
         else:
-            logger.info("Auto-seller will place REAL orders - use --dry-run to test without placing orders")
+            logger.info("Auto-seller will place REAL orders - use --dry-run or --no-sell to test without placing orders")
         if args.debug_seller:
             logger.info("Detailed debugging is enabled for position seller")
     
