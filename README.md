@@ -183,6 +183,24 @@ The Position Seller automatically identifies positions that should be sold based
 - Statistical opportunities (when market price exceeds model prediction)
 - Low prediction percentage (automatically exits positions with low win probability)
 
+### 6. Robust Tweet Count Mismatch Handling
+
+The system now includes enhanced tweet count verification and recovery mechanisms:
+
+- Compares tweet counts between Polymarket and local database
+- When mismatches are detected, automatically re-fetches tweets up to 3 times to resolve the discrepancy
+- If mismatches persist after 3 retries, falls back to Apify's API as a reliable alternative
+- Continuously verifies counts after each attempt to ensure data integrity
+- Provides detailed logging and console output about the reconciliation process
+- Continues with prediction and trading operations even if counts can't be perfectly reconciled
+
+This multi-stage approach ensures maximum data reliability and reduces the chance of acting on incomplete information.
+
+```bash
+# Example command using the enhanced tweet count verification
+python -m src.scheduler.scheduler --get-tweet-count-first --use-csv-getter --interval 60 --dry-run
+```
+
 ## Detailed Configuration Options
 
 ### Scheduler Options

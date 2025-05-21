@@ -813,7 +813,112 @@ def run_scheduled_jobs(args):
                             print(f"Difference:       {diff} tweets")
                             print("=" * 50)
                             print("This might indicate missing tweets in your database or counting differences.")
-                            print("Continuing with the rest of the process anyway.")
+                            
+                            # Try to fetch tweets again up to 3 times using CSV getter
+                            print("Attempting to re-fetch tweets 3 more times to resolve the mismatch...")
+                            print("=" * 50 + "\n")
+                            
+                            retry_success = False
+                            for retry_fetch in range(1, 4):  # 3 retries
+                                logger.info(f"Re-fetching tweets attempt {retry_fetch}/3")
+                                print(f"\nRe-fetching tweets, attempt {retry_fetch}/3...")
+                                
+                                if args.use_csv_getter:
+                                    retry_tweets_success = fetch_tweets_csv(quiet=args.quiet, max_retries=1)
+                                else:
+                                    retry_tweets_success = fetch_tweets(
+                                        max_tweets=args.max_tweets,
+                                        debug=not args.no_debug,
+                                        quiet=args.quiet,
+                                        use_incremental=not args.no_incremental,
+                                        initial_batch=args.initial_batch,
+                                        max_batch=args.max_batch
+                                    )
+                                
+                                if retry_tweets_success:
+                                    # Verify tweet count after re-fetching
+                                    logger.info(f"Verifying tweet count after re-fetch attempt {retry_fetch}")
+                                    reverify_success, reverify_db_count = verify_tweet_count(quiet=args.quiet)
+                                    
+                                    if reverify_success and reverify_db_count > 0:
+                                        # Get a fresh Polymarket count
+                                        reverify_polymarket_count = get_polymarket_tweet_count(max_retries=1)
+                                        
+                                        if reverify_polymarket_count > 0 and reverify_db_count == reverify_polymarket_count:
+                                            logger.info(f"Tweet count match after re-fetch attempt {retry_fetch}: DB={reverify_db_count}, Polymarket={reverify_polymarket_count}")
+                                            print("\n" + "=" * 50)
+                                            print(f"✅ TWEET COUNT MATCH (after re-fetch attempt {retry_fetch}/3)")
+                                            print("=" * 50)
+                                            print(f"Both local database and Polymarket site show {reverify_db_count} tweets")
+                                            print("=" * 50 + "\n")
+                                            retry_success = True
+                                            break
+                                        else:
+                                            diff = abs(reverify_db_count - reverify_polymarket_count) if reverify_polymarket_count > 0 else "unknown"
+                                            logger.warning(f"Tweet count still mismatched after re-fetch attempt {retry_fetch}: DB={reverify_db_count}, Polymarket={reverify_polymarket_count}, Difference={diff}")
+                                    else:
+                                        logger.warning(f"Failed to verify tweet count after re-fetch attempt {retry_fetch}")
+                                else:
+                                    logger.warning(f"Re-fetch attempt {retry_fetch}/3 failed")
+                            
+                            # If all re-fetch attempts failed, try Apify as a last resort
+                            if not retry_success:
+                                if args.use_csv_getter:  # Only fall back if we're not already using Apify
+                                    logger.warning("All re-fetch attempts failed, falling back to Apify method")
+                                    print("\n" + "=" * 50)
+                                    print("⚠️ ALL RE-FETCH ATTEMPTS FAILED - FALLING BACK TO APIFY")
+                                    print("=" * 50)
+                                    print("Will attempt to fetch tweets using the Apify method as a last resort")
+                                    print("=" * 50 + "\n")
+                                    
+                                    # Use default Apify method as fallback
+                                    apify_success = fetch_tweets(
+                                        max_tweets=args.max_tweets,
+                                        debug=not args.no_debug,
+                                        quiet=args.quiet,
+                                        use_incremental=not args.no_incremental,
+                                        initial_batch=args.initial_batch,
+                                        max_batch=args.max_batch
+                                    )
+                                    
+                                    if apify_success:
+                                        # Final verification
+                                        logger.info("Verifying tweet count after Apify fallback")
+                                        final_verify_success, final_db_count = verify_tweet_count(quiet=args.quiet)
+                                        final_polymarket_count = get_polymarket_tweet_count(max_retries=1)
+                                        
+                                        if final_verify_success and final_db_count > 0 and final_polymarket_count > 0:
+                                            if final_db_count == final_polymarket_count:
+                                                logger.info(f"Tweet count match after Apify fallback: DB={final_db_count}, Polymarket={final_polymarket_count}")
+                                                print("\n" + "=" * 50)
+                                                print("✅ TWEET COUNT MATCH AFTER APIFY FALLBACK")
+                                                print("=" * 50)
+                                                print(f"Both local database and Polymarket site show {final_db_count} tweets")
+                                                print("=" * 50 + "\n")
+                                            else:
+                                                diff = abs(final_db_count - final_polymarket_count)
+                                                logger.warning(f"Tweet count still mismatched after Apify fallback: DB={final_db_count}, Polymarket={final_polymarket_count}, Difference={diff}")
+                                                print("\n" + "=" * 50)
+                                                print("⚠️ TWEET COUNT STILL MISMATCHED AFTER APIFY FALLBACK")
+                                                print("=" * 50)
+                                                print(f"Local database:   {final_db_count} tweets")
+                                                print(f"Polymarket site:  {final_polymarket_count} tweets")
+                                                print(f"Difference:       {diff} tweets")
+                                                print("=" * 50)
+                                                print("Could not resolve the tweet count mismatch. Continuing with the process anyway.")
+                                                print("=" * 50 + "\n")
+                                    else:
+                                        logger.error("Apify fallback also failed to fetch tweets")
+                                else:
+                                    # We're already using Apify, just continue with the process
+                                    print("\n" + "=" * 50)
+                                    print("⚠️ TWEET COUNT MISMATCH PERSISTS")
+                                    print("=" * 50)
+                                    print("Could not resolve the tweet count mismatch. Continuing with the process anyway.")
+                                    print("=" * 50 + "\n")
+                            
+                            # Continue with the rest of the process anyway.
+                            print("Continuing with the rest of the process...")
                             print("=" * 50 + "\n")
                     else:
                         logger.info(f"Post-fetch tweet counts match exactly: DB={db_count_after}, Polymarket={polymarket_count}")
