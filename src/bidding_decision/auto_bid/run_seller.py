@@ -8,6 +8,7 @@ import argparse
 import logging
 import sys
 import pandas as pd
+from dotenv import load_dotenv
 
 from .position_seller import PositionSeller
 from src.bidding_decision.stats.comparison import generate_comparison_table
@@ -61,19 +62,19 @@ def main():
     """Main entry point for the auto seller."""
     parser = argparse.ArgumentParser(description='Identify positions to sell and execute sell orders')
     parser.add_argument('--threshold', type=float, default=0.0,
-                        help='Minimum opportunity percentage (default: 0.0)')
+                         help='Minimum opportunity percentage (default: 0.0)')
     parser.add_argument('--auto-sell', action='store_true',
-                        help='Automatically execute sell orders for recommended positions')
+                         help='Automatically execute sell orders for recommended positions')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Show what would be sold but don\'t execute actual sell orders')
+                         help='Show what would be sold but don\'t execute actual sell orders')
     parser.add_argument('--no-stats', action='store_true',
-                        help='Don\'t show the full statistical comparison table')
+                         help='Don\'t show the full statistical comparison table')
     parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Enable verbose logging')
+                         help='Enable verbose logging')
     parser.add_argument('--sell-below', type=float, default=0.0,
-                        help='Sell positions with prediction below this percentage (default: 0.0)')
+                         help='Sell positions with prediction below this percentage (default: 0.0)')
     parser.add_argument('--debug', action='store_true',
-                        help='Show detailed debugging information')
+                         help='Show detailed debugging information')
     
     args = parser.parse_args()
     
@@ -85,6 +86,18 @@ def main():
     try:
         # Create the position seller with debug flag
         seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below, debug=args.debug)
+        
+        # Generate the comparison table directly for displaying full stats
+        if not args.no_stats:
+            comparison_df = generate_comparison_table(
+                refresh=True,
+                use_prophet=True,
+                threshold=args.threshold,
+                silent=True  # Add silent parameter to suppress built-in output
+            )
+            
+            if not comparison_df.empty:
+                print_stats_table(comparison_df)
         
         # Get all recommended positions to sell
         positions_to_sell = seller.get_positions_to_sell()

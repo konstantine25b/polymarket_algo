@@ -170,7 +170,8 @@ def generate_comparison_table(
     refresh: bool = True,
     use_prophet: bool = True,
     output_path: Optional[str] = None,
-    threshold: float = 0.0
+    threshold: float = 0.0,
+    silent: bool = False
 ) -> pd.DataFrame:
     """
     Generate a comparison table between prediction and market data.
@@ -182,6 +183,7 @@ def generate_comparison_table(
         use_prophet: Whether to use Prophet for predictions
         output_path: Path to save the comparison table CSV
         threshold: Minimum opportunity percentage to include in results
+        silent: Whether to suppress printing of the table to console
         
     Returns:
         DataFrame with comparison data
@@ -1046,6 +1048,7 @@ def main():
     parser.add_argument('--enhanced-viz', action='store_true', help='Generate enhanced visualization with more details')
     parser.add_argument('--simple-table', action='store_true', help='Generate simple table visualization')
     parser.add_argument('--show-tokens', action='store_true', help='Show token IDs in console output')
+    parser.add_argument('--silent', action='store_true', help='Suppress console output of the comparison table')
     
     args = parser.parse_args()
     
@@ -1074,11 +1077,12 @@ def main():
             refresh=not args.no_refresh,
             use_prophet=not args.no_prophet,
             output_path=args.output,
-            threshold=args.threshold
+            threshold=args.threshold,
+            silent=args.silent
         )
         
-        # Print the table
-        if not df.empty:
+        # Print the table if not in silent mode
+        if not df.empty and not args.silent:
             # Determine which columns to show 
             display_cols = [col for col in df.columns if col not in ['Token ID', 'Market ID']]
             print("\nComparison Table:")
@@ -1136,7 +1140,8 @@ def main():
             else:
                 print("No data available for comparison. Please check the logs for errors.")
         else:
-            print("No data available for comparison. Please check the logs for errors.")
+            if df.empty:
+                print("No data available for comparison. Please check the logs for errors.")
         
         # Generate simple table visualization if requested
         if args.simple_table and not df.empty:

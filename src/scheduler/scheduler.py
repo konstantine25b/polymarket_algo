@@ -481,24 +481,7 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
-    # First show the prediction table to provide context for sell decisions
-    print("\n" + "=" * 50)
-    print("CURRENT PREDICTION TABLE")
-    print("=" * 50)
-    
-    # Run the comparison table generator to show current predictions
-    comparison_cmd = [
-        sys.executable,
-        "-m",
-        "src.bidding_decision.stats.comparison",
-        "--threshold=0.0"  # Show all ranges regardless of opportunity
-    ]
-    
-    if not quiet:
-        subprocess.run(comparison_cmd, check=True)
-    else:
-        subprocess.run(comparison_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    
+    # Skip the explicit comparison table generation since the auto-seller will generate it
     print("\n" + "=" * 50)
     print("SELL RECOMMENDATIONS")
     print("=" * 50)

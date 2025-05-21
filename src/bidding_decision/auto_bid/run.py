@@ -102,10 +102,12 @@ def main():
         
         # Generate the comparison table directly for displaying full stats
         if not args.no_stats:
+            # Pass silent=True to suppress the built-in printing in generate_comparison_table
             comparison_df = generate_comparison_table(
                 refresh=True,
                 use_prophet=True,
-                threshold=args.threshold
+                threshold=args.threshold,
+                silent=True  # Add this parameter to suppress output
             )
             
             if not comparison_df.empty:
