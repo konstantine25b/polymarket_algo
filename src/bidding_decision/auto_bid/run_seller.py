@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from .position_seller import PositionSeller
 from src.bidding_decision.stats.comparison import generate_comparison_table
+from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
 
 # Configure logging
 logging.basicConfig(
@@ -75,6 +76,8 @@ def main():
                          help='Sell positions with prediction below this percentage (default: 0.0)')
     parser.add_argument('--debug', action='store_true',
                          help='Show detailed debugging information')
+    parser.add_argument('--active-market-only', action='store_true',
+                         help='Only sell positions for the active market (current time frame)')
     
     args = parser.parse_args()
     
@@ -99,15 +102,95 @@ def main():
             if not comparison_df.empty:
                 print_stats_table(comparison_df)
         
-        # Get all recommended positions to sell
-        positions_to_sell = seller.get_positions_to_sell()
+        # Get ALL positions with stats, not just the ones recommended for selling
+        all_positions, _ = seller.get_all_positions_with_stats()
+        
+        # Print all market names for debugging
+        print("\nAll market names:")
+        for position in all_positions:
+            print(f"  {position.get('market_name', 'Unknown')}")
+        
+        # Filter for active market only if requested
+        if args.active_market_only and all_positions:
+            # Get the active market time frame from constants
+            active_start = POLYMARKET_START_TIME
+            active_end = POLYMARKET_END_TIME
+            
+            # Extract the dates from the constants (format: "YYYY-MM-DD HH:MM:SS")
+            active_start_date = active_start.split(" ")[0]
+            active_end_date = active_end.split(" ")[0]
+            
+            # Format the date range for filtering - create multiple possible formats
+            active_start_month = active_start_date.split('-')[1]
+            active_start_day = active_start_date.split('-')[2]
+            active_end_month = active_end_date.split('-')[1]
+            active_end_day = active_end_date.split('-')[2]
+            
+            # Different possible formats for the market name
+            format1 = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"  # 05-16–05-23
+            format2 = f"May {active_start_day}–{active_end_day}"  # May 16–23
+            format3 = f"May {active_start_day}-{active_end_day}"  # May 16-23
+            format4 = f"May {int(active_start_day)}–{int(active_end_day)}"  # May 16–23 (no leading zeros)
+            format5 = f"May {int(active_start_day)}-{int(active_end_day)}"  # May 16-23 (no leading zeros)
+            
+            possible_formats = [format1, format2, format3, format4, format5]
+            
+            # Log the active market we're filtering for
+            logger.info(f"Filtering for active market only: {format1}")
+            print(f"\nFiltering for active market only: {format1}")
+            logger.debug(f"Looking for market names containing any of: {possible_formats}")
+            
+            # Filter positions to only include those from the active market
+            filtered_positions = []
+            for position in all_positions:
+                market_name = position.get('market_name', '')
+                # Check if any of the possible formats are in the market name
+                is_active_market = any(fmt in market_name for fmt in possible_formats)
+                
+                if is_active_market:
+                    filtered_positions.append(position)
+                    logger.debug(f"Keeping position: {market_name}")
+                else:
+                    logger.debug(f"Filtering out position: {market_name}")
+            
+            # Log how many positions were filtered out
+            logger.info(f"Filtered from {len(all_positions)} to {len(filtered_positions)} positions for active market")
+            print(f"Filtered from {len(all_positions)} to {len(filtered_positions)} positions for active market")
+            
+            # Use the filtered positions
+            all_positions = filtered_positions
+        
+        # Now get only the positions that should be sold from the filtered list
+        positions_to_sell = [pos for pos in all_positions if pos.get('should_sell', False)]
         
         if args.auto_sell:
             # Execute all sell orders (with dry run mode if requested)
-            seller.execute_sell_orders(positions_to_sell, dry_run=args.dry_run)
+            if positions_to_sell:
+                seller.execute_sell_orders(positions_to_sell, dry_run=args.dry_run)
+            else:
+                print("\nNo positions recommended for selling with threshold {:.1f}%".format(args.threshold))
+                if args.sell_below > 0:
+                    print(f"or prediction below {args.sell_below}%.")
+                
+                # If we have active market positions but none to sell, show them anyway
+                if all_positions:
+                    print("\nActive market positions (not recommended for selling):")
+                    for position in all_positions:
+                        print(f"  {position['market_name']} - {position['outcome']}: {position['quantity']:.6f} shares")
         else:
             # Just show recommendations
-            seller.print_sell_recommendations(positions_to_sell)
+            if positions_to_sell:
+                seller.print_sell_recommendations(positions_to_sell)
+            else:
+                print("\nNo positions recommended for selling with threshold {:.1f}%".format(args.threshold))
+                if args.sell_below > 0:
+                    print(f"or prediction below {args.sell_below}%.")
+                
+                # If we have active market positions but none to sell, show them anyway
+                if all_positions:
+                    print("\nActive market positions (not recommended for selling):")
+                    for position in all_positions:
+                        print(f"  {position['market_name']} - {position['outcome']}: {position['quantity']:.6f} shares")
         
         # Log the number of positions found
         num_positions = len(positions_to_sell)

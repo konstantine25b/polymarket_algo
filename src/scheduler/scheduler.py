@@ -42,6 +42,8 @@ Options:
     --use-csv-getter       Use TweetCSVGetter instead of Apify for fetching tweets
     --get-tweet-count-first Get tweet count from website before fetching and verify database count after fetching
     --max-count-retries    Maximum number of retries for tweet count retrieval (default: 3)
+    --show-positions       Show all current positions when running
+    --show-active-positions Show positions for active market when running
 """
 
 import argparse
@@ -130,6 +132,10 @@ def setup_argparse():
                         help='Get tweet count from website before fetching and verify database count after fetching')
     parser.add_argument('--max-count-retries', type=int, default=3,
                         help='Maximum number of retries for tweet count retrieval (default: 3)')
+    parser.add_argument('--show-positions', action='store_true',
+                        help='Show all current positions when running')
+    parser.add_argument('--show-active-positions', action='store_true',
+                        help='Show positions for active market when running')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -468,7 +474,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True, debug=False):
+def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True, debug=False, show_positions=True, show_active_positions=True):
     """Run the auto-seller to sell positions based on statistical opportunities.
     
     Args:
@@ -478,8 +484,117 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
         debug: Whether to show detailed debugging information
+        show_positions: Whether to show all positions
+        show_active_positions: Whether to show active market positions
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
+    
+    # First display all positions if requested
+    if show_positions:
+        print("\n" + "=" * 50)
+        print("CURRENT POSITIONS")
+        print("=" * 50)
+        
+        # Run the position display command
+        position_cmd = [
+            sys.executable,
+            "-m",
+            "src.polymarket.my_positions.cli",
+            "--simple-positions"
+        ]
+        
+        try:
+            subprocess.run(position_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to display positions: {e}")
+            # Continue with the rest of the function even if this fails
+    
+    # Now display active market positions separately if requested
+    if show_active_positions:
+        from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
+        
+        # Extract the dates from the constants (format: "YYYY-MM-DD HH:MM:SS")
+        active_start_date = POLYMARKET_START_TIME.split(" ")[0]
+        active_end_date = POLYMARKET_END_TIME.split(" ")[0]
+        
+        # Format the date range for display
+        active_start_month = active_start_date.split('-')[1]
+        active_start_day = active_start_date.split('-')[2]
+        active_end_month = active_end_date.split('-')[1]
+        active_end_day = active_end_date.split('-')[2]
+        
+        active_market = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
+        
+        print("\n" + "=" * 50)
+        print(f"ACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)})")
+        print("=" * 50)
+        
+        # Run the position display command with grep to filter for active market
+        active_position_cmd = [
+            sys.executable,
+            "-m",
+            "src.polymarket.my_positions.cli",
+            "--simple-positions"
+        ]
+        
+        try:
+            # Run the command and pipe the output to grep
+            process = subprocess.Popen(
+                active_position_cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Use grep to filter for the active market date patterns
+            grep_patterns = [
+                f"May {active_start_day}–{active_end_day}",
+                f"May {int(active_start_day)}–{int(active_end_day)}",
+                f"May {active_start_day}-{active_end_day}",
+                f"May {int(active_start_day)}-{int(active_end_day)}",
+                active_market
+            ]
+            
+            output, error = process.communicate()
+            output_lines = output.splitlines()
+            
+            # Filter the output for active market positions
+            active_positions_found = False
+            active_positions = []
+            
+            # Process the output line by line to match market names with their share quantities
+            i = 0
+            while i < len(output_lines):
+                line = output_lines[i]
+                
+                # Check if this line contains an active market position
+                is_active_market = False
+                for pattern in grep_patterns:
+                    if pattern in line and "Will Elon tweet" in line:
+                        is_active_market = True
+                        break
+                
+                if is_active_market:
+                    market_name = line.split("(")[0].strip()
+                    
+                    # Look for the corresponding shares line (usually the next line)
+                    if i + 1 < len(output_lines) and "Yes:" in output_lines[i + 1] and "shares" in output_lines[i + 1]:
+                        shares = output_lines[i + 1].strip()
+                        active_positions.append(f"{market_name}: {shares}")
+                        active_positions_found = True
+                    
+                i += 1
+            
+            # Display the active positions in a clean format
+            if active_positions:
+                for position in active_positions:
+                    print(position)
+            elif not active_positions_found:
+                print("No positions found for the active market.")
+                
+        except Exception as e:
+            logger.error(f"Failed to display active market positions: {e}")
+            # Continue with the rest of the function even if this fails
     
     # Skip the explicit comparison table generation since the auto-seller will generate it
     print("\n" + "=" * 50)
@@ -515,6 +630,9 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
     # Disable stats if requested
     if not show_stats:
         cmd.append("--no-stats")
+    
+    # Add flag to focus on active market only
+    cmd.append("--active-market-only")
     
     # Run the command
     try:
@@ -782,7 +900,9 @@ def run_scheduled_jobs(args):
                 sell_below=args.sell_below,
                 dry_run=effective_dry_run,
                 show_stats=not args.no_stats,
-                debug=args.debug_seller
+                debug=args.debug_seller,
+                show_positions=args.show_positions,
+                show_active_positions=args.show_active_positions
             )
     
     return tweets_success and prediction_success or skip_tweet_fetching
@@ -922,6 +1042,14 @@ def main():
             logger.info("Auto-seller will place REAL orders - use --dry-run or --no-sell to test without placing orders")
         if args.debug_seller:
             logger.info("Detailed debugging is enabled for position seller")
+        
+        # Log position display settings
+        if args.show_positions:
+            logger.info("Will display all current positions")
+        if args.show_active_positions:
+            logger.info("Will display active market positions")
+        if not args.show_positions and not args.show_active_positions:
+            logger.info("Position display is disabled (use --show-positions or --show-active-positions to enable)")
     
     if args.run_once:
         logger.info("Running jobs once and exiting")

@@ -32,12 +32,12 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 dAYS
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --dry-run
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
 
-# Run the automated scheduler with reasonable defaults when 1-2 days 
+# Run the automated scheduler with reasonable defaults when 1-2 days
 python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
 
-# Run the automated scheduler with reasonable defaults when 6-7 days 
+# Run the automated scheduler with reasonable defaults when 6-7 days
 python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --dry-run
 ```
 
@@ -182,6 +182,8 @@ The scheduler is the main entry point for the automated system. Key options incl
 --amount FLOAT         Amount to bid in USDC (default: 1.0)
 --dry-run              Test without placing actual orders
 --weighted-selection   Use weighted probability selection instead of always choosing the best opportunity
+--show-positions       Show all current positions when running
+--show-active-positions Show positions for active market when running
 ```
 
 ### Auto-Bidder Options

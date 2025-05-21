@@ -181,6 +181,24 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
 - `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
 - `--debug-seller`: Show detailed debugging information for the position seller
+- `--show-positions`: Show all current positions when running
+- `--show-active-positions`: Show positions for active market when running
+
+## Command-Line Examples
+
+```bash
+# Show all positions and active market positions when running
+python -m src.scheduler.scheduler --show-positions --show-active-positions
+
+# Only show active market positions, not all positions
+python -m src.scheduler.scheduler --show-active-positions
+
+# Don't show any positions (default behavior)
+python -m src.scheduler.scheduler
+
+# Combined with other options
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --dry-run --show-active-positions
+```
 
 ## Tweet Count Verification
 
