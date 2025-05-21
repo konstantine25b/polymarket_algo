@@ -65,7 +65,7 @@ def convert_to_et(dt):
         # Convert to ET if it has another timezone
         return dt.astimezone(ET_TIMEZONE)
 
-def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None):
+def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None, no_cache=False):
     """
     Utility function to verify the exact tweet count within a date range
     by manually counting and displaying detailed information.
@@ -75,6 +75,7 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
         end_date_str: End date/time in 'YYYY-MM-DD HH:MM:SS' format (ET timezone)
         data_file: Path to the tweet data file
         logger: Logger instance
+        no_cache: If True, force reload data from disk
     
     Returns:
         int: The count of tweets within the specified range
@@ -117,10 +118,36 @@ def verify_tweet_count(start_date_str, end_date_str, data_file=None, logger=None
         
     logger.info(f"Loading tweet data from: {data_path}")
     
-    # Read the CSV file
+    # Read the CSV file - ALWAYS FORCE FRESH READ
     try:
-        df = pd.read_csv(data_path)
-        logger.info(f"Loaded {len(df)} total tweets")
+        # Clear any pandas cache that might exist
+        import gc
+        gc.collect()
+        
+        # Force pandas to completely reload the file by bypassing any caching
+        logger.info("Forcing fresh data load from disk")
+        
+        # Close any open file handles
+        import os
+        try:
+            os.close(os.open(data_path, os.O_RDONLY))
+        except:
+            pass
+        
+        # Use a completely new pandas instance to read the file
+        # This is a more aggressive approach to ensure fresh data
+        with open(data_path, 'r', encoding='utf-8') as f:
+            # Read the file contents directly
+            file_contents = f.read()
+            
+        # Create a StringIO object to parse the CSV
+        import io
+        csv_data = io.StringIO(file_contents)
+        
+        # Read the CSV data
+        df = pd.read_csv(csv_data)
+        
+        logger.info(f"Loaded {len(df)} total tweets (fresh read from disk)")
         
         # Parse created_at timestamps and properly handle timezone
         logger.info("Parsing timestamps with custom function to handle timezone properly...")
@@ -712,45 +739,74 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
         return {frame: 0.0 for frame in count_frames}
 
 def main():
-    parser = argparse.ArgumentParser(description='Predict Elon Musk tweet counts')
-    parser.add_argument('--verify-count', action='store_true', help='Verify tweet count in a specific timeframe')
-    parser.add_argument('--data-path', type=str, default=DEFAULT_DATA_PATH, help='Path to tweet data CSV')
+    parser = argparse.ArgumentParser(description='Predict Elon Musk tweet counts for Polymarket')
+    parser.add_argument('--data-path', type=str, default=DEFAULT_DATA_PATH,
+                        help='Path to the data directory')
+    parser.add_argument('--data-file', type=str, default=None,
+                        help='Path to the tweet data file')
+    parser.add_argument('--start-date', type=str, default=None,
+                        help='Start date for the prediction period (format: YYYY-MM-DD HH:MM:SS)')
+    parser.add_argument('--end-date', type=str, default=None,
+                        help='End date for the prediction period (format: YYYY-MM-DD HH:MM:SS)')
+    parser.add_argument('--use-trend', action='store_true',
+                        help='Use trend analysis for prediction')
+    parser.add_argument('--simulations', type=int, default=5000,
+                        help='Number of simulations to run')
+    parser.add_argument('--verify-count', action='store_true',
+                        help='Verify tweet count for the current market period')
+    parser.add_argument('--current-count', type=int, default=None,
+                        help='Current tweet count (override auto-detection)')
+    parser.add_argument('--prophet', action='store_true',
+                        help='Use Prophet algorithm for prediction')
+    parser.add_argument('--no-cache', action='store_true',
+                        help='Force reload data from disk, ignoring any cached data')
+    
     args = parser.parse_args()
     
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(message)s'
+    )
+    
+    # If verify-count is specified, just verify the tweet count and exit
     if args.verify_count:
-        verify_tweet_count(POLYMARKET_START_TIME, POLYMARKET_END_TIME, args.data_path)
-    else:
-        # Get market details
-        market_details = get_market_details()
-        if market_details:
-            count_frames = parse_count_frames(market_details)
+        # Use the current market period
+        start_date_str = POLYMARKET_START_TIME
+        end_date_str = POLYMARKET_END_TIME
         
-        # Specify the start and end times (Eastern Time)
-        start_time = POLYMARKET_START_TIME
-        end_time = POLYMARKET_END_TIME
-        
-        start_time_dt = ET_TIMEZONE.localize(datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S"))
-        end_time_dt = ET_TIMEZONE.localize(datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S"))
-        
-        print(f"Using provided start time (ET): {start_time_dt}")
-        print(f"Using provided end time (ET): {end_time_dt}")
-        
-        # Calculate elapsed and remaining time
-        now = datetime.now(ET_TIMEZONE)
-        print(f"Current time (ET): {now}")
-        
-        total_days = (end_time_dt - start_time_dt).total_seconds() / (24 * 3600)
-        elapsed_days = (now - start_time_dt).total_seconds() / (24 * 3600)
-        remaining_days = (end_time_dt - now).total_seconds() / (24 * 3600)
-        
-        if remaining_days < 0:
-            print(f"Prediction window has ended. Total duration was {total_days:.2f} days.")
-        else:
-            print(f"Currently {elapsed_days:.2f} days into the prediction window, with {remaining_days:.2f} days remaining")
-        
-        # Predict probabilities
-        print(f"Loading data from: {args.data_path}")
-        predict_tweet_frame_probabilities(args.data_path)
+        # Always force reload data, regardless of no-cache flag
+        # Clear any pandas cache that might be in memory
+        import gc
+        gc.collect()
+            
+        # Always pass no_cache=True to force fresh data reading
+        verify_tweet_count(start_date_str, end_date_str, args.data_file, no_cache=True)
+        return
+    
+    # Use Prophet algorithm if specified
+    if args.prophet:
+        from src.algos.prophet_predictor.prophet_predictor import run_prophet_prediction
+        run_prophet_prediction(
+            data_path=args.data_path,
+            data_file=args.data_file,
+            start_date_str=args.start_date,
+            end_date_str=args.end_date,
+            current_tweet_count=args.current_count
+        )
+        return
+    
+    # Otherwise, run the standard prediction algorithm
+    predict_tweet_frame_probabilities(
+        data_path=args.data_path,
+        start_date_str=args.start_date,
+        end_date_str=args.end_date,
+        data_file=args.data_file,
+        use_trend=args.use_trend,
+        num_simulations=args.simulations,
+        current_tweet_count=args.current_count,
+        override_auto_count=args.current_count is not None
+    )
 
 if __name__ == "__main__":
     main() 

@@ -38,6 +38,8 @@ Options:
     --min-prediction FLOAT Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
     --debug-seller         Show detailed debugging information for position seller
     --use-csv-getter       Use TweetCSVGetter instead of Apify for fetching tweets
+    --get-tweet-count-first Get tweet count from website before fetching and verify database count after fetching
+    --max-count-retries    Maximum number of retries for tweet count retrieval (default: 3)
 """
 
 import argparse
@@ -118,6 +120,10 @@ def setup_argparse():
                         help='Show detailed debugging information for position seller')
     parser.add_argument('--use-csv-getter', action='store_true',
                         help='Use TweetCSVGetter instead of Apify for fetching tweets')
+    parser.add_argument('--get-tweet-count-first', action='store_true',
+                        help='Get tweet count from website before fetching and verify database count after fetching')
+    parser.add_argument('--max-count-retries', type=int, default=3,
+                        help='Maximum number of retries for tweet count retrieval (default: 3)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -165,35 +171,62 @@ def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, i
     
     return process.returncode == 0
 
-def get_polymarket_tweet_count():
+def get_polymarket_tweet_count(max_retries=3):
     """Get the current tweet count from Polymarket website.
     
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+    
     Returns:
-        int: The current tweet count or -1 if retrieval failed
+        int: The current tweet count or -1 if retrieval failed after all retries
     """
-    logger.info("Getting tweet count from Polymarket...")
+    logger.info(f"Getting tweet count from Polymarket (max retries: {max_retries})...")
     
     cmd = [sys.executable, "-m", "src.xpath_scraper.NumberGetter"]
     
-    try:
-        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if process.returncode != 0:
-            logger.error(f"Failed to get tweet count: {process.stderr}")
-            return -1
-        
-        output = process.stdout
-        # Extract the tweet count using regex
-        match = re.search(r"Tweet count: (\d+)", output)
-        if match:
-            count = int(match.group(1))
-            logger.info(f"Retrieved tweet count from Polymarket: {count}")
-            return count
-        else:
-            logger.error(f"Failed to parse tweet count from output: {output}")
-            return -1
-    except Exception as e:
-        logger.error(f"Error getting tweet count: {e}")
-        return -1
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Attempt {attempt}/{max_retries} to get tweet count")
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            if process.returncode != 0:
+                logger.warning(f"Attempt {attempt}/{max_retries} failed with error: {process.stderr}")
+                if attempt < max_retries:
+                    logger.info(f"Retrying in 3 seconds...")
+                    time.sleep(3)
+                    continue
+                else:
+                    logger.error(f"All {max_retries} attempts to get tweet count failed")
+                    return -1
+            
+            output = process.stdout
+            # Extract the tweet count using regex
+            match = re.search(r"Tweet count: (\d+)", output)
+            if match:
+                count = int(match.group(1))
+                logger.info(f"Retrieved tweet count from Polymarket: {count}")
+                return count
+            else:
+                logger.warning(f"Attempt {attempt}/{max_retries}: Failed to parse tweet count from output: {output}")
+                if attempt < max_retries:
+                    logger.info(f"Retrying in 3 seconds...")
+                    time.sleep(3)
+                    continue
+                else:
+                    logger.error(f"All {max_retries} attempts to parse tweet count failed")
+                    return -1
+                    
+        except Exception as e:
+            logger.warning(f"Attempt {attempt}/{max_retries}: Error getting tweet count: {e}")
+            if attempt < max_retries:
+                logger.info(f"Retrying in 3 seconds...")
+                time.sleep(3)
+                continue
+            else:
+                logger.error(f"All {max_retries} attempts to get tweet count failed with exception: {e}")
+                return -1
+    
+    return -1
 
 def verify_tweet_count(quiet=False):
     """Verify and display the tweet count for the current market week.
@@ -210,7 +243,8 @@ def verify_tweet_count(quiet=False):
     """
     logger.info("Verifying tweet count for current market week...")
     
-    cmd = [sys.executable, "-m", "src.polymarket_predictor.tweet_predictor", "--verify-count"]
+    # Add --no-cache flag to force fresh data loading
+    cmd = [sys.executable, "-m", "src.polymarket_predictor.tweet_predictor", "--verify-count", "--no-cache"]
     
     try:
         process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -230,10 +264,13 @@ def verify_tweet_count(quiet=False):
                 total_count_str = line.split(":")[-1].strip()
                 try:
                     total_count = int(total_count_str)
+                    logger.info(f"Parsed total tweet count from database: {total_count}")
                 except ValueError:
+                    logger.error(f"Failed to parse tweet count as integer: '{total_count_str}'")
                     total_count = -1
             elif "tweets" in line and line.startswith("  202"):
                 daily_counts.append(line.strip())
+                logger.debug(f"Found daily count: {line.strip()}")
         
         # Display the tweet count information
         if total_count is not None:
@@ -247,9 +284,13 @@ def verify_tweet_count(quiet=False):
             print("=" * 50 + "\n")
             
             logger.info(f"Tweet count verification complete: {total_count} total tweets this week")
+            logger.info(f"Daily breakdown: {len(daily_counts)} days with tweets")
+            for count in daily_counts:
+                logger.debug(f"  {count}")
             return True, total_count
         else:
             logger.warning("Could not extract tweet count information from verification output")
+            logger.debug(f"Verification output: {output}")
             return False, -1
             
     except Exception as e:
@@ -493,8 +534,67 @@ def run_scheduled_jobs(args):
     log_dir = Path(__file__).parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
     
-    # Run the tweet fetching job if configured
-    if not args.predictions_only:
+    # Get tweet count from Polymarket website first if requested
+    polymarket_count = -1
+    db_count = -1
+    skip_tweet_fetching = False
+    
+    if not args.predictions_only and args.get_tweet_count_first:
+        logger.info("Getting tweet count from Polymarket before fetching tweets")
+        polymarket_count = get_polymarket_tweet_count(max_retries=args.max_count_retries)
+        
+        if polymarket_count > 0:
+            logger.info(f"Successfully retrieved tweet count from Polymarket: {polymarket_count}")
+            print("\n" + "=" * 50)
+            print("CURRENT TWEET COUNT FROM POLYMARKET")
+            print("=" * 50)
+            print(f"Current tweet count: {polymarket_count}")
+            print("=" * 50 + "\n")
+            
+            # Verify local database count to compare
+            logger.info("Checking local database tweet count for comparison")
+            verification_success, db_count = verify_tweet_count(quiet=args.quiet)
+            
+            if verification_success and db_count > 0:
+                logger.info(f"Successfully retrieved tweet count from database: {db_count}")
+                # Compare the counts
+                if db_count == polymarket_count:
+                    logger.info(f"Tweet counts match exactly: DB={db_count}, Polymarket={polymarket_count}")
+                    print("\n" + "=" * 50)
+                    print("✅ TWEET COUNT MATCH - SKIPPING TWEET FETCHING")
+                    print("=" * 50)
+                    print(f"Both local database and Polymarket site show {db_count} tweets")
+                    print("Skipping tweet fetching as counts already match")
+                    print("=" * 50 + "\n")
+                    skip_tweet_fetching = True
+                else:
+                    diff = abs(db_count - polymarket_count)
+                    logger.info(f"Tweet counts don't match: DB={db_count}, Polymarket={polymarket_count}, Difference={diff}")
+                    print("\n" + "=" * 50)
+                    print("⚠️ TWEET COUNT MISMATCH - PROCEEDING WITH TWEET FETCHING")
+                    print("=" * 50)
+                    print(f"Local database:   {db_count} tweets")
+                    print(f"Polymarket site:  {polymarket_count} tweets")
+                    print(f"Difference:       {diff} tweets")
+                    print("Will fetch tweets to update the database")
+                    print("=" * 50 + "\n")
+            else:
+                logger.warning(f"Failed to get tweet count from database, verification_success={verification_success}, db_count={db_count}")
+                print("\n" + "=" * 50)
+                print("⚠️ WARNING: COULD NOT VERIFY LOCAL DATABASE TWEET COUNT")
+                print("=" * 50)
+                print("Continuing with tweet fetching...")
+                print("=" * 50 + "\n")
+        else:
+            logger.warning(f"Failed to get tweet count from Polymarket website, polymarket_count={polymarket_count}")
+            print("\n" + "=" * 50)
+            print("⚠️ WARNING: COULD NOT GET TWEET COUNT FROM POLYMARKET")
+            print("=" * 50)
+            print("Continuing with tweet fetching...")
+            print("=" * 50 + "\n")
+    
+    # Run the tweet fetching job if configured and not skipped
+    if not args.predictions_only and not skip_tweet_fetching:
         if args.use_csv_getter:
             # Use TweetCSVGetter method
             logger.info("Using TweetCSVGetter method for tweet fetching")
@@ -510,38 +610,89 @@ def run_scheduled_jobs(args):
                 max_batch=args.max_batch
             )
         
-        # Verify tweet count after fetching if enabled
+        # Verify tweet count after fetching if enabled and we didn't skip fetching
         if tweets_success and not args.no_tweet_verify:
-            verification_success, db_count = verify_tweet_count(quiet=args.quiet)
+            logger.info("Verifying tweet count after fetching")
+            verification_success, db_count_after = verify_tweet_count(quiet=args.quiet)
             
-            # Get the tweet count from Polymarket for comparison
-            if verification_success and db_count > 0:
-                polymarket_count = get_polymarket_tweet_count()
+            # Get the tweet count from Polymarket for comparison if we haven't already or if we need an updated count
+            if verification_success and db_count_after > 0:
+                logger.info(f"Post-fetch database count: {db_count_after}")
+                # Check if we need to get a fresh count from Polymarket
+                get_fresh_count = True
+                
+                if polymarket_count <= 0 and args.get_tweet_count_first:
+                    # Already tried and failed to get count before, no need to try again
+                    logger.warning("Skipping Polymarket tweet count verification as it failed earlier")
+                    get_fresh_count = False
+                elif db_count_after == db_count and polymarket_count > 0:
+                    # DB count didn't change and we already have a Polymarket count
+                    logger.info(f"Using previously fetched Polymarket count ({polymarket_count}) as database count didn't change ({db_count} → {db_count_after})")
+                    get_fresh_count = False
+                
+                if get_fresh_count:
+                    logger.info("Getting fresh Polymarket tweet count for post-fetch verification")
+                    polymarket_count = get_polymarket_tweet_count(max_retries=args.max_count_retries)
+                    logger.info(f"Fresh Polymarket count: {polymarket_count}")
                 
                 if polymarket_count > 0:
                     # Compare the counts
-                    if db_count != polymarket_count:
-                        diff = abs(db_count - polymarket_count)
-                        logger.warning(f"Tweet count mismatch: DB has {db_count}, Polymarket has {polymarket_count} (difference: {diff})")
-                        print("\n" + "=" * 50)
-                        print("⚠️ TWEET COUNT MISMATCH")
-                        print("=" * 50)
-                        print(f"Local database:   {db_count} tweets")
-                        print(f"Polymarket site:  {polymarket_count} tweets")
-                        print(f"Difference:       {diff} tweets")
-                        print("=" * 50)
-                        print("This might indicate missing tweets in your database or counting differences.")
-                        print("=" * 50 + "\n")
+                    if db_count_after != polymarket_count:
+                        diff = abs(db_count_after - polymarket_count)
+                        logger.warning(f"Post-fetch tweet count mismatch: DB={db_count_after}, Polymarket={polymarket_count}, Difference={diff}")
+                        
+                        # Try up to 3 more times to get a matching count
+                        logger.info(f"Retrying Polymarket tweet count verification up to 3 more times")
+                        match_found = False
+                        
+                        for retry in range(1, 4):  # 3 retries
+                            logger.info(f"Post-fetch verification retry {retry}/3")
+                            time.sleep(3)  # Wait a bit before retrying
+                            retry_polymarket_count = get_polymarket_tweet_count(max_retries=1)  # Single attempt per retry
+                            
+                            if retry_polymarket_count > 0:
+                                logger.info(f"Retry {retry}/3 Polymarket count: {retry_polymarket_count}")
+                                
+                                if db_count_after == retry_polymarket_count:
+                                    logger.info(f"Match found on retry {retry}/3: DB={db_count_after}, Polymarket={retry_polymarket_count}")
+                                    print("\n" + "=" * 50)
+                                    print(f"✅ TWEET COUNT MATCH (on retry {retry}/3)")
+                                    print("=" * 50)
+                                    print(f"Both local database and Polymarket site show {db_count_after} tweets")
+                                    print("=" * 50 + "\n")
+                                    match_found = True
+                                    break
+                            else:
+                                logger.warning(f"Retry {retry}/3 failed to get Polymarket tweet count")
+                        
+                        # If all retries failed, show warning but continue
+                        if not match_found:
+                            print("\n" + "=" * 50)
+                            print("⚠️ TWEET COUNT MISMATCH (after 3 retries)")
+                            print("=" * 50)
+                            print(f"Local database:   {db_count_after} tweets")
+                            print(f"Polymarket site:  {polymarket_count} tweets")
+                            print(f"Difference:       {diff} tweets")
+                            print("=" * 50)
+                            print("This might indicate missing tweets in your database or counting differences.")
+                            print("Continuing with the rest of the process anyway.")
+                            print("=" * 50 + "\n")
                     else:
-                        logger.info(f"Tweet counts match: Both DB and Polymarket show {db_count} tweets")
+                        logger.info(f"Post-fetch tweet counts match exactly: DB={db_count_after}, Polymarket={polymarket_count}")
                         print("\n" + "=" * 50)
                         print("✅ TWEET COUNT MATCH")
                         print("=" * 50)
-                        print(f"Both local database and Polymarket site show {db_count} tweets")
+                        print(f"Both local database and Polymarket site show {db_count_after} tweets")
                         print("=" * 50 + "\n")
+            else:
+                logger.warning(f"Post-fetch verification failed: verification_success={verification_success}, db_count_after={db_count_after}")
+    else:
+        # If we skipped tweet fetching, log it
+        if skip_tweet_fetching:
+            logger.info(f"Skipped tweet fetching as counts already matched (DB={db_count}, Polymarket={polymarket_count})")
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
-    if not args.tweets_only and tweets_success:
+    if not args.tweets_only and (tweets_success or skip_tweet_fetching):
         prediction_success = run_prediction(
             quiet=True,  # Always run prediction quietly since we'll show bidder output instead
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
@@ -593,7 +744,7 @@ def run_scheduled_jobs(args):
                 debug=args.debug_seller
             )
     
-    return tweets_success and prediction_success
+    return tweets_success and prediction_success or skip_tweet_fetching
 
 def fetch_tweets_csv(quiet=False):
     """Fetch tweets using the TweetCSVGetter.
@@ -651,6 +802,12 @@ def main():
             logger.info("Using TweetCSVGetter for tweet fetching (XTracker.io method)")
         else:
             logger.info("Using Apify method for tweet fetching")
+            
+            # Log tweet count pre-check setting
+            if args.get_tweet_count_first:
+                logger.info(f"Will get tweet count from Polymarket first (max retries: {args.max_count_retries})")
+            else:
+                logger.info("Will not pre-check tweet count from Polymarket")
     
     # Log which prediction algorithm will be used
     if not args.tweets_only and not args.no_prophet:

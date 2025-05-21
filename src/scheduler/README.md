@@ -17,6 +17,9 @@ This module provides an automated scheduler that periodically:
 - **Selective execution**: Run only tweet fetching or only predictions
 - **Smart incremental fetching**: Uses advanced incremental fetching strategy by default to ensure continuous tweet collection
 - **Alternative data sources**: Option to use either Apify (default) or TweetCSVGetter (XTracker.io) for fetching tweets
+- **Pre-fetch validation**: Option to check tweet count from Polymarket before fetching tweets
+- **Count verification**: Compares local database count with Polymarket's website count
+- **Retry mechanism**: Configurable retries when getting tweet count from Polymarket
 - **Logging**: Comprehensive logging to file and console
 - **One-time execution**: Option to run once and exit
 - **Quiet mode**: Reduce output verbosity
@@ -79,6 +82,15 @@ python -m src.scheduler.scheduler --quiet
 # Use TweetCSVGetter (XTracker.io) instead of Apify for tweet fetching
 python -m src.scheduler.scheduler --use-csv-getter
 
+# Get tweet count before fetching and verify with database after fetching
+python -m src.scheduler.scheduler --get-tweet-count-first
+
+# Set maximum retries for tweet count retrieval
+python -m src.scheduler.scheduler --max-count-retries 5
+
+# Combined approach with tweet count checking and CSV getter
+python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first
+
 # Customize incremental fetching parameters
 python -m src.scheduler.scheduler --initial-batch 60 --max-batch 300
 
@@ -125,7 +137,7 @@ python -m src.scheduler.scheduler --sell-below 5.0
 python -m src.scheduler.scheduler --debug-seller
 
 # Combine multiple options
-python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5 --sell-below 3.0
+python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-threshold 3.0 --sell-threshold 2.0 --amount 2.0 --weighted-selection --dry-run --min-usdc 1.5 --sell-below 3.0 --get-tweet-count-first
 ```
 
 ## Command-Line Options
@@ -138,6 +150,8 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--run-once`: Run jobs once and exit
 - `--quiet`: Reduce output verbosity
 - `--use-csv-getter`: Use TweetCSVGetter (XTracker.io) instead of Apify for tweet fetching
+- `--get-tweet-count-first`: Get tweet count from Polymarket before fetching tweets and verify with database
+- `--max-count-retries`: Maximum number of retries for tweet count retrieval (default: 3)
 - `--no-incremental`: Disable incremental fetching (not recommended)
 - `--initial-batch`: Initial batch size for incremental fetching (default: 40)
 - `--max-batch`: Maximum batch size for incremental fetching (default: 200)
@@ -156,6 +170,132 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--no-tweet-verify`: Skip verifying and displaying tweet counts after fetching
 - `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
 - `--debug-seller`: Show detailed debugging information for the position seller
+
+## Tweet Count Verification
+
+The scheduler now supports enhanced tweet count verification with two options:
+
+### Pre-Fetch Count Validation
+
+Using the `--get-tweet-count-first` option, the scheduler will:
+
+1. Get the current tweet count from Polymarket's website before fetching tweets
+2. Display the current count from Polymarket
+3. Check the local database count and compare it with Polymarket's count
+4. Skip tweet fetching completely if counts already match
+5. Continue with tweet fetching only if counts don't match
+6. If getting the count fails, continue with tweet fetching (with warnings)
+7. Retry up to 3 times (configurable with `--max-count-retries`) if getting the count fails
+
+This approach provides two benefits:
+
+- Avoids unnecessary tweet fetching when your database is already up to date
+- Provides a baseline count to compare against when tweet fetching is needed
+
+Example output when counts match (tweet fetching is skipped):
+
+```
+==================================================
+CURRENT TWEET COUNT FROM POLYMARKET
+==================================================
+Current tweet count: 238
+==================================================
+
+==================================================
+✅ TWEET COUNT MATCH - SKIPPING TWEET FETCHING
+==================================================
+Both local database and Polymarket site show 238 tweets
+Skipping tweet fetching as counts already match
+==================================================
+```
+
+Example output when counts don't match (tweet fetching proceeds):
+
+```
+==================================================
+CURRENT TWEET COUNT FROM POLYMARKET
+==================================================
+Current tweet count: 241
+==================================================
+
+==================================================
+⚠️ TWEET COUNT MISMATCH - PROCEEDING WITH TWEET FETCHING
+==================================================
+Local database:   238 tweets
+Polymarket site:  241 tweets
+Difference:       3 tweets
+Will fetch tweets to update the database
+==================================================
+```
+
+If getting the count fails after all retries:
+
+```
+==================================================
+⚠️ WARNING: COULD NOT GET TWEET COUNT FROM POLYMARKET
+==================================================
+Continuing with tweet fetching...
+==================================================
+```
+
+### Post-Fetch Count Validation
+
+After tweet fetching (unless disabled with `--no-tweet-verify`), the scheduler:
+
+1. Verifies the total count in your local database
+2. Gets the current count from Polymarket (if not already obtained during pre-fetch validation)
+3. Compares the two counts and alerts you if there's a discrepancy
+4. Shows the total number of tweets for the current market week
+5. Displays a daily breakdown of tweets for each day of the week
+6. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
+
+The tweet verification feature provides valuable information for monitoring:
+
+- Whether the expected number of tweets are being collected
+- The daily pattern of tweet activity during the week
+- Progress toward the various tweet count ranges on Polymarket
+- Potential gaps in data collection if counts don't match
+
+Example output:
+
+```
+==================================================
+TWEET COUNT VERIFICATION
+==================================================
+Total tweets this week: 235
+
+Daily tweet counts:
+  2025-05-02: 25 tweets
+  2025-05-03: 44 tweets
+  2025-05-04: 50 tweets
+  2025-05-05: 18 tweets
+  2025-05-06: 28 tweets
+  2025-05-07: 40 tweets
+  2025-05-08: 30 tweets
+==================================================
+
+==================================================
+✅ TWEET COUNT MATCH
+==================================================
+Both local database and Polymarket site show 235 tweets
+==================================================
+```
+
+If a discrepancy is detected:
+
+```
+==================================================
+⚠️ TWEET COUNT MISMATCH
+==================================================
+Local database:   232 tweets
+Polymarket site:  235 tweets
+Difference:       3 tweets
+==================================================
+This might indicate missing tweets in your database or counting differences.
+==================================================
+```
+
+You can combine pre-fetch and post-fetch validation for maximum reliability, or use them independently. You can also disable post-fetch verification with the `--no-tweet-verify` flag if you don't need the information.
 
 ## Tweet Fetching Methods
 
@@ -206,64 +346,6 @@ You can customize the incremental fetching parameters using the `--initial-batch
 `--max-batch` options, or disable it entirely with `--no-incremental` (though this is not recommended).
 
 Note: Incremental fetching only applies when using the default Apify method, not when using `--use-csv-getter`.
-
-## Tweet Count Verification
-
-After successfully fetching tweets, the scheduler automatically verifies and displays the tweet count for the current market week. This feature:
-
-1. Shows the total number of tweets for the current market week
-2. Displays a daily breakdown of tweets for each day of the week
-3. Helps you monitor Elon's tweeting activity and ensure data is being collected correctly
-4. Cross-checks the local database count with Polymarket's official count
-5. Alerts you if there's a discrepancy between your database and Polymarket
-
-The tweet verification feature provides valuable information for monitoring:
-
-- Whether the expected number of tweets are being collected
-- The daily pattern of tweet activity during the week
-- Progress toward the various tweet count ranges on Polymarket
-- Potential gaps in data collection if counts don't match
-
-Example output:
-
-```
-==================================================
-TWEET COUNT VERIFICATION
-==================================================
-Total tweets this week: 235
-
-Daily tweet counts:
-  2025-05-02: 25 tweets
-  2025-05-03: 44 tweets
-  2025-05-04: 50 tweets
-  2025-05-05: 18 tweets
-  2025-05-06: 28 tweets
-  2025-05-07: 40 tweets
-  2025-05-08: 30 tweets
-==================================================
-
-==================================================
-✅ TWEET COUNT MATCH
-==================================================
-Both local database and Polymarket site show 235 tweets
-==================================================
-```
-
-If a discrepancy is detected:
-
-```
-==================================================
-⚠️ TWEET COUNT MISMATCH
-==================================================
-Local database:   232 tweets
-Polymarket site:  235 tweets
-Difference:       3 tweets
-==================================================
-This might indicate missing tweets in your database or counting differences.
-==================================================
-```
-
-You can disable this feature with the `--no-tweet-verify` flag if you don't need the information.
 
 ## Automated Trading with Auto-Bidder
 
