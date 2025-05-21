@@ -595,10 +595,28 @@ def run_scheduled_jobs(args):
     
     # Run the tweet fetching job if configured and not skipped
     if not args.predictions_only and not skip_tweet_fetching:
-        if args.use_csv_getter:
-            # Use TweetCSVGetter method
+        if args.use_csv_getter:            # Use TweetCSVGetter method with retries
             logger.info("Using TweetCSVGetter method for tweet fetching")
-            tweets_success = fetch_tweets_csv(quiet=args.quiet)
+            tweets_success = fetch_tweets_csv(quiet=args.quiet, max_retries=3)
+            
+            # If CSV getter failed after all retries, fall back to Apify
+            if not tweets_success:
+                logger.warning("CSV getter failed after all retries, falling back to Apify method")
+                print("\n" + "=" * 50)
+                print("⚠️ CSV GETTER FAILED - FALLING BACK TO APIFY")
+                print("=" * 50)
+                print("Will attempt to fetch tweets using the Apify method instead")
+                print("=" * 50 + "\n")
+                
+                # Use default Apify method as fallback
+                tweets_success = fetch_tweets(
+                    max_tweets=args.max_tweets,
+                    debug=not args.no_debug,
+                    quiet=args.quiet,
+                    use_incremental=not args.no_incremental,
+                    initial_batch=args.initial_batch,
+                    max_batch=args.max_batch
+                )
         else:
             # Use default Apify method
             tweets_success = fetch_tweets(
@@ -746,13 +764,14 @@ def run_scheduled_jobs(args):
     
     return tweets_success and prediction_success or skip_tweet_fetching
 
-def fetch_tweets_csv(quiet=False):
+def fetch_tweets_csv(quiet=False, max_retries=3):
     """Fetch tweets using the TweetCSVGetter.
     
     This uses the XTracker.io method to download tweets as CSV and process them.
     
     Args:
         quiet: Whether to suppress output
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         bool: Whether the tweet fetching was successful
@@ -761,24 +780,49 @@ def fetch_tweets_csv(quiet=False):
     
     cmd = [sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"]
     
-    try:
-        if quiet:
-            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if process.returncode != 0:
-                logger.error(f"Tweet CSV fetching failed with error: {process.stderr.decode()}")
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"CSV getter attempt {attempt}/{max_retries}")
+            
+            if quiet:
+                process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if process.returncode != 0:
+                    error_msg = process.stderr.decode()
+                    logger.warning(f"Tweet CSV fetching attempt {attempt}/{max_retries} failed with error: {error_msg}")
+                    if attempt < max_retries:
+                        logger.info(f"Retrying in 5 seconds...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        logger.error(f"All {max_retries} attempts to fetch tweets via CSV getter failed")
+                        return False
+                else:
+                    logger.info(f"Tweet CSV fetching completed successfully on attempt {attempt}")
+                    return True
             else:
-                logger.info("Tweet CSV fetching completed successfully")
-        else:
-            process = subprocess.run(cmd)
-            if process.returncode != 0:
-                logger.error("Tweet CSV fetching failed")
+                process = subprocess.run(cmd)
+                if process.returncode != 0:
+                    logger.warning(f"Tweet CSV fetching attempt {attempt}/{max_retries} failed")
+                    if attempt < max_retries:
+                        logger.info(f"Retrying in 5 seconds...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        logger.error(f"All {max_retries} attempts to fetch tweets via CSV getter failed")
+                        return False
+                else:
+                    logger.info(f"Tweet CSV fetching completed successfully on attempt {attempt}")
+                    return True
+        except Exception as e:
+            logger.warning(f"Error during CSV fetching attempt {attempt}/{max_retries}: {e}")
+            if attempt < max_retries:
+                logger.info(f"Retrying in 5 seconds...")
+                time.sleep(5)
             else:
-                logger.info("Tweet CSV fetching completed successfully")
-    except Exception as e:
-        logger.error(f"Error running tweet CSV fetching: {e}")
-        return False
+                logger.error(f"All {max_retries} attempts to fetch tweets via CSV getter failed with exception: {e}")
+                return False
     
-    return process.returncode == 0
+    return False
 
 def main():
     """Main entry point for the scheduler."""
