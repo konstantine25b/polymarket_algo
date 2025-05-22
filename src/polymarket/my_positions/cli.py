@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 
 from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
 
 def parse_args():
     """Parse command line arguments."""
@@ -20,6 +21,8 @@ def parse_args():
     parser.add_argument('--detailed', action='store_true', help='Display detailed position information')
     parser.add_argument('--positions-table', action='store_true', help='Display current positions as a formatted table with P&L info')
     parser.add_argument('--simple-positions', action='store_true', help='Display a simple list of market IDs and share quantities')
+    parser.add_argument('--active-positions', action='store_true', help='Display positions for the currently active market week only')
+    parser.add_argument('--simple-and-active-positions', action='store_true', help='Display both all positions and active market positions in a single call (more efficient)')
     parser.add_argument('--save-table-image', action='store_true', help='Save the positions table as an image')
     parser.add_argument('--table-image-path', type=str, help='Path for the saved table image')
     parser.add_argument('--trades-table', action='store_true', help='Display all trades grouped by market as tables with P&L metrics')
@@ -72,7 +75,7 @@ def main():
     if args.positions or (not any([args.detailed, args.positions_table, args.trades_table, args.market_trades, 
                                   args.visualize, args.positions_chart, args.trade_history, args.market_chart,
                                   args.export_positions, args.export_positions_csv, args.export_trades_csv,
-                                  args.save_table_image, args.simple_positions])):
+                                  args.save_table_image, args.simple_positions, args.active_positions, args.simple_and_active_positions])):
         print("\nPOSITION SUMMARY (with P&L calculations):")
         positions = tracker.get_positions_summary()
         tracker.print_positions_summary(positions)
@@ -85,6 +88,68 @@ def main():
             print(f"\n{market_name} ({market_id}):")
             for outcome, quantity in outcomes.items():
                 print(f"  {outcome}: {quantity:.6f} shares")
+    
+    if args.active_positions:
+        # Extract the dates from the constants for display
+        active_start_date = POLYMARKET_START_TIME.split(" ")[0]
+        active_end_date = POLYMARKET_END_TIME.split(" ")[0]
+        
+        # Format the date range for display
+        active_start_month = active_start_date.split('-')[1]
+        active_start_day = active_start_date.split('-')[2]
+        active_end_month = active_end_date.split('-')[1]
+        active_end_day = active_end_date.split('-')[2]
+        
+        print(f"\nACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)}):")
+        active_positions = tracker.get_active_market_positions()
+        
+        if active_positions:
+            for market_id, outcomes in active_positions.items():
+                market_name = tracker.get_market_name(market_id)
+                print(f"\n{market_name} ({market_id}):")
+                for outcome, quantity in outcomes.items():
+                    print(f"  {outcome}: {quantity:.6f} shares")
+        else:
+            print("No positions found for the active market.")
+    
+    if args.simple_and_active_positions:
+        # First show all positions
+        print("\n" + "=" * 50)
+        print("CURRENT POSITIONS")
+        print("=" * 50)
+        
+        simple_positions = tracker.get_simple_positions()
+        for market_id, outcomes in simple_positions.items():
+            market_name = tracker.get_market_name(market_id)
+            print(f"\n{market_name} ({market_id}):")
+            for outcome, quantity in outcomes.items():
+                print(f"  {outcome}: {quantity:.6f} shares")
+        
+        # Then show active market positions using the already loaded data
+        # Extract the dates from the constants for display
+        active_start_date = POLYMARKET_START_TIME.split(" ")[0]
+        active_end_date = POLYMARKET_END_TIME.split(" ")[0]
+        
+        # Format the date range for display
+        active_start_month = active_start_date.split('-')[1]
+        active_start_day = active_start_date.split('-')[2]
+        active_end_month = active_end_date.split('-')[1]
+        active_end_day = active_end_date.split('-')[2]
+        
+        print("\n" + "=" * 50)
+        print(f"ACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)})")
+        print("=" * 50)
+        
+        active_positions = tracker.get_active_market_positions()
+        
+        if active_positions:
+            for market_id, outcomes in active_positions.items():
+                market_name = tracker.get_market_name(market_id)
+                print(f"\n{market_name} ({market_id}):")
+                for outcome, quantity in outcomes.items():
+                    print(f"  {outcome}: {quantity:.6f} shares")
+        else:
+            print("No positions found for the active market.")
     
     if args.detailed:
         print("\nDETAILED POSITIONS:")

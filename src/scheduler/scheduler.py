@@ -496,17 +496,17 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
     # First display all positions if requested
-    if show_positions:
+    if show_positions and show_active_positions:
         print("\n" + "=" * 50)
-        print("CURRENT POSITIONS")
+        print("POSITIONS INFORMATION")
         print("=" * 50)
         
-        # Run the position display command
+        # Run the position display command with the combined flag
         position_cmd = [
             sys.executable,
             "-m",
             "src.polymarket.my_positions.cli",
-            "--simple-positions"
+            "--simple-and-active-positions"
         ]
         
         try:
@@ -514,93 +514,46 @@ def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, s
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to display positions: {e}")
             # Continue with the rest of the function even if this fails
-    
-    # Now display active market positions separately if requested
-    if show_active_positions:
-        from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
-        
-        # Extract the dates from the constants (format: "YYYY-MM-DD HH:MM:SS")
-        active_start_date = POLYMARKET_START_TIME.split(" ")[0]
-        active_end_date = POLYMARKET_END_TIME.split(" ")[0]
-        
-        # Format the date range for display
-        active_start_month = active_start_date.split('-')[1]
-        active_start_day = active_start_date.split('-')[2]
-        active_end_month = active_end_date.split('-')[1]
-        active_end_day = active_end_date.split('-')[2]
-        
-        active_market = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
-        
-        print("\n" + "=" * 50)
-        print(f"ACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)})")
-        print("=" * 50)
-        
-        # Run the position display command with grep to filter for active market
-        active_position_cmd = [
-            sys.executable,
-            "-m",
-            "src.polymarket.my_positions.cli",
-            "--simple-positions"
-        ]
-        
-        try:
-            # Run the command and pipe the output to grep
-            process = subprocess.Popen(
-                active_position_cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True
-            )
+    else:
+        # First display all positions if requested
+        if show_positions:
+            print("\n" + "=" * 50)
+            print("CURRENT POSITIONS")
+            print("=" * 50)
             
-            # Use grep to filter for the active market date patterns
-            grep_patterns = [
-                f"May {active_start_day}–{active_end_day}",
-                f"May {int(active_start_day)}–{int(active_end_day)}",
-                f"May {active_start_day}-{active_end_day}",
-                f"May {int(active_start_day)}-{int(active_end_day)}",
-                active_market
+            # Run the position display command
+            position_cmd = [
+                sys.executable,
+                "-m",
+                "src.polymarket.my_positions.cli",
+                "--simple-positions"
             ]
             
-            output, error = process.communicate()
-            output_lines = output.splitlines()
+            try:
+                subprocess.run(position_cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to display positions: {e}")
+                # Continue with the rest of the function even if this fails
+        
+        # Now display active market positions separately if requested
+        if show_active_positions:
+            print("\n" + "=" * 50)
+            print("ACTIVE MARKET POSITIONS")
+            print("=" * 50)
             
-            # Filter the output for active market positions
-            active_positions_found = False
-            active_positions = []
+            # Run the position display command with the new active-positions flag
+            active_position_cmd = [
+                sys.executable,
+                "-m",
+                "src.polymarket.my_positions.cli",
+                "--active-positions"
+            ]
             
-            # Process the output line by line to match market names with their share quantities
-            i = 0
-            while i < len(output_lines):
-                line = output_lines[i]
-                
-                # Check if this line contains an active market position
-                is_active_market = False
-                for pattern in grep_patterns:
-                    if pattern in line and "Will Elon tweet" in line:
-                        is_active_market = True
-                        break
-                
-                if is_active_market:
-                    market_name = line.split("(")[0].strip()
-                    
-                    # Look for the corresponding shares line (usually the next line)
-                    if i + 1 < len(output_lines) and "Yes:" in output_lines[i + 1] and "shares" in output_lines[i + 1]:
-                        shares = output_lines[i + 1].strip()
-                        active_positions.append(f"{market_name}: {shares}")
-                        active_positions_found = True
-                    
-                i += 1
-            
-            # Display the active positions in a clean format
-            if active_positions:
-                for position in active_positions:
-                    print(position)
-            elif not active_positions_found:
-                print("No positions found for the active market.")
-                
-        except Exception as e:
-            logger.error(f"Failed to display active market positions: {e}")
-            # Continue with the rest of the function even if this fails
+            try:
+                subprocess.run(active_position_cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to display active market positions: {e}")
+                # Continue with the rest of the function even if this fails
     
     # Skip the explicit comparison table generation since the auto-seller will generate it
     print("\n" + "=" * 50)

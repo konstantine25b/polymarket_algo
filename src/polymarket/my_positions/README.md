@@ -51,6 +51,10 @@ tracker.print_positions_summary(positions)
 simple_positions = tracker.get_simple_positions()
 print(simple_positions)
 
+# Get positions for the active market week only
+active_positions = tracker.get_active_market_positions()
+print(active_positions)
+
 # Display positions table with P&L metrics
 tracker.display_positions_table()
 
@@ -81,6 +85,18 @@ Display simple list of market IDs and share quantities:
 
 ```bash
 python -m src.polymarket.my_positions.cli --simple-positions
+```
+
+Display active market positions only:
+
+```bash
+python -m src.polymarket.my_positions.cli --active-positions
+```
+
+Display both all positions and active market positions efficiently (single data load):
+
+```bash
+python -m src.polymarket.my_positions.cli --simple-and-active-positions
 ```
 
 Get token IDs for your positions:
@@ -223,6 +239,18 @@ Will Elon tweet 275–299 times May 2–9? (0xb942003e5c182f905b88302b79368d7891
   Yes: 3.310000 shares
 ```
 
+### Active Market Positions Output
+
+```
+ACTIVE MARKET POSITIONS (May 16–23):
+
+Will Elon tweet 200–224 times May 16–23? (0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00):
+  Yes: 5.250000 shares
+
+Will Elon tweet 150–174 times May 16–23? (0x7a9d2d4c6e8f7b5c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c):
+  Yes: 2.100000 shares
+```
+
 ### Programmatic Usage of Simple Positions
 
 ```python
@@ -245,6 +273,31 @@ simple_positions = tracker.get_simple_positions()
 # Process the data programmatically
 for market_id, outcomes in simple_positions.items():
     print(f"Market: {market_id}")
+    for outcome, quantity in outcomes.items():
+        print(f"  {outcome}: {quantity} shares")
+```
+
+### Programmatic Usage of Active Market Positions
+
+```python
+from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+
+# Initialize tracker
+tracker = PolymarketPositionTracker()
+
+# Get positions for the active market week only
+active_positions = tracker.get_active_market_positions()
+
+# Example of the returned data structure:
+# {
+#    '0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00': {'Yes': 5.25},
+#    '0x7a9d2d4c6e8f7b5c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c': {'Yes': 2.10}
+# }
+
+# Process the active market positions programmatically
+for market_id, outcomes in active_positions.items():
+    market_name = tracker.get_market_name(market_id)
+    print(f"Active Market: {market_name}")
     for outcome, quantity in outcomes.items():
         print(f"  {outcome}: {quantity} shares")
 ```

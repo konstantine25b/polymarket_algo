@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
 from py_clob_client.constants import POLYGON
 from py_clob_client.clob_types import TradeParams
-from src.constants import POLYMARKET_API_HOST
+from src.constants import POLYMARKET_API_HOST, POLYMARKET_START_TIME, POLYMARKET_END_TIME
 
 class PolymarketPositionTracker:
     """
@@ -1685,6 +1685,61 @@ class PolymarketPositionTracker:
             simple_positions[market_id] = outcome_positions
             
         return simple_positions
+        
+    def get_active_market_positions(self):
+        """
+        Get positions for the currently active market week only.
+        
+        This filters positions based on the date range defined in src.constants
+        (POLYMARKET_START_TIME and POLYMARKET_END_TIME).
+        
+        Returns:
+            dict: Dictionary with filtered market IDs as keys and a nested dictionary of outcome-to-quantity as values.
+                  Only includes markets that match the active market pattern.
+        """
+        # Get all positions
+        all_positions = self.get_simple_positions()
+        
+        if not all_positions:
+            return {}
+            
+        # Extract the dates from the constants (format: "YYYY-MM-DD HH:MM:SS")
+        active_start_date = POLYMARKET_START_TIME.split(" ")[0]
+        active_end_date = POLYMARKET_END_TIME.split(" ")[0]
+        
+        # Format the date range for pattern matching
+        active_start_month = active_start_date.split('-')[1]
+        active_start_day = active_start_date.split('-')[2]
+        active_end_month = active_end_date.split('-')[1]
+        active_end_day = active_end_date.split('-')[2]
+        
+        # Create patterns to match for active market
+        patterns = [
+            f"May {active_start_day}–{active_end_day}",
+            f"May {int(active_start_day)}–{int(active_end_day)}",
+            f"May {active_start_day}-{active_end_day}",
+            f"May {int(active_start_day)}-{int(active_end_day)}",
+            f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
+        ]
+        
+        # Filter positions for active market
+        active_positions = {}
+        
+        for market_id, outcomes in all_positions.items():
+            # Get market name for pattern matching
+            market_name = self.get_market_name(market_id)
+            
+            # Check if this market matches the active market pattern
+            is_active_market = False
+            for pattern in patterns:
+                if pattern in market_name and "Will Elon tweet" in market_name:
+                    is_active_market = True
+                    break
+                    
+            if is_active_market:
+                active_positions[market_id] = outcomes
+                
+        return active_positions
 
     def get_positions_summary(self):
         """
