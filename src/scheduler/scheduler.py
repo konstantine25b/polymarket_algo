@@ -73,7 +73,13 @@ def setup_argparse():
     """Set up command line argument parsing."""
     parser = argparse.ArgumentParser(description='Schedule tweet fetching and prediction jobs')
     parser.add_argument('--interval', type=int, default=20,
-                        help='Interval between runs in minutes (default: 20)')
+                        help='Global interval between runs in minutes (default: 20)')
+    parser.add_argument('--tweet-interval', type=int, default=None,
+                        help='Interval between tweet fetching runs in minutes (overrides global interval)')
+    parser.add_argument('--buy-interval', type=int, default=None,
+                        help='Interval between auto-bidder runs in minutes (overrides global interval)')
+    parser.add_argument('--sell-interval', type=int, default=None,
+                        help='Interval between auto-seller runs in minutes (overrides global interval)')
     parser.add_argument('--tweets-only', action='store_true',
                         help='Only run the tweet fetching job')
     parser.add_argument('--predictions-only', action='store_true',
@@ -396,17 +402,17 @@ def display_wallet_balance():
     balance_info = check_wallet_balance()
     
     if balance_info["success"]:
-        print("\n" + "=" * 50)
-        print(f"WALLET BALANCE: {balance_info['wallet']}")
-        print("=" * 50)
-        print(f"MATIC Balance: {balance_info['matic_balance']} MATIC")
-        print(f"USDC Balance:  {balance_info['usdc_balance']} USDC")
-        print("=" * 50 + "\n")
+        print("\n" + "=" * 60)
+        print(f"💼 WALLET BALANCE: {balance_info['wallet']}")
+        print("=" * 60)
+        print(f"💰 MATIC Balance: {balance_info['matic_balance']} MATIC")
+        print(f"💲 USDC Balance:  {balance_info['usdc_balance']} USDC")
+        print("=" * 60 + "\n")
     else:
-        print("\n" + "=" * 50)
-        print("ERROR CHECKING WALLET BALANCE")
+        print("\n" + "=" * 60)
+        print("❌ ERROR CHECKING WALLET BALANCE")
         print(f"Error: {balance_info.get('error', 'Unknown error')}")
-        print("=" * 50 + "\n")
+        print("=" * 60 + "\n")
     
     return balance_info
 
@@ -659,17 +665,23 @@ def run_scheduled_jobs(args):
     db_count = -1
     skip_tweet_fetching = False
     
-    if not args.predictions_only and args.get_tweet_count_first:
+    # Check if we're running tweets (not predictions_only) and if it's not a specialized auto-bidder or auto-seller run
+    running_tweets = not args.predictions_only and not getattr(args, '_component_run', False)
+    
+    # Check if we're only checking counts without forcing fetching
+    only_checking_counts = getattr(args, '_only_check_counts', False)
+    
+    if running_tweets and args.get_tweet_count_first:
         logger.info("Getting tweet count from Polymarket before fetching tweets")
         polymarket_count = get_polymarket_tweet_count(max_retries=args.max_count_retries)
         
         if polymarket_count > 0:
             logger.info(f"Successfully retrieved tweet count from Polymarket: {polymarket_count}")
-            print("\n" + "=" * 50)
+            print("\n" + "=" * 60)
             print("CURRENT TWEET COUNT FROM POLYMARKET")
-            print("=" * 50)
+            print("=" * 60)
             print(f"Current tweet count: {polymarket_count}")
-            print("=" * 50 + "\n")
+            print("=" * 60 + "\n")
             
             # Verify local database count to compare
             logger.info("Checking local database tweet count for comparison")
@@ -680,41 +692,65 @@ def run_scheduled_jobs(args):
                 # Compare the counts
                 if db_count == polymarket_count:
                     logger.info(f"Tweet counts match exactly: DB={db_count}, Polymarket={polymarket_count}")
-                    print("\n" + "=" * 50)
+                    print("\n" + "=" * 60)
                     print("✅ TWEET COUNT MATCH - SKIPPING TWEET FETCHING")
-                    print("=" * 50)
-                    print(f"Both local database and Polymarket site show {db_count} tweets")
-                    print("Skipping tweet fetching as counts already match")
-                    print("=" * 50 + "\n")
+                    print("=" * 60)
+                    print(f"📊 Both local database and Polymarket site show {db_count} tweets")
+                    print("🔄 Skipping tweet fetching as counts already match")
+                    print("=" * 60 + "\n")
                     skip_tweet_fetching = True
                 else:
                     diff = abs(db_count - polymarket_count)
                     logger.info(f"Tweet counts don't match: DB={db_count}, Polymarket={polymarket_count}, Difference={diff}")
-                    print("\n" + "=" * 50)
-                    print("⚠️ TWEET COUNT MISMATCH - PROCEEDING WITH TWEET FETCHING")
-                    print("=" * 50)
-                    print(f"Local database:   {db_count} tweets")
-                    print(f"Polymarket site:  {polymarket_count} tweets")
-                    print(f"Difference:       {diff} tweets")
-                    print("Will fetch tweets to update the database")
-                    print("=" * 50 + "\n")
+                    
+                    # If we're only checking counts, don't force fetching
+                    if only_checking_counts:
+                        logger.info("Only checking counts, not forcing tweet fetching despite mismatch")
+                        print("\n" + "=" * 60)
+                        print("⚠️ TWEET COUNT MISMATCH - NOTED BUT NOT FETCHING")
+                        print("=" * 60)
+                        print(f"📊 Local database:   {db_count} tweets")
+                        print(f"📊 Polymarket site:  {polymarket_count} tweets")
+                        print(f"🔄 Difference:       {diff} tweets")
+                        print("ℹ️ Not fetching tweets now as this is just a scheduled count check")
+                        print("=" * 60 + "\n")
+                        skip_tweet_fetching = True
+                    else:
+                        print("\n" + "=" * 60)
+                        print("⚠️ TWEET COUNT MISMATCH - PROCEEDING WITH TWEET FETCHING")
+                        print("=" * 60)
+                        print(f"📊 Local database:   {db_count} tweets")
+                        print(f"📊 Polymarket site:  {polymarket_count} tweets")
+                        print(f"🔄 Difference:       {diff} tweets")
+                        print("🔄 Will fetch tweets to update the database")
+                        print("=" * 60 + "\n")
             else:
                 logger.warning(f"Failed to get tweet count from database, verification_success={verification_success}, db_count={db_count}")
-                print("\n" + "=" * 50)
+                print("\n" + "=" * 60)
                 print("⚠️ WARNING: COULD NOT VERIFY LOCAL DATABASE TWEET COUNT")
-                print("=" * 50)
+                print("=" * 60)
                 print("Continuing with tweet fetching...")
-                print("=" * 50 + "\n")
+                print("=" * 60 + "\n")
+                
+                # If we're only checking counts, don't force fetching
+                if only_checking_counts:
+                    logger.info("Only checking counts, not forcing tweet fetching despite verification failure")
+                    skip_tweet_fetching = True
         else:
             logger.warning(f"Failed to get tweet count from Polymarket website, polymarket_count={polymarket_count}")
-            print("\n" + "=" * 50)
+            print("\n" + "=" * 60)
             print("⚠️ WARNING: COULD NOT GET TWEET COUNT FROM POLYMARKET")
-            print("=" * 50)
+            print("=" * 60)
             print("Continuing with tweet fetching...")
-            print("=" * 50 + "\n")
+            print("=" * 60 + "\n")
+            
+            # If we're only checking counts, don't force fetching
+            if only_checking_counts:
+                logger.info("Only checking counts, not forcing tweet fetching despite retrieval failure")
+                skip_tweet_fetching = True
     
     # Run the tweet fetching job if configured and not skipped
-    if not args.predictions_only and not skip_tweet_fetching:
+    if running_tweets and not skip_tweet_fetching:
         if args.use_csv_getter:            # Use TweetCSVGetter method with retries
             logger.info("Using TweetCSVGetter method for tweet fetching")
             tweets_success = fetch_tweets_csv(quiet=args.quiet, max_retries=3)
@@ -722,11 +758,11 @@ def run_scheduled_jobs(args):
             # If CSV getter failed after all retries, fall back to Apify
             if not tweets_success:
                 logger.warning("CSV getter failed after all retries, falling back to Apify method")
-                print("\n" + "=" * 50)
+                print("\n" + "=" * 60)
                 print("⚠️ CSV GETTER FAILED - FALLING BACK TO APIFY")
-                print("=" * 50)
+                print("=" * 60)
                 print("Will attempt to fetch tweets using the Apify method instead")
-                print("=" * 50 + "\n")
+                print("=" * 60 + "\n")
                 
                 # Use default Apify method as fallback
                 tweets_success = fetch_tweets(
@@ -793,11 +829,12 @@ def run_scheduled_jobs(args):
                                 
                                 if db_count_after == retry_polymarket_count:
                                     logger.info(f"Match found on retry {retry}/3: DB={db_count_after}, Polymarket={retry_polymarket_count}")
-                                    print("\n" + "=" * 50)
+                                    print("\n" + "=" * 60)
                                     print(f"✅ TWEET COUNT MATCH (on retry {retry}/3)")
-                                    print("=" * 50)
-                                    print(f"Both local database and Polymarket site show {db_count_after} tweets")
-                                    print("=" * 50 + "\n")
+                                    print("=" * 60)
+                                    print(f"📊 Both local database and Polymarket site show {db_count_after} tweets")
+                                    print("🔄 Skipping tweet fetching as counts already match")
+                                    print("=" * 60 + "\n")
                                     match_found = True
                                     break
                             else:
@@ -805,18 +842,18 @@ def run_scheduled_jobs(args):
                         
                         # If all retries failed, show warning but continue
                         if not match_found:
-                            print("\n" + "=" * 50)
+                            print("\n" + "=" * 60)
                             print("⚠️ TWEET COUNT MISMATCH (after 3 retries)")
-                            print("=" * 50)
-                            print(f"Local database:   {db_count_after} tweets")
-                            print(f"Polymarket site:  {polymarket_count} tweets")
-                            print(f"Difference:       {diff} tweets")
-                            print("=" * 50)
+                            print("=" * 60)
+                            print(f"📊 Local database:   {db_count_after} tweets")
+                            print(f"📊 Polymarket site:  {polymarket_count} tweets")
+                            print(f"🔄 Difference:       {diff} tweets")
+                            print("=" * 60)
                             print("This might indicate missing tweets in your database or counting differences.")
                             
                             # Try to fetch tweets again up to 3 times using CSV getter
                             print("Attempting to re-fetch tweets 3 more times to resolve the mismatch...")
-                            print("=" * 50 + "\n")
+                            print("=" * 60 + "\n")
                             
                             retry_success = False
                             for retry_fetch in range(1, 4):  # 3 retries
@@ -846,11 +883,12 @@ def run_scheduled_jobs(args):
                                         
                                         if reverify_polymarket_count > 0 and reverify_db_count == reverify_polymarket_count:
                                             logger.info(f"Tweet count match after re-fetch attempt {retry_fetch}: DB={reverify_db_count}, Polymarket={reverify_polymarket_count}")
-                                            print("\n" + "=" * 50)
+                                            print("\n" + "=" * 60)
                                             print(f"✅ TWEET COUNT MATCH (after re-fetch attempt {retry_fetch}/3)")
-                                            print("=" * 50)
-                                            print(f"Both local database and Polymarket site show {reverify_db_count} tweets")
-                                            print("=" * 50 + "\n")
+                                            print("=" * 60)
+                                            print(f"📊 Both local database and Polymarket site show {reverify_db_count} tweets")
+                                            print("🔄 Skipping tweet fetching as counts already match")
+                                            print("=" * 60 + "\n")
                                             retry_success = True
                                             break
                                         else:
@@ -865,11 +903,11 @@ def run_scheduled_jobs(args):
                             if not retry_success:
                                 if args.use_csv_getter:  # Only fall back if we're not already using Apify
                                     logger.warning("All re-fetch attempts failed, falling back to Apify method")
-                                    print("\n" + "=" * 50)
+                                    print("\n" + "=" * 60)
                                     print("⚠️ ALL RE-FETCH ATTEMPTS FAILED - FALLING BACK TO APIFY")
-                                    print("=" * 50)
+                                    print("=" * 60)
                                     print("Will attempt to fetch tweets using the Apify method as a last resort")
-                                    print("=" * 50 + "\n")
+                                    print("=" * 60 + "\n")
                                     
                                     # Use default Apify method as fallback
                                     apify_success = fetch_tweets(
@@ -890,43 +928,45 @@ def run_scheduled_jobs(args):
                                         if final_verify_success and final_db_count > 0 and final_polymarket_count > 0:
                                             if final_db_count == final_polymarket_count:
                                                 logger.info(f"Tweet count match after Apify fallback: DB={final_db_count}, Polymarket={final_polymarket_count}")
-                                                print("\n" + "=" * 50)
+                                                print("\n" + "=" * 60)
                                                 print("✅ TWEET COUNT MATCH AFTER APIFY FALLBACK")
-                                                print("=" * 50)
-                                                print(f"Both local database and Polymarket site show {final_db_count} tweets")
-                                                print("=" * 50 + "\n")
+                                                print("=" * 60)
+                                                print(f"📊 Both local database and Polymarket site show {final_db_count} tweets")
+                                                print("🔄 Skipping tweet fetching as counts already match")
+                                                print("=" * 60 + "\n")
                                             else:
                                                 diff = abs(final_db_count - final_polymarket_count)
                                                 logger.warning(f"Tweet count still mismatched after Apify fallback: DB={final_db_count}, Polymarket={final_polymarket_count}, Difference={diff}")
-                                                print("\n" + "=" * 50)
+                                                print("\n" + "=" * 60)
                                                 print("⚠️ TWEET COUNT STILL MISMATCHED AFTER APIFY FALLBACK")
-                                                print("=" * 50)
-                                                print(f"Local database:   {final_db_count} tweets")
-                                                print(f"Polymarket site:  {final_polymarket_count} tweets")
-                                                print(f"Difference:       {diff} tweets")
-                                                print("=" * 50)
+                                                print("=" * 60)
+                                                print(f"📊 Local database:   {final_db_count} tweets")
+                                                print(f"📊 Polymarket site:  {final_polymarket_count} tweets")
+                                                print(f"🔄 Difference:       {diff} tweets")
+                                                print("=" * 60)
                                                 print("Could not resolve the tweet count mismatch. Continuing with the process anyway.")
-                                                print("=" * 50 + "\n")
+                                                print("=" * 60 + "\n")
                                     else:
                                         logger.error("Apify fallback also failed to fetch tweets")
                                 else:
                                     # We're already using Apify, just continue with the process
-                                    print("\n" + "=" * 50)
+                                    print("\n" + "=" * 60)
                                     print("⚠️ TWEET COUNT MISMATCH PERSISTS")
-                                    print("=" * 50)
+                                    print("=" * 60)
                                     print("Could not resolve the tweet count mismatch. Continuing with the process anyway.")
-                                    print("=" * 50 + "\n")
+                                    print("=" * 60 + "\n")
                             
                             # Continue with the rest of the process anyway.
                             print("Continuing with the rest of the process...")
-                            print("=" * 50 + "\n")
+                            print("=" * 60 + "\n")
                     else:
                         logger.info(f"Post-fetch tweet counts match exactly: DB={db_count_after}, Polymarket={polymarket_count}")
-                        print("\n" + "=" * 50)
+                        print("\n" + "=" * 60)
                         print("✅ TWEET COUNT MATCH")
-                        print("=" * 50)
-                        print(f"Both local database and Polymarket site show {db_count_after} tweets")
-                        print("=" * 50 + "\n")
+                        print("=" * 60)
+                        print(f"📊 Both local database and Polymarket site show {db_count_after} tweets")
+                        print("🔄 Skipping tweet fetching as counts already match")
+                        print("=" * 60 + "\n")
             else:
                 logger.warning(f"Post-fetch verification failed: verification_success={verification_success}, db_count_after={db_count_after}")
     else:
@@ -935,7 +975,11 @@ def run_scheduled_jobs(args):
             logger.info(f"Skipped tweet fetching as counts already matched (DB={db_count}, Polymarket={polymarket_count})")
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
-    if not args.tweets_only and (tweets_success or skip_tweet_fetching):
+    if not args.tweets_only and (tweets_success or skip_tweet_fetching or getattr(args, '_component_run', False)):
+        # For component-specific runs, ensure we run prediction
+        if getattr(args, '_component_run', False):
+            logger.info("Running prediction for component-specific run")
+            
         prediction_success = run_prediction(
             quiet=True,  # Always run prediction quietly since we'll show bidder output instead
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
@@ -949,8 +993,12 @@ def run_scheduled_jobs(args):
             if not has_sufficient_balance and not args.dry_run and not args.no_buy:
                 logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
                 logger.warning("Skipping auto-bidder due to insufficient USDC balance")
-                print(f"\n⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC)")
-                print(f"Minimum required: {args.min_usdc} USDC\n")
+                print("\n" + "=" * 60)
+                print(f"⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance")
+                print("=" * 60)
+                print(f"💲 Current balance: {balance_info.get('usdc_balance', 0)} USDC")
+                print(f"💲 Minimum required: {args.min_usdc} USDC")
+                print("=" * 60 + "\n")
             elif prediction_success and not args.no_bidding:
                 # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
                 if has_sufficient_balance or args.dry_run or args.no_buy:
@@ -1080,8 +1128,30 @@ def main():
     if args.quiet:
         logger.setLevel(logging.WARNING)
     
+    # Set component-specific intervals or use global interval as default
+    tweet_interval = args.tweet_interval if args.tweet_interval is not None else args.interval
+    buy_interval = args.buy_interval if args.buy_interval is not None else args.interval
+    sell_interval = args.sell_interval if args.sell_interval is not None else args.interval
+    
+    # Display a clear startup banner
+    print("\n" + "=" * 80)
+    print("🤖 POLYMARKET AUTOMATED SCHEDULER STARTING")
+    print("=" * 80)
+    print(f"📊 Tweet checking interval: {tweet_interval} minutes")
+    print(f"💰 Auto-bidder interval:    {buy_interval} minutes")
+    print(f"💸 Auto-seller interval:    {sell_interval} minutes")
+    if args.dry_run:
+        print("🔒 Running in DRY RUN mode - no real orders will be placed")
+    print("=" * 80 + "\n")
+    
     # Log the scheduler startup
-    logger.info(f"Tweet scheduler starting with interval: {args.interval} minutes")
+    logger.info(f"Tweet scheduler starting with global interval: {args.interval} minutes")
+    if args.tweet_interval is not None:
+        logger.info(f"Tweet fetching interval: {tweet_interval} minutes")
+    if args.buy_interval is not None:
+        logger.info(f"Auto-bidder interval: {buy_interval} minutes")
+    if args.sell_interval is not None:
+        logger.info(f"Auto-seller interval: {sell_interval} minutes")
     
     if args.tweets_only:
         logger.info("Configured to run tweet fetching only")
@@ -1162,10 +1232,132 @@ def main():
         return 0
     
     try:
+        # Initialize timers for each component
+        last_tweet_run = 0
+        last_buy_run = 0
+        last_sell_run = 0
+        
         while True:
-            run_scheduled_jobs(args)
-            logger.info(f"Sleeping for {args.interval} minutes until next run")
-            time.sleep(args.interval * 60)
+            current_time = time.time()
+            
+            # Check if it's time to run each component
+            run_tweets = not args.predictions_only and (current_time - last_tweet_run >= tweet_interval * 60)
+            run_buy = not args.tweets_only and not args.no_bidding and (current_time - last_buy_run >= buy_interval * 60)
+            run_sell = not args.tweets_only and not args.no_selling and (current_time - last_sell_run >= sell_interval * 60)
+            
+            # Custom configuration to run specific components based on their intervals
+            custom_args = argparse.Namespace(**vars(args))
+            
+            if run_tweets:
+                # Add clear visual separator and timestamp for tweet checking
+                current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print("\n" + "=" * 80)
+                print(f"🔍 TWEET COUNT CHECK - SCHEDULED INTERVAL ({tweet_interval}m) - {current_time_str}")
+                print("=" * 80)
+                
+                logger.info(f"Running scheduled tweet count check (interval: {tweet_interval}m)")
+                # Only check tweet counts, don't force fetching
+                custom_args = argparse.Namespace(**vars(args))
+                custom_args.no_bidding = True
+                custom_args.no_selling = True
+                custom_args._component_run = False
+                custom_args._only_check_counts = True  # Only check counts, don't force fetching
+                run_scheduled_jobs(custom_args)
+                last_tweet_run = current_time
+            
+            if run_buy:
+                # Add clear visual separator and timestamp for auto-bidder
+                current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print("\n" + "=" * 80)
+                print(f"💰 AUTO-BIDDER - SCHEDULED INTERVAL ({buy_interval}m) - {current_time_str}")
+                print("=" * 80)
+                
+                # Always check and fetch tweets before buying
+                logger.info(f"Running auto-bidder (interval: {buy_interval}m)")
+                
+                # First check and fetch tweets if needed
+                if not run_tweets:  # Only if we haven't just run the tweet checking
+                    print("\n" + "-" * 60)
+                    print("📊 PRE-BIDDING TWEET CHECK")
+                    print("-" * 60)
+                    logger.info("Running tweet checking and fetching before auto-bidder")
+                    tweet_args = argparse.Namespace(**vars(args))
+                    tweet_args.no_bidding = True
+                    tweet_args.no_selling = True
+                    tweet_args._component_run = False
+                    tweet_args._only_check_counts = False  # Check and fetch if needed
+                    run_scheduled_jobs(tweet_args)
+                
+                # Then run the auto-bidder
+                print("\n" + "-" * 60)
+                print("🤖 EXECUTING AUTO-BIDDER")
+                print("-" * 60)
+                custom_args = argparse.Namespace(**vars(args))
+                custom_args.predictions_only = True
+                custom_args.no_selling = True
+                custom_args.no_bidding = False
+                custom_args._component_run = True  # This is a component-specific run
+                run_scheduled_jobs(custom_args)
+                last_buy_run = current_time
+            
+            if run_sell:
+                # Add clear visual separator and timestamp for auto-seller
+                current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print("\n" + "=" * 80)
+                print(f"💸 AUTO-SELLER - SCHEDULED INTERVAL ({sell_interval}m) - {current_time_str}")
+                print("=" * 80)
+                
+                # Always check and fetch tweets before selling
+                logger.info(f"Running auto-seller (interval: {sell_interval}m)")
+                
+                # First check and fetch tweets if needed
+                if not run_tweets and not run_buy:  # Only if we haven't just run tweet checking or buying
+                    print("\n" + "-" * 60)
+                    print("📊 PRE-SELLING TWEET CHECK")
+                    print("-" * 60)
+                    logger.info("Running tweet checking and fetching before auto-seller")
+                    tweet_args = argparse.Namespace(**vars(args))
+                    tweet_args.no_bidding = True
+                    tweet_args.no_selling = True
+                    tweet_args._component_run = False
+                    tweet_args._only_check_counts = False  # Check and fetch if needed
+                    run_scheduled_jobs(tweet_args)
+                
+                # Then run the auto-seller
+                print("\n" + "-" * 60)
+                print("🤖 EXECUTING AUTO-SELLER")
+                print("-" * 60)
+                custom_args = argparse.Namespace(**vars(args))
+                custom_args.predictions_only = True
+                custom_args.no_bidding = True
+                custom_args.no_selling = False
+                custom_args._component_run = True  # This is a component-specific run
+                run_scheduled_jobs(custom_args)
+                last_sell_run = current_time
+                
+            # Add a clear visual separator for the sleep period
+            next_event = min(
+                last_tweet_run + tweet_interval * 60,
+                last_buy_run + buy_interval * 60,
+                last_sell_run + sell_interval * 60
+            )
+            next_component = ""
+            seconds_to_next = next_event - current_time
+            minutes_to_next = seconds_to_next / 60
+            
+            if next_event == last_tweet_run + tweet_interval * 60:
+                next_component = f"Tweet Check ({tweet_interval}m interval)"
+            elif next_event == last_buy_run + buy_interval * 60:
+                next_component = f"Auto-Bidder ({buy_interval}m interval)"
+            elif next_event == last_sell_run + sell_interval * 60:
+                next_component = f"Auto-Seller ({sell_interval}m interval)"
+                
+            print("\n" + "=" * 80)
+            print(f"⏱️  SLEEPING - Next run in {minutes_to_next:.1f} minutes - {next_component}")
+            print("=" * 80 + "\n")
+            
+            # Sleep for the remaining time until the next component is due
+            time.sleep(max(0, next_event - current_time))
     except KeyboardInterrupt:
         logger.info("Scheduler stopped by user")
     except Exception as e:

@@ -151,7 +151,10 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 
 ## Command-Line Options
 
-- `--interval`: Set the interval between runs in minutes (default: 20)
+- `--interval`: Set the global interval between runs in minutes (default: 20)
+- `--tweet-interval`: Set the interval between tweet fetching runs in minutes (overrides global interval)
+- `--buy-interval`: Set the interval between auto-bidder runs in minutes (overrides global interval)
+- `--sell-interval`: Set the interval between auto-seller runs in minutes (overrides global interval)
 - `--tweets-only`: Only run the tweet fetching job
 - `--predictions-only`: Only run the prediction and trading jobs
 - `--max-tweets`: Maximum number of tweets to fetch (default: 40)
@@ -195,6 +198,13 @@ python -m src.scheduler.scheduler --show-positions --show-active-positions
 # Only show active market positions, not all positions
 python -m src.scheduler.scheduler --show-active-positions
 # --show-active-positions  : Display only positions for the active market week (May 16-23, etc.)
+
+# Configure different intervals for each component
+python -m src.scheduler.scheduler --tweet-interval 20 --buy-interval 60 --sell-interval 10 --dry-run
+# --tweet-interval 20      : Run tweet fetching every 20 minutes
+# --buy-interval 60        : Run auto-bidder every 60 minutes
+# --sell-interval 10       : Run auto-seller every 10 minutes
+# --dry-run                : Test without placing actual orders
 
 # Don't show any positions (default behavior)
 python -m src.scheduler.scheduler
@@ -275,6 +285,52 @@ If getting the count fails after all retries:
 Continuing with tweet fetching...
 ==================================================
 ```
+
+## Separate Component Intervals
+
+The scheduler now supports running different components (tweet fetching, buying, and selling) at different intervals, giving you more control over the frequency of each operation:
+
+```bash
+# Run tweet fetching every 20 minutes, buying every 60 minutes, and selling every 10 minutes
+python -m src.scheduler.scheduler --tweet-interval 20 --buy-interval 60 --sell-interval 10 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+```
+
+This allows you to:
+
+- Check for selling opportunities frequently (e.g., every 10 minutes)
+- Run the resource-intensive tweet fetching less frequently (e.g., every 20 minutes)
+- Run the auto-bidder at a custom interval (e.g., every 60 minutes)
+
+Each component operates independently with its own timer:
+
+- `--tweet-interval`: Set the interval between tweet count checks (in minutes)
+- `--buy-interval`: Set the interval between auto-bidder runs (in minutes)
+- `--sell-interval`: Set the interval between auto-seller runs (in minutes)
+- `--interval`: Set the global interval for all components (used as default if specific intervals are not set)
+
+The scheduler uses an optimized approach to minimize unnecessary operations:
+
+1. The **tweet interval** only checks tweet counts without forcing fetching. It simply compares the Polymarket count with your local database count and logs any mismatches.
+
+2. Before any **buy or sell operation**, the scheduler automatically:
+   - Checks tweet counts
+   - Only fetches tweets if there's a mismatch
+   - Then runs the prediction and trading operation
+
+This ensures trading decisions are always made with the most up-to-date tweet data while minimizing unnecessary API calls and processing. You only fetch tweets when they're actually needed.
+
+You can set any combination of intervals to optimize your trading strategy. For example:
+
+```bash
+# Run tweet fetching hourly, buying every 2 hours, and selling every 15 minutes
+python -m src.scheduler.scheduler --tweet-interval 60 --buy-interval 120 --sell-interval 15 --dry-run
+```
+
+This is particularly useful when:
+
+- You want to monitor the market more frequently for selling opportunities
+- Tweet fetching is resource-intensive and doesn't need to run as often
+- You want to space out your buying operations to avoid placing too many orders at once
 
 ### Post-Fetch Count Validation
 

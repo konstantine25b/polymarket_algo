@@ -32,7 +32,7 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 days remain in the market
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
 # Option explanations:
 # --buy-threshold 1.5      : Only bid on opportunities with at least 1.5% edge over market price
 # --sell-threshold 0.5     : Sell positions with at least 0.5% sell opportunity
@@ -208,7 +208,10 @@ python -m src.scheduler.scheduler --get-tweet-count-first --use-csv-getter --int
 The scheduler is the main entry point for the automated system. Key options include:
 
 ```
---interval MINUTES     How often to run the process (default: 20)
+--interval MINUTES     Global interval for all operations (default: 20)
+--tweet-interval MINUTES Interval between tweet fetching runs (overrides global interval)
+--buy-interval MINUTES  Interval between auto-bidder runs (overrides global interval)
+--sell-interval MINUTES Interval between auto-seller runs (overrides global interval)
 --buy-threshold FLOAT  Minimum edge required to place buy orders (default: 0.0)
 --sell-threshold FLOAT Minimum edge required to place sell orders (default: 0.0)
 --sell-below FLOAT     Automatically sell positions with prediction below this percentage
@@ -219,6 +222,23 @@ The scheduler is the main entry point for the automated system. Key options incl
 --show-positions       Show all current positions when running
 --show-active-positions Show positions for active market when running
 ```
+
+### Example with Different Intervals
+
+Run the scheduler with different intervals for each operation:
+
+```bash
+# Run tweet count checks every 20 minutes, buying every 60 minutes, and selling every 10 minutes
+python -m src.scheduler.scheduler --tweet-interval 20 --buy-interval 60 --sell-interval 10 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+```
+
+This configuration uses an optimized approach:
+
+- Every 20 minutes: Check tweet counts without forcing fetching
+- Every 60 minutes: Check tweet counts, fetch if needed, then run auto-bidder
+- Every 10 minutes: Check tweet counts, fetch if needed, then run auto-seller
+
+This minimizes unnecessary API calls while ensuring all trading decisions are made with up-to-date data.
 
 ### Auto-Bidder Options
 
