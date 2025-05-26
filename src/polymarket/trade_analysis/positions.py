@@ -425,7 +425,9 @@ def calculate_position_performance(position, bid_price, ask_price, is_finished=F
         'roi': 0,
         'unrealized_pnl': 0,
         'total_pnl': 0,
-        'status': 'Unknown'
+        'status': 'Unknown',
+        'total_investment': position['avg_buy_price'] * position['buy_volume'],
+        'current_value': 0
     }
     
     # For closed positions
@@ -435,6 +437,8 @@ def calculate_position_performance(position, bid_price, ask_price, is_finished=F
             
             # Calculate ROI
             total_cost = position['avg_buy_price'] * position['buy_volume']
+            performance['total_investment'] = total_cost
+            
             if total_cost > 0:
                 performance['roi'] = (position['realized_pnl'] / total_cost) * 100
                 
@@ -454,6 +458,8 @@ def calculate_position_performance(position, bid_price, ask_price, is_finished=F
             
         # Calculate ROI
         total_cost = position['avg_buy_price'] * position['buy_volume']
+        performance['total_investment'] = total_cost
+        
         if total_cost > 0:
             performance['roi'] = (performance['total_pnl'] / total_cost) * 100
             
@@ -468,6 +474,9 @@ def calculate_position_performance(position, bid_price, ask_price, is_finished=F
         # Calculate unrealized PnL based on current market price
         performance['unrealized_pnl'] = (price_to_use - position['avg_buy_price']) * position['net_position']
         
+        # Current value of remaining shares
+        performance['current_value'] = price_to_use * position['net_position']
+        
         # Add any partial realized PnL from sells
         partial_realized_pnl = 0
         if position['sell_volume'] > 0:
@@ -477,6 +486,8 @@ def calculate_position_performance(position, bid_price, ask_price, is_finished=F
         
         # Calculate ROI
         total_cost = position['avg_buy_price'] * position['buy_volume']
+        performance['total_investment'] = total_cost
+        
         if total_cost > 0:
             performance['roi'] = (performance['total_pnl'] / total_cost) * 100
             
@@ -553,6 +564,7 @@ def display_positions(trades_data, analyzer, active_only=False):
     total_partial_pnl = 0
     total_portfolio_value = 0
     total_remaining_shares = 0
+    total_investment = 0
     
     # Display each position
     for idx, (key, position) in enumerate(positions.items(), 1):
@@ -599,6 +611,10 @@ def display_positions(trades_data, analyzer, active_only=False):
             is_finished
         )
         
+        # Calculate total investment
+        position_investment = position['avg_buy_price'] * position['buy_volume']
+        total_investment += position_investment
+        
         # Update portfolio totals
         if position['status'] == 'closed' and 'realized_pnl' in position:
             total_realized_pnl += position['realized_pnl']
@@ -634,6 +650,11 @@ def display_positions(trades_data, analyzer, active_only=False):
             print(f"   {reset_color}Market Status: FINISHED{reset_color}")
             
         print(f"   Entry: {first_trade} | Exit: {last_trade if position['status'] == 'closed' else 'OPEN'}")
+        
+        # Add total investment information
+        inv_color = "\033[95m"  # Purple for investment
+        print(f"   {inv_color}Total Investment: ${position_investment:.4f}{reset_color}")
+        
         print(f"   Buy Volume: {position['buy_volume']:.2f} @ Avg Price: ${position['avg_buy_price']:.4f}")
         print(f"   Sell Volume: {position['sell_volume']:.2f} @ Avg Price: ${position['avg_sell_price']:.4f}")
         
@@ -685,18 +706,25 @@ def display_positions(trades_data, analyzer, active_only=False):
     # Calculate total PnL
     total_pnl = total_realized_pnl + total_partial_pnl + total_unrealized_pnl
     
+    # Calculate overall ROI
+    overall_roi = 0
+    if total_investment > 0:
+        overall_roi = (total_pnl / total_investment) * 100
+    
     # Display portfolio summary with colors
     realized_color = "\033[92m" if total_realized_pnl >= 0 else "\033[91m"
     unrealized_color = "\033[92m" if total_unrealized_pnl >= 0 else "\033[91m"
     total_color = "\033[92m" if total_pnl >= 0 else "\033[91m"
+    inv_color = "\033[95m"  # Purple for investment
     reset_color = "\033[0m"
     
     print(f"\n=== Portfolio Summary ===")
+    print(f"{inv_color}Total Investment: ${total_investment:.4f}{reset_color}")
     print(f"Total Realized PnL: {realized_color}${total_realized_pnl + total_partial_pnl:.4f}{reset_color}")
     print(f"  - From Closed Positions: {realized_color}${total_realized_pnl:.4f}{reset_color}")
     print(f"  - From Partial Sells: {realized_color}${total_partial_pnl:.4f}{reset_color}")
     print(f"Total Unrealized PnL: {unrealized_color}${total_unrealized_pnl:.4f}{reset_color}")
-    print(f"Total PnL (Realized + Unrealized): {total_color}${total_pnl:.4f}{reset_color}")
+    print(f"Total PnL (Realized + Unrealized): {total_color}${total_pnl:.4f} (ROI: {overall_roi:.2f}%){reset_color}")
     print(f"Portfolio Value: ${total_portfolio_value:.4f}")
     print(f"Total Remaining Shares: {total_remaining_shares:.2f}")
     print(f"Closed Positions: {closed_positions}")
