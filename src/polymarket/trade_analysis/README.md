@@ -327,18 +327,22 @@ The trade analyzer now includes position tracking functionality that helps you u
 5. Shows exact market names and descriptions
 6. Calculates partial realized PnL for positions where you've sold some shares
 7. Displays remaining shares and estimated value
-8. Fetches current bid prices from Polymarket
+8. Fetches current bid and ask prices from Polymarket
 9. Calculates potential PnL if sold at current bid price
+10. Provides performance metrics with ROI calculation
+11. Detects finished markets and adjusts valuations accordingly
 
 ### Position Analysis Features
 
 - **Market Names**: Displays full market names fetched from Polymarket API
 - **Partial PnL**: Calculates PnL for the portion of shares you've already sold
 - **Remaining Shares**: Clearly shows how many shares you still have in each position
-- **Current Bid Prices**: Shows the current market bid price for selling your position
+- **Current Prices**: Shows both the current bid price (what you can sell for) and ask price (market price)
+- **Market Status**: Detects and labels finished markets
+- **Performance Metrics**: Displays ROI, unrealized PnL, and status indicators for each position
 - **Potential PnL**: Calculates potential profit/loss if you sold at current bid price
 - **Active Market Filter**: Option to show only positions for the currently active market
-- **Portfolio Summary**: Provides an overview of your total realized PnL and remaining shares
+- **Portfolio Summary**: Provides a comprehensive overview of your total realized and unrealized PnL
 
 ### How to Use Position Analysis
 
@@ -385,7 +389,7 @@ Connected to Polymarket CLOB API with wallet: 0xF7B5bD...
 
 Retrieving your trades...
 Found 31 trades. Analyzing positions...
-Fetching market names and current bid prices...
+Fetching market names and current prices...
 
 === Position Analysis ===
 Found 9 positions (8 open, 1 closed)
@@ -393,29 +397,38 @@ Found 9 positions (8 open, 1 closed)
 === Position Details ===
 1. Market: Will Elon tweet 100–124 times May 23–30?
    ID: 0xe63332b05d45de8f89340ed0742426b29e8a86207f6c7bcd0107fad9e97450bf
-   Outcome: Yes | Status: OPEN
+   Outcome: Yes | Status: OPEN (Profitable)
    Entry: 2025-05-26 14:56:17 | Exit: OPEN
    Buy Volume: 24.48 @ Avg Price: $0.1226
    Sell Volume: 0.00 @ Avg Price: $0.0000
-   Current Bid Price: $0.1300
+   Current Bid Price (Selling): $0.1300
+   Current Ask Price (Market): $0.1400
    Remaining Shares: 24.48
-   Est. Value at Current Bid Price: $3.1824
-   Potential PnL at Current Bid: $0.1815
+   Est. Value at Market (Ask) Price: $3.4272
+   Unrealized PnL: $0.4267
+   Total PnL: $0.4267 (ROI: 14.26%)
+   Potential PnL if Sold Now: $0.1815
 
 2. Market: Will Elon tweet 250–274 times May 2–9?
    ID: 0x7bedaca7d17a565de42bbf4c0e25535396350bc6026adf1e6c633e3d42aadf63
-   Outcome: Yes | Status: CLOSED
+   Outcome: Yes | Status: CLOSED (Closed)
+   Market Status: FINISHED
    Entry: 2025-05-05 18:57:21 | Exit: 2025-05-06 23:11:47
    Buy Volume: 8.00 @ Avg Price: $0.2500
    Sell Volume: 8.00 @ Avg Price: $0.2650
-   Current Bid Price: $0.0000
+   Current Bid Price (Selling): $0.0000
+   Current Ask Price (Market): $0.0000
    Remaining Shares: 0.00
    Realized PnL: $0.1200
+   Total PnL: $0.1200 (ROI: 6.00%)
 
 === Portfolio Summary ===
 Total Realized PnL: $3.0219
   - From Closed Positions: $0.1200
   - From Partial Sells: $2.9019
+Total Unrealized PnL: $0.7548
+Total PnL (Realized + Unrealized): $3.7767
+Portfolio Value: $4.9562
 Total Remaining Shares: 27.09
 Closed Positions: 1
 Open Positions: 8
