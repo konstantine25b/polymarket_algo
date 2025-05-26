@@ -246,57 +246,145 @@ def create_trade_summary_table(trades_df, output_dir):
     return output_path
 
 
+def display_positions(trades_data, analyzer):
+    """
+    Display position information using the new identify_positions functionality.
+    
+    Args:
+        trades_data (list): List of trade data dictionaries.
+        analyzer (PolymarketTradeAnalyzer): The trade analyzer instance.
+    """
+    print("\n=== Position Analysis ===")
+    positions = analyzer.identify_positions(trades_data)
+    
+    if isinstance(positions, dict) and positions.get('error'):
+        print(f"Error: {positions['error']}")
+        return
+    
+    # Display position information
+    position_count = len(positions)
+    open_positions = sum(1 for p in positions.values() if p['status'] == 'open')
+    closed_positions = sum(1 for p in positions.values() if p['status'] == 'closed')
+    
+    print(f"Found {position_count} positions ({open_positions} open, {closed_positions} closed)")
+    print("\n=== Position Details ===")
+    
+    # Display each position
+    for idx, (key, position) in enumerate(positions.items(), 1):
+        status_color = "\033[92m" if position['status'] == 'closed' else "\033[93m"  # Green for closed, yellow for open
+        reset_color = "\033[0m"
+        
+        # Format entry/exit times - Fix for timestamp objects
+        if 'first_trade_time' in position:
+            if isinstance(position['first_trade_time'], (int, float)):
+                first_trade = datetime.fromtimestamp(position['first_trade_time'])
+            else:
+                # Handle pandas Timestamp objects
+                first_trade = position['first_trade_time']
+        else:
+            first_trade = "N/A"
+            
+        if 'last_trade_time' in position:
+            if isinstance(position['last_trade_time'], (int, float)):
+                last_trade = datetime.fromtimestamp(position['last_trade_time'])
+            else:
+                # Handle pandas Timestamp objects
+                last_trade = position['last_trade_time']
+        else:
+            last_trade = "N/A"
+        
+        # Display basic position info
+        print(f"{idx}. Market: {position['market_id_short']} | Outcome: {position['outcome']} | "
+              f"Status: {status_color}{position['status'].upper()}{reset_color}")
+        
+        print(f"   Entry: {first_trade} | Exit: {last_trade if position['status'] == 'closed' else 'OPEN'}")
+        print(f"   Buy Volume: {position['buy_volume']:.2f} @ Avg Price: ${position['avg_buy_price']:.4f}")
+        print(f"   Sell Volume: {position['sell_volume']:.2f} @ Avg Price: ${position['avg_sell_price']:.4f}")
+        print(f"   Net Position: {position['net_position']:.2f}")
+        
+        # Show PnL for closed positions
+        if position['status'] == 'closed' and 'realized_pnl' in position:
+            pnl_color = "\033[92m" if position['realized_pnl'] >= 0 else "\033[91m"  # Green for profit, red for loss
+            print(f"   Realized PnL: {pnl_color}${position['realized_pnl']:.4f}{reset_color}")
+        
+        print("")  # Empty line between positions
+    
+    return positions
+
+
+def analyze_positions_only():
+    """
+    Standalone function to run only position analysis without other trade data.
+    This provides a focused view of just position PnL information.
+    """
+    print("=== Polymarket Position Analysis ===")
+    
+    try:
+        # Initialize the analyzer
+        print("Initializing trade analyzer...")
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        analyzer = PolymarketTradeAnalyzer(output_dir=output_dir)
+        
+        # Get trades for the current wallet
+        print("\nRetrieving your trades...")
+        trades = analyzer.get_trades_by_maker()
+        
+        if not trades:
+            print("No trades found for your wallet address.")
+            return
+        
+        print(f"Found {len(trades)} trades. Analyzing positions...")
+        
+        # Perform position analysis
+        positions = display_positions(trades, analyzer)
+        
+        # Show total PnL summary
+        closed_positions = [p for p in positions.values() if p['status'] == 'closed' and 'realized_pnl' in p]
+        if closed_positions:
+            total_realized_pnl = sum(p['realized_pnl'] for p in closed_positions)
+            pnl_color = "\033[92m" if total_realized_pnl >= 0 else "\033[91m"
+            reset_color = "\033[0m"
+            print(f"\n=== PnL Summary ===")
+            print(f"Total Realized PnL: {pnl_color}${total_realized_pnl:.4f}{reset_color}")
+            print(f"Closed Positions: {len(closed_positions)}")
+            
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     """Main function to run the Polymarket trade analysis."""
     print("=== Polymarket Trade Analysis ===")
     
-    # Load environment variables (including WALLET_PRIVATE_KEY)
-    load_dotenv()
-    
-    if not os.getenv("WALLET_PRIVATE_KEY"):
-        print("ERROR: WALLET_PRIVATE_KEY environment variable not found.")
-        print("Please create a .env file with your private key or set it in your environment.")
-        print("Example .env file content: WALLET_PRIVATE_KEY=0x123abc...")
-        return
-    
     try:
-        # Determine the script location to save output files in the same directory
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(script_dir, "plots")
-        
-        # Initialize the analyzer with credentials from .env
+        # Initialize the analyzer
         print("Initializing trade analyzer...")
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
+        os.makedirs(output_dir, exist_ok=True)
+        
         analyzer = PolymarketTradeAnalyzer(output_dir=output_dir)
         
-        # Get your trades (where you are the maker)
+        # Get trades for the current wallet
         print("\nRetrieving your maker trades...")
         trades = analyzer.get_trades_by_maker()
         
         if not trades:
-            print("No maker trades found for your account.")
-            print("\nWould you like to try retrieving trades where you are the taker? (y/n)")
-            choice = input().lower()
-            if choice in ('y', 'yes'):
-                # Try getting trades for the connected wallet (not as maker but as participant)
-                print("Retrieving trades for your wallet...")
-                # Use the market parameter to get all trades for any market
-                # (this is a workaround as the API doesn't have a direct method for this)
-                trades = analyzer.client.get_trades()
-                if not trades:
-                    print("No trades found for your wallet.")
-                    return
-            else:
-                return
+            print("No trades found for your wallet address.")
+            return
         
         print(f"Found {len(trades)} trades.")
         
-        # Display all trades
+        # Convert to DataFrame for analysis
+        trades_df = analyzer.get_trades_to_dataframe(trades)
+        
+        # Display trades
         print("\n=== Your Trades ===")
         for i, trade in enumerate(trades, 1):
             print(f"{i}. {format_trade_for_display(trade)}")
-        
-        # Convert to pandas DataFrame for analysis
-        trades_df = analyzer.get_trades_to_dataframe(trades)
         
         # Calculate and display balance
         balance = calculate_balance(trades_df)
@@ -305,70 +393,67 @@ def main():
         
         # Generate balance history plot
         print("\nGenerating balance history plot...")
-        balance_plot_path = plot_balance_history(trades_df, output_dir)
+        plot_balance_history(trades_df, output_dir)
         
-        # Generate trade distribution pie charts
+        # Generate trade distribution charts
         print("Generating trade distribution charts...")
-        distribution_plot_path = plot_trade_distribution(trades_df, output_dir)
+        plot_trade_distribution(trades_df, output_dir)
         
         # Generate trade summary table
         print("Generating trade summary table...")
-        summary_table_path = create_trade_summary_table(trades_df, output_dir)
+        create_trade_summary_table(trades_df, output_dir)
         
-        # Get comprehensive analysis
+        # Generate comprehensive analysis
         print("\nGenerating comprehensive analysis...")
         analysis = analyzer.get_comprehensive_analysis(trades)
-        
-        # Pretty print the analysis results
         print("\n=== Analysis Results ===")
-        print(json.dumps(analysis, indent=2, default=str))
+        print(json.dumps(analysis, indent=2))
         
-        # Create an output directory if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        
-        # Initialize the visualizer with the output directory
+        # Generate visualizations
         print("\nGenerating visualizations...")
-        visualizer = PolymarketTradeVisualizer(output_dir=output_dir)
-        
-        # Create visualizations - using matplotlib by default (use_plotly=False)
         try:
-            # Price history chart
+            visualizer = PolymarketTradeVisualizer(output_dir=output_dir)
+            
+            # Create price history chart
             print("Creating price history chart...")
-            visualizer.plot_price_history(trades_df, save_file=True)
+            visualizer.plot_price_history(trades_df)
             
-            # Volume distribution
+            # Create volume distribution chart
             print("Creating volume distribution chart...")
-            visualizer.plot_volume_distribution(trades_df, by='outcome', save_file=True)
+            visualizer.plot_volume_by_outcome(trades_df)
             
-            # Price distribution
+            # Create price distribution chart
             print("Creating price distribution chart...")
-            visualizer.plot_price_distribution(trades_df, save_file=True)
+            visualizer.plot_price_distribution(trades_df)
             
-            # Trading activity heatmap
+            # Create trading activity heatmap
             print("Creating trading activity heatmap...")
-            visualizer.plot_trade_heatmap(trades_df, save_file=True)
+            visualizer.plot_trading_heatmap(trades_df)
             
-            # Full dashboard - requires plotly
+            # Create full dashboard
             print("Creating full dashboard...")
-            visualizer.create_dashboard(trades_df, save_file=True)
+            visualizer.create_dashboard(trades_df)
             
             print(f"\nVisualization files have been created in the '{output_dir}' directory.")
             print("Open the PNG files in any image viewer to see the visualizations.")
+        
         except Exception as viz_error:
             print(f"ERROR during visualization: {str(viz_error)}")
             print("Analysis completed, but some visualizations failed to generate.")
-    
+        
+        # Display position analysis
+        print("\nPerforming position analysis...")
+        display_positions(trades, analyzer)
+        
     except Exception as e:
         print(f"ERROR: {str(e)}")
-        print("\nTroubleshooting tips:")
-        print("1. Make sure your WALLET_PRIVATE_KEY is valid")
-        print("2. Check your internet connection")
-        print("3. Ensure the Polymarket API is accessible")
-        print("\nStacktrace for debugging:")
         import traceback
-        print(traceback.format_exc())
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
-    main() 
+    # Check if we're running the positions-only command
+    if len(sys.argv) > 1 and sys.argv[1] == "positions":
+        analyze_positions_only()
+    else:
+        main() 

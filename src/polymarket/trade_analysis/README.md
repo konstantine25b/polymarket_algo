@@ -306,3 +306,117 @@ The comprehensive analysis returns detailed metrics in this format:
     'status_distribution': {'MINED': 42}
 }
 ```
+
+## Features
+
+- Trade retrieval from Polymarket CLOB API
+- Comprehensive trade analysis
+- Visualization of trade data
+- Balance tracking
+- Trade summary tables
+- Position analysis and PnL tracking
+
+## Position Analysis
+
+The trade analyzer now includes position tracking functionality that helps you understand your trading performance for each market position. It:
+
+1. Groups trades by market/outcome
+2. Tracks buy and sell pairs chronologically
+3. Identifies complete (closed) vs. partial (open) positions
+4. Calculates realized PnL for closed positions
+5. Shows exact market names and descriptions
+6. Calculates partial realized PnL for positions where you've sold some shares
+7. Displays remaining shares and estimated value
+8. Fetches current bid prices from Polymarket
+9. Calculates potential PnL if sold at current bid price
+
+### Position Analysis Features
+
+- **Market Names**: Displays full market names fetched from Polymarket API
+- **Partial PnL**: Calculates PnL for the portion of shares you've already sold
+- **Remaining Shares**: Clearly shows how many shares you still have in each position
+- **Current Bid Prices**: Shows the current market bid price for selling your position
+- **Potential PnL**: Calculates potential profit/loss if you sold at current bid price
+- **Active Market Filter**: Option to show only positions for the currently active market
+- **Portfolio Summary**: Provides an overview of your total realized PnL and remaining shares
+
+### How to Use Position Analysis
+
+You can run the position analysis in several ways:
+
+#### Option 1: Using the Dedicated Positions Script (Recommended)
+
+Use this dedicated script that focuses only on position tracking and PnL:
+
+```bash
+# Show all positions
+python -m src.polymarket.trade_analysis.positions
+
+# Show only active market positions (based on dates in constants.py)
+python -m src.polymarket.trade_analysis.positions --active
+# OR shorter version
+python -m src.polymarket.trade_analysis.positions -a
+```
+
+This provides the cleanest view of your positions without any other trade analysis data.
+
+#### Option 2: Using the Main Script with Positions Flag
+
+Use the main script with the positions flag to see only position information:
+
+```bash
+python -m src.polymarket.trade_analysis.run positions
+```
+
+#### Option 3: As Part of Full Analysis
+
+Run the full analysis script which includes position information at the end:
+
+```bash
+python -m src.polymarket.trade_analysis.run
+```
+
+### Example Output
+
+```
+=== Polymarket Position Analysis ===
+Initializing trade analyzer...
+Connected to Polymarket CLOB API with wallet: 0xF7B5bD...
+
+Retrieving your trades...
+Found 31 trades. Analyzing positions...
+Fetching market names and current bid prices...
+
+=== Position Analysis ===
+Found 9 positions (8 open, 1 closed)
+
+=== Position Details ===
+1. Market: Will Elon tweet 100–124 times May 23–30?
+   ID: 0xe63332b05d45de8f89340ed0742426b29e8a86207f6c7bcd0107fad9e97450bf
+   Outcome: Yes | Status: OPEN
+   Entry: 2025-05-26 14:56:17 | Exit: OPEN
+   Buy Volume: 24.48 @ Avg Price: $0.1226
+   Sell Volume: 0.00 @ Avg Price: $0.0000
+   Current Bid Price: $0.1300
+   Remaining Shares: 24.48
+   Est. Value at Current Bid Price: $3.1824
+   Potential PnL at Current Bid: $0.1815
+
+2. Market: Will Elon tweet 250–274 times May 2–9?
+   ID: 0x7bedaca7d17a565de42bbf4c0e25535396350bc6026adf1e6c633e3d42aadf63
+   Outcome: Yes | Status: CLOSED
+   Entry: 2025-05-05 18:57:21 | Exit: 2025-05-06 23:11:47
+   Buy Volume: 8.00 @ Avg Price: $0.2500
+   Sell Volume: 8.00 @ Avg Price: $0.2650
+   Current Bid Price: $0.0000
+   Remaining Shares: 0.00
+   Realized PnL: $0.1200
+
+=== Portfolio Summary ===
+Total Realized PnL: $3.0219
+  - From Closed Positions: $0.1200
+  - From Partial Sells: $2.9019
+Total Remaining Shares: 27.09
+Closed Positions: 1
+Open Positions: 8
+```

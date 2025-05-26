@@ -751,7 +751,15 @@ class PolymarketTradeAnalyzer:
         return '\n'.join(lines)
     
     def _format_pattern_analysis(self, analysis):
-        """Format trading pattern analysis as readable text."""
+        """
+        Format pattern analysis for display.
+        
+        Args:
+            analysis (dict): Pattern analysis results.
+            
+        Returns:
+            str: Formatted analysis text.
+        """
         lines = [
             "TRADING PATTERN ANALYSIS:",
             f"- Peak Trading Hour: {analysis.get('peak_hour', 'N/A')}:00 ({analysis.get('peak_hour_trades', 'N/A')} trades)"
@@ -770,4 +778,100 @@ class PolymarketTradeAnalyzer:
             lines.append(f"- Active Trading Days: {analysis['active_days']}")
             lines.append(f"- Average Trades per Day: {analysis['avg_trades_per_active_day']:.2f}")
         
-        return '\n'.join(lines) 
+        return '\n'.join(lines)
+    
+    def identify_positions(self, trades_data):
+        """
+        Group trades by market/outcome and identify complete vs. partial positions.
+        Tracks buy/sell pairs chronologically.
+        
+        Args:
+            trades_data (list): List of trade data dictionaries.
+            
+        Returns:
+            dict: Dictionary of positions by market/outcome with status (open/closed).
+                  Each position contains entry and exit details.
+        """
+        # Convert to DataFrame for analysis
+        df = self.get_trades_to_dataframe(trades_data)
+        
+        if df.empty:
+            return {'error': 'No trade data available for position analysis'}
+        
+        # Ensure proper data types
+        df['price'] = df['price'].astype(float)
+        df['size'] = df['size'].astype(float)
+        df['total'] = df['price'] * df['size']
+        
+        # Sort by match_time to ensure chronological order
+        df = df.sort_values('match_time')
+        
+        # Group trades by market and outcome
+        positions = {}
+        
+        # Process each market/outcome combination
+        for (market_id, outcome), group in df.groupby(['market', 'outcome']):
+            position_key = f"{market_id}_{outcome}"
+            
+            # Initialize position tracking for this market/outcome
+            if position_key not in positions:
+                positions[position_key] = {
+                    'market_id': market_id,
+                    'outcome': outcome,
+                    'buy_trades': [],
+                    'sell_trades': [],
+                    'buy_volume': 0,
+                    'sell_volume': 0,
+                    'net_position': 0,
+                    'avg_buy_price': 0,
+                    'avg_sell_price': 0,
+                    'status': 'open',
+                    'trades': []
+                }
+            
+            position = positions[position_key]
+            
+            # Process each trade chronologically
+            for _, trade in group.iterrows():
+                trade_info = trade.to_dict()
+                position['trades'].append(trade_info)
+                
+                # Track buys and sells separately
+                if trade['side'] == 'BUY':
+                    position['buy_trades'].append(trade_info)
+                    position['buy_volume'] += trade['size']
+                    # Update average buy price (weighted average)
+                    if position['buy_volume'] > 0:
+                        position['avg_buy_price'] = sum(t['price'] * t['size'] for t in position['buy_trades']) / position['buy_volume']
+                else:  # SELL
+                    position['sell_trades'].append(trade_info)
+                    position['sell_volume'] += trade['size']
+                    # Update average sell price (weighted average)
+                    if position['sell_volume'] > 0:
+                        position['avg_sell_price'] = sum(t['price'] * t['size'] for t in position['sell_trades']) / position['sell_volume']
+                
+                # Update net position
+                position['net_position'] = position['buy_volume'] - position['sell_volume']
+                
+                # Determine if position is closed (net position near zero)
+                if abs(position['net_position']) < 0.0001:
+                    position['status'] = 'closed'
+                else:
+                    position['status'] = 'open'
+        
+        # Add summary stats for each position
+        for position_key, position in positions.items():
+            # For closed positions, calculate realized PnL
+            if position['status'] == 'closed' and position['buy_volume'] > 0 and position['sell_volume'] > 0:
+                # Simple PnL calculation (this doesn't account for partial positions)
+                position['realized_pnl'] = (position['avg_sell_price'] - position['avg_buy_price']) * min(position['buy_volume'], position['sell_volume'])
+            
+            # Add first and last trade timestamps
+            if position['trades']:
+                position['first_trade_time'] = position['trades'][0]['match_time']
+                position['last_trade_time'] = position['trades'][-1]['match_time']
+                
+            # Add market name (short version for display)
+            position['market_id_short'] = position['market_id'][:8] + '...'
+            
+        return positions 
