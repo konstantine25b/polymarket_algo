@@ -658,16 +658,16 @@ def run_scheduled_jobs(args):
                     
                     # If we're only checking counts, don't force fetching
                     if only_checking_counts:
-                        logger.info("Only checking counts, not forcing tweet fetching despite mismatch")
+                        logger.info(f"Count mismatch detected - fetching tweets to update database")
                         print("\n" + "=" * 60)
-                        print("⚠️ TWEET COUNT MISMATCH - NOTED BUT NOT FETCHING")
+                        print("⚠️ TWEET COUNT MISMATCH - FETCHING TWEETS")
                         print("=" * 60)
                         print(f"📊 Local database:   {db_count} tweets")
                         print(f"📊 Polymarket site:  {polymarket_count} tweets")
                         print(f"🔄 Difference:       {diff} tweets")
-                        print("ℹ️ Not fetching tweets now as this is just a scheduled count check")
+                        print("🔄 Fetching tweets to update the database")
                         print("=" * 60 + "\n")
-                        skip_tweet_fetching = True
+                        skip_tweet_fetching = False
                     else:
                         print("\n" + "=" * 60)
                         print("⚠️ TWEET COUNT MISMATCH - PROCEEDING WITH TWEET FETCHING")
@@ -1214,7 +1214,7 @@ def main():
                 custom_args.no_bidding = True
                 custom_args.no_selling = True
                 custom_args._component_run = False
-                custom_args._only_check_counts = True  # Only check counts, don't force fetching
+                custom_args._only_check_counts = False  # Changed from True to False - fetch tweets if needed
                 run_scheduled_jobs(custom_args)
                 last_tweet_run = current_time
             
