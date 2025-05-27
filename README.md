@@ -149,6 +149,27 @@ Scheduler for automating the entire workflow from fetching tweets to placing ord
 python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30
 ```
 
+#### `/src/terminal_logger/` - Terminal Output Logging
+
+Simple utility for logging terminal output to files when running commands.
+
+- Saves terminal output to timestamped log files
+- Works with any command, including those with emojis and special characters
+- Supports custom log filenames
+
+```bash
+# Run any command and log its output
+python -m src.terminal_logger.logger "your command here"
+
+# Run the scheduler with logging
+python -m src.terminal_logger.logger "python -m src.scheduler.scheduler --buy-threshold 1.5 --dry-run"
+
+# Run with custom log filename
+python -m src.terminal_logger.logit --logfile my_custom_log.log python -m src.scheduler.scheduler --dry-run
+```
+
+See the [Terminal Logger README](src/terminal_logger/README.md) for more details.
+
 ### Key Configuration Files
 
 - `requirements.txt` - Python dependencies
