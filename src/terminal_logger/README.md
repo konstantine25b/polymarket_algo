@@ -6,7 +6,7 @@ A simple utility to capture and log terminal output to files when running comman
 
 - Logs terminal output to timestamped files with exact terminal formatting preserved
 - Works with any command, including those with emojis and ANSI color codes
-- Supports custom log filenames
+- Supports custom log filenames with automatic timestamping
 - Multiple ways to use: Python module, CLI tool, or bash wrapper
 
 ## Usage
@@ -16,8 +16,14 @@ There are multiple ways to use the Terminal Logger:
 ### 1. As a command-line wrapper
 
 ```bash
-# Run any command with logging
+# Run any command with logging (automatic timestamped filename)
 python -m src.terminal_logger.logger "your command here"
+
+# Run with a custom log name (timestamp will be added automatically)
+python -m src.terminal_logger.logger --name scheduler_test "python -m src.scheduler.scheduler --dry-run"
+
+# Short form with -n
+python -m src.terminal_logger.logger -n price_check "python -m src.polymarket.order_book.get_prices"
 
 # Example with Polymarket scheduler
 python -m src.terminal_logger.logger "python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run"
@@ -33,13 +39,13 @@ chmod +x src/terminal_logger/run_with_log.sh
 ./src/terminal_logger/run_with_log.sh python -m src.scheduler.scheduler --dry-run
 ```
 
-### 3. Using the dedicated CLI script
+### 3. Using the dedicated CLI script (with full custom filename control)
 
 ```bash
 # Run with the logit module
 python -m src.terminal_logger.logit your command here
 
-# Example with custom log filename
+# Example with custom log filename (exact filename, no automatic timestamp)
 python -m src.terminal_logger.logit --logfile my_custom_log.log python -m src.scheduler.scheduler --dry-run
 ```
 
@@ -67,6 +73,40 @@ python -m src.terminal_logger.wrapper_example --dry-run
 python -m src.terminal_logger.wrapper_example --buy-threshold 2.0 --min-prediction 10.0 --dry-run
 ```
 
+## Log Naming Options
+
+The Terminal Logger offers two approaches for custom log names:
+
+### Option 1: Simple Custom Name (--name)
+
+- Uses `--name` or `-n` flag
+- Automatically adds timestamp to your custom name
+- Format: `{custom_name}_{timestamp}.log`
+- Example: `--name scheduler_test` creates `scheduler_test_2023-05-15_14-30-25.log`
+
+### Option 2: Full Custom Filename (--logfile with logit.py)
+
+- Uses the `logit.py` module with `--logfile` flag
+- Gives you complete control over the filename
+- No automatic timestamp added
+- Example: `--logfile my_log.log` creates exactly `my_log.log`
+
+## Examples with Custom Names
+
+```bash
+# Simple custom name (timestamp added automatically)
+python -m src.terminal_logger.logger --name price_check "python -m src.polymarket.order_book.get_prices"
+# Creates: price_check_2023-05-15_14-30-25.log
+
+# Short form
+python -m src.terminal_logger.logger -n scheduler_run "python -m src.scheduler.scheduler --dry-run"
+# Creates: scheduler_run_2023-05-15_14-30-25.log
+
+# Full custom filename (exact control)
+python -m src.terminal_logger.logit --logfile scheduler_test_today.log python -m src.scheduler.scheduler --dry-run
+# Creates: scheduler_test_today.log
+```
+
 ## Log File Location
 
 Log files are stored in the `src/terminal_logger/logs/` directory with timestamped filenames by default. Each log file includes:
@@ -83,8 +123,8 @@ The terminal logger uses a simple but effective approach with the Unix `tee` com
 ## Example
 
 ```bash
-# Run the scheduler with logging
-python -m src.terminal_logger.logger "python -m src.scheduler.scheduler --dry-run"
+# Run the scheduler with logging and custom name
+python -m src.terminal_logger.logger --name scheduler_test "python -m src.scheduler.scheduler --dry-run"
 ```
 
-Output will be identical to running the command directly, but will also be saved to a log file.
+Output will be identical to running the command directly, but will also be saved to a log file with your custom name plus timestamp.

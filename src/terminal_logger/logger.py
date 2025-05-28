@@ -4,16 +4,21 @@ import sys
 import datetime
 import subprocess
 import tempfile
+import argparse
 
 # Create logs directory if it doesn't exist
 logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
 
-def get_log_filename():
+def get_log_filename(custom_name=None):
     """Generate a timestamped log filename"""
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return "terminal_log_{0}.log".format(timestamp)
+    if custom_name:
+        # Add timestamp to custom name
+        return "{0}_{1}.log".format(custom_name, timestamp)
+    else:
+        return "terminal_log_{0}.log".format(timestamp)
 
 def log_terminal_output(command, log_filename=None):
     """
@@ -70,10 +75,27 @@ def run_with_logging(command, log_filename=None):
     return log_terminal_output(command, log_filename)
 
 if __name__ == "__main__":
-    # If script is run directly, use the first argument as the command to execute
-    if len(sys.argv) > 1:
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Run a command and log its output")
+    parser.add_argument('--name', '-n', help='Custom name for the log file (timestamp will be added automatically)')
+    parser.add_argument('command', nargs='*', help='Command to execute and log')
+    
+    # Handle both new argument format and old format for backward compatibility
+    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+        # Old format: python -m src.terminal_logger.logger "command here"
         command = " ".join(sys.argv[1:])
         log_terminal_output(command)
     else:
-        print("Usage: python -m src.terminal_logger.logger 'your command here'")
-        sys.exit(1) 
+        # New format with arguments
+        args = parser.parse_args()
+        
+        if not args.command:
+            print("Usage: python -m src.terminal_logger.logger [--name custom_name] 'your command here'")
+            print("Examples:")
+            print("  python -m src.terminal_logger.logger 'python -m src.scheduler.scheduler --dry-run'")
+            print("  python -m src.terminal_logger.logger --name scheduler_test 'python -m src.scheduler.scheduler --dry-run'")
+            sys.exit(1)
+        
+        command = " ".join(args.command)
+        log_filename = get_log_filename(args.name)
+        log_terminal_output(command, log_filename) 
