@@ -105,6 +105,26 @@ python -m src.polymarket.main --generate-plot
 
 # Scan for markets with rewards
 python -m src.polymarket.market_scanner --rewarded
+
+# Get prices for specific tokens using order book
+python -m src.polymarket.order_book.get_prices
+
+# Get prices for all active markets (shows token ID, question, BUY/SELL prices)
+python -m src.polymarket.order_book.get_prices
+
+# Get price for a specific market by token ID
+python -m src.polymarket.order_book.get_price 47979392807610373586249777498703710597487450905720498331079563053270702791739
+
+# Use in code:
+from src.polymarket.order_book import get_prices, get_price
+
+# Get all markets with prices and questions
+all_markets = get_prices()
+# Returns: {"token_id": {"question": "Market question", "market_id": "100–124  May 23–30?", "BUY": 0.123, "SELL": 0.456}}
+
+# Get specific market by token ID
+market_data = get_price("47979392807610373586249777498703710597487450905720498331079563053270702791739")
+# Returns: {"question": "Will Elon tweet 100–124 times May 23–30?", "market_id": "100–124  May 23–30?", "BUY": 0.093, "SELL": 0.105}
 ```
 
 #### `/src/polymarket_predictor/` - Prediction Integration

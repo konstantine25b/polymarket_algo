@@ -37,6 +37,73 @@ python -m src.polymarket.order_book.visualize_order_book
 python -m src.polymarket.order_book.visualize_order_book --file data/elonmusk_orderbook_2023-05-15.json
 ```
 
+### Get Market Prices
+
+```bash
+# Get prices for all active markets (shows token ID, question, BUY/SELL prices)
+python -m src.polymarket.order_book.get_prices
+
+# Get price for a specific market by token ID
+python -m src.polymarket.order_book.get_price 47979392807610373586249777498703710597487450905720498331079563053270702791739
+```
+
+**Programmatic Usage:**
+
+```python
+from src.polymarket.order_book import get_prices, get_price
+
+# Get all markets with prices and questions
+all_markets = get_prices()
+print(all_markets)
+# Returns: {
+#   "47979392807610373586249777498703710597487450905720498331079563053270702791739": {
+#     "question": "Will Elon tweet 100–124 times May 23–30?",
+#     "market_id": "100–124  May 23–30?",
+#     "BUY": 0.093,
+#     "SELL": 0.105
+#   },
+#   "46013376799067974080084443786516246478646378876845979385084058248738915704692": {
+#     "question": "Will Elon tweet 125–149 times May 23–30?",
+#     "market_id": "125–149  May 23–30?",
+#     "BUY": 0.570,
+#     "SELL": 0.580
+#   }
+# }
+
+# Get specific market by token ID
+market_data = get_price("47979392807610373586249777498703710597487450905720498331079563053270702791739")
+print(market_data)
+# Returns: {
+#   "question": "Will Elon tweet 100–124 times May 23–30?",
+#   "market_id": "100–124  May 23–30?",
+#   "BUY": 0.093,
+#   "SELL": 0.105
+# }
+```
+
+**Example Output:**
+
+When you run `python -m src.polymarket.order_book.get_prices`, you'll see output like:
+
+```
+=== Polymarket Price Fetching ===
+
+Fetching all market prices...
+✅ Found 9 active markets:
+
+47979392807610373586249777498703710597487450905720498331079563053270702791739 - Will Elon tweet 100–124 times May 23–30?
+     Market ID: 100–124  May 23–30?
+     BUY: $0.093, SELL: $0.105
+
+46013376799067974080084443786516246478646378876845979385084058248738915704692 - Will Elon tweet 125–149 times May 23–30?
+     Market ID: 125–149  May 23–30?
+     BUY: $0.570, SELL: $0.590
+
+15699599713652456808085045065553399395902475818106268935134678445084766818973 - Will Elon tweet 150–174 times May 23–30?
+     Market ID: 150–174  May 23–30?
+     BUY: $0.270, SELL: $0.290
+```
+
 ### View Current Market Status
 
 ```bash

@@ -7,5 +7,6 @@ Polymarket order book data, with a focus on Elon Musk tweet markets.
 """
 
 from datetime import datetime
+from .get_prices import get_prices, get_price
 
 __version__ = "0.1.0" 

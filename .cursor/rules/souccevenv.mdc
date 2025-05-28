@@ -4,3 +4,4 @@ globs:
 alwaysApply: true
 ---
 Use source venv/bin/activate always when running code in ur terminal
+Do not crerate example.py or something like that if i do not say so. when testing command test it directly in command.
