@@ -43,21 +43,36 @@ POLYMARKET_END_TIME = "2025-06-06 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket
+# TWEET_COUNT_FRAMES = [
+#     {"name": "less than 100", "min": 0, "max": 99},
+#     {"name": "100–124", "min": 100, "max": 124},
+#     {"name": "125–149", "min": 125, "max": 149},
+#     {"name": "150–174", "min": 150, "max": 174},
+#     {"name": "175–199", "min": 175, "max": 199},
+#     {"name": "200–224", "min": 200, "max": 224},
+#     {"name": "225–249", "min": 225, "max": 249},
+#     {"name": "250–274", "min": 250, "max": 274},
+#     {"name": "275–299", "min": 275, "max": 299},
+#     {"name": "300–324", "min": 300, "max": 324},
+#     {"name": "325–349", "min": 325, "max": 349},
+#     {"name": "350–374", "min": 350, "max": 374},
+#     {"name": "375–399", "min": 375, "max": 399},
+#     {"name": "400 or more", "min": 400, "max": float('inf')}
+# ]
+
 TWEET_COUNT_FRAMES = [
-    {"name": "less than 100", "min": 0, "max": 99},
-    {"name": "100–124", "min": 100, "max": 124},
-    {"name": "125–149", "min": 125, "max": 149},
-    {"name": "150–174", "min": 150, "max": 174},
-    {"name": "175–199", "min": 175, "max": 199},
-    {"name": "200–224", "min": 200, "max": 224},
-    {"name": "225–249", "min": 225, "max": 249},
-    {"name": "250–274", "min": 250, "max": 274},
-    {"name": "275–299", "min": 275, "max": 299},
-    {"name": "300–324", "min": 300, "max": 324},
-    {"name": "325–349", "min": 325, "max": 349},
-    {"name": "350–374", "min": 350, "max": 374},
-    {"name": "375–399", "min": 375, "max": 399},
-    {"name": "400 or more", "min": 400, "max": float('inf')}
+    {"name": "<80", "min": 0, "max": 79},
+    {"name": "80–94", "min": 80, "max": 94},
+    {"name": "95–109", "min": 95, "max": 109},
+    {"name": "110–124", "min": 110, "max": 124},
+    {"name": "125–139", "min": 125, "max": 139},
+    {"name": "140–154", "min": 140, "max": 154},
+    {"name": "155–169", "min": 155, "max": 169},
+    {"name": "170–184", "min": 170, "max": 184},
+    {"name": "185–199", "min": 185, "max": 199},
+    {"name": "200–214", "min": 200, "max": 214},
+    {"name": "215–229", "min": 215, "max": 229},
+    {"name": "230 or more", "min": 230, "max": float('inf')}
 ]
 
 # Apify Constants
