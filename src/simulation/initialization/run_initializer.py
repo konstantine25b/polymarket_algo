@@ -40,7 +40,7 @@ class RunInitializer:
         
         Args:
             market_name: Name of the whole market for this simulation
-            initial_balance: Starting balance for the simulation
+            initial_balance: Starting balance for the simulation (can be 0)
             run_name: Optional custom name for the run. If None, generates timestamp-based name
             
         Returns:
@@ -125,13 +125,26 @@ class RunInitializer:
             market_name: Human-readable name of the market
             description: Description of the market
             category: Category of the market (e.g., "prediction", "sports")
-            initial_price: Initial price of the share
-            bid_price: Current bid price (price to sell at)
-            ask_price: Current ask price (price to buy at)
+            initial_price: Initial price of the share (must be >= 0)
+            bid_price: Current bid price (price to sell at, must be >= 0)
+            ask_price: Current ask price (price to buy at, must be >= 0)
             
         Returns:
             bool: True if market was created successfully
         """
+        # Validate that prices are not negative (0 is allowed)
+        if initial_price < 0:
+            print(f"❌ Initial price cannot be negative. Got: {initial_price}")
+            return False
+        
+        if bid_price < 0:
+            print(f"❌ Bid price cannot be negative. Got: {bid_price}")
+            return False
+        
+        if ask_price < 0:
+            print(f"❌ Ask price cannot be negative. Got: {ask_price}")
+            return False
+        
         json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
         
         if not json_file_path.exists():
@@ -199,7 +212,7 @@ class RunInitializer:
         Args:
             run_name: Name of the run to update
             market_id: Unique identifier for the market (must exist)
-            num_shares: Number of shares purchased (can be fractional)
+            num_shares: Number of shares purchased (can be fractional, must be positive)
             allow_negative_balance: Whether to allow transactions that result in negative balance
             
         Returns:
@@ -257,9 +270,23 @@ class RunInitializer:
                 existing_share_idx = idx
                 break
         
+        # Create buy transaction record for position history
+        buy_transaction = {
+            "timestamp": datetime.now().isoformat(),
+            "type": "BUY",
+            "num_shares": num_shares,
+            "price_per_share": purchase_price,
+            "total_amount": total_cost
+        }
+        
         if existing_position_idx is not None:
             # Update existing position
             existing_position = run_data["positions"][existing_position_idx]
+            
+            # Ensure transaction_history exists for backward compatibility
+            if "transaction_history" not in existing_position:
+                existing_position["transaction_history"] = []
+            
             old_shares = existing_position["num_shares"]
             old_total_invested = existing_position["total_invested"]
             
@@ -274,6 +301,9 @@ class RunInitializer:
             current_market_value = new_total_shares * market["current_price"]
             win_loss_percentage = ((current_market_value - new_total_invested) / new_total_invested) * 100 if new_total_invested > 0 else 0
             
+            # Add transaction to position history
+            existing_position["transaction_history"].append(buy_transaction)
+            
             # Update position
             run_data["positions"][existing_position_idx].update({
                 "num_shares": new_total_shares,
@@ -281,7 +311,8 @@ class RunInitializer:
                 "current_total_price": current_market_value,
                 "current_value_if_sold": current_value_if_sold,
                 "total_invested": new_total_invested,
-                "win_loss_percentage": win_loss_percentage
+                "win_loss_percentage": win_loss_percentage,
+                "position_status": "ACTIVE"  # Ensure status is active
                 # Note: initial_price_per_share and initial_total_price stay the same
             })
             
@@ -325,7 +356,9 @@ class RunInitializer:
                 "initial_price_per_share": purchase_price,  # This should never change
                 "initial_total_price": total_cost,  # This should never change
                 "total_invested": total_cost,
-                "win_loss_percentage": win_loss_percentage
+                "win_loss_percentage": win_loss_percentage,
+                "transaction_history": [buy_transaction],  # Track all buy/sell transactions
+                "position_status": "ACTIVE"  # Ensure status is active
             }
             run_data["positions"].append(position_entry)
             
@@ -393,7 +426,7 @@ class RunInitializer:
         Args:
             run_name: Name of the run to update
             market_id: Unique identifier for the market
-            num_shares: Number of shares to sell (can be fractional)
+            num_shares: Number of shares to sell (can be fractional, must be positive)
             
         Returns:
             bool: True if position was sold successfully
@@ -448,6 +481,10 @@ class RunInitializer:
         existing_position = run_data["positions"][existing_position_idx]
         current_shares = existing_position["num_shares"]
         
+        # Ensure transaction_history exists for backward compatibility
+        if "transaction_history" not in existing_position:
+            existing_position["transaction_history"] = []
+        
         if num_shares > current_shares:
             print(f"❌ Cannot sell {num_shares} shares. Only {current_shares} shares available.")
             return False
@@ -460,14 +497,49 @@ class RunInitializer:
         cost_basis_per_share = total_invested / current_shares
         cost_basis_sold = num_shares * cost_basis_per_share
         
+        # Create sell transaction record for position history
+        sell_transaction = {
+            "timestamp": datetime.now().isoformat(),
+            "type": "SELL",
+            "num_shares": num_shares,
+            "price_per_share": sell_price_per_share,
+            "total_amount": sale_proceeds,
+            "cost_basis": cost_basis_sold,
+            "profit_loss": sale_proceeds - cost_basis_sold
+        }
+        
         if num_shares == current_shares:
-            # Selling entire position - remove it
-            run_data["positions"].pop(existing_position_idx)
+            # Selling entire position - add final sell transaction but keep position record
+            existing_position["transaction_history"].append(sell_transaction)
+            
+            # Calculate total P&L for the closed position
+            total_pnl = self._calculate_position_total_pnl(existing_position["transaction_history"])
+            
+            # Update position to show 0 shares but keep historical data
+            existing_position.update({
+                "num_shares": 0.0,
+                "current_price_per_share": market["current_price"],
+                "current_total_price": 0.0,
+                "current_value_if_sold": 0.0,
+                "total_invested": 0.0,  # Reset since position is closed
+                "win_loss_percentage": 0.0,  # Position is closed
+                "position_status": "CLOSED",  # Mark as closed
+                "total_pnl": total_pnl["net_pnl"],  # Store total P&L
+                "total_pnl_percentage": total_pnl["net_pnl_percentage"]  # Store total P&L %
+            })
+            
+            # Remove shares entry completely when selling entire position
             if existing_share_idx is not None:
                 run_data["shares"].pop(existing_share_idx)
-            print(f"📉 Sold entire position for market {market_id}")
+            
+            print(f"📉 Sold entire position for market {market_id} (position kept for history)")
+            print(f"   🏁 Position CLOSED - Total P&L: ${total_pnl['net_pnl']:,.2f} ({total_pnl['net_pnl_percentage']:+.2f}%)")
+            print(f"   📊 Total bought: {total_pnl['total_bought']} shares for ${total_pnl['total_cost']:,.2f}")
+            print(f"   📊 Total sold: {total_pnl['total_sold']} shares for ${total_pnl['total_proceeds']:,.2f}")
         else:
-            # Partial sale - update position
+            # Partial sale - add transaction and update position
+            existing_position["transaction_history"].append(sell_transaction)
+            
             remaining_shares = current_shares - num_shares
             remaining_total_invested = total_invested - cost_basis_sold
             
@@ -482,7 +554,8 @@ class RunInitializer:
                 "current_total_price": current_market_value,
                 "current_value_if_sold": current_value_if_sold,
                 "total_invested": remaining_total_invested,
-                "win_loss_percentage": win_loss_percentage
+                "win_loss_percentage": win_loss_percentage,
+                "position_status": "ACTIVE"  # Ensure status is active
                 # initial_price_per_share and initial_total_price remain unchanged
             })
             
@@ -555,6 +628,7 @@ class RunInitializer:
             run_name: Name of the run to update
             price_updates: Dict mapping market_id to price dict with keys:
                           {"price": float, "bid": float, "ask": float}
+                          All price values must be >= 0
             
         Returns:
             bool: True if prices were updated successfully
@@ -564,6 +638,20 @@ class RunInitializer:
         if not json_file_path.exists():
             print(f"❌ Run '{run_name}' not found!")
             return False
+        
+        # Validate all price updates before applying any changes
+        for market_id, price_data in price_updates.items():
+            if "price" in price_data and price_data["price"] < 0:
+                print(f"❌ Price cannot be negative for market '{market_id}'. Got: {price_data['price']}")
+                return False
+            
+            if "bid" in price_data and price_data["bid"] < 0:
+                print(f"❌ Bid price cannot be negative for market '{market_id}'. Got: {price_data['bid']}")
+                return False
+            
+            if "ask" in price_data and price_data["ask"] < 0:
+                print(f"❌ Ask price cannot be negative for market '{market_id}'. Got: {price_data['ask']}")
+                return False
         
         # Load existing data
         with open(json_file_path, 'r', encoding='utf-8') as f:
@@ -828,4 +916,38 @@ class RunInitializer:
             return None
         
         with open(json_file_path, 'r', encoding='utf-8') as f:
-            return json.load(f) 
+            return json.load(f)
+    
+    def _calculate_position_total_pnl(self, transaction_history: List[Dict]) -> Dict[str, float]:
+        """
+        Calculate total profit/loss for a position based on its transaction history.
+        
+        Args:
+            transaction_history: List of buy/sell transactions
+            
+        Returns:
+            Dict with total_bought, total_sold, total_cost, total_proceeds, net_pnl
+        """
+        total_bought = 0.0
+        total_sold = 0.0
+        total_cost = 0.0
+        total_proceeds = 0.0
+        
+        for transaction in transaction_history:
+            if transaction["type"] == "BUY":
+                total_bought += transaction["num_shares"]
+                total_cost += transaction["total_amount"]
+            elif transaction["type"] == "SELL":
+                total_sold += transaction["num_shares"]
+                total_proceeds += transaction["total_amount"]
+        
+        net_pnl = total_proceeds - total_cost
+        
+        return {
+            "total_bought": total_bought,
+            "total_sold": total_sold,
+            "total_cost": total_cost,
+            "total_proceeds": total_proceeds,
+            "net_pnl": net_pnl,
+            "net_pnl_percentage": (net_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        } 

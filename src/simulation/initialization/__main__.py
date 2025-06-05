@@ -272,7 +272,7 @@ Examples:
                 
         elif args.create_market:
             # Validate required arguments
-            if not args.run or not args.market_id or not args.market_name or not args.category or not args.initial_price or not args.bid_price or not args.ask_price:
+            if not args.run or not args.market_id or not args.market_name or not args.category or args.initial_price is None or args.bid_price is None or args.ask_price is None:
                 parser.error("--create-market requires --run, --market-id, --market-name, --category, --initial-price, --bid-price, and --ask-price")
             
             description = args.description or f"Market for {args.market_name}"

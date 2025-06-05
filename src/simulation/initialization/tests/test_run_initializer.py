@@ -414,7 +414,7 @@ class TestRunInitializer(unittest.TestCase):
     
     def test_sell_entire_position(self):
         """Test selling entire position."""
-        # Setup with position
+        # Setup
         self.initializer.create_new_run(
             market_name=self.test_market_name,
             initial_balance=self.initial_balance,
@@ -447,9 +447,14 @@ class TestRunInitializer(unittest.TestCase):
         
         self.assertTrue(success)
         
-        # Check position was removed
+        # Check position was kept but marked as CLOSED
         run_data = self.initializer.get_run_info(self.test_run_name)
-        self.assertEqual(len(run_data['positions']), 0)
+        self.assertEqual(len(run_data['positions']), 1)  # Position kept for history
+        position = run_data['positions'][0]
+        self.assertEqual(position['position_status'], 'CLOSED')
+        self.assertEqual(position['num_shares'], 0.0)
+        
+        # Check shares tracking is cleared
         self.assertEqual(len(run_data['shares']), 0)
         
         # Check final balance
@@ -992,7 +997,21 @@ class TestIntegrationScenarios(unittest.TestCase):
         run_data = self.initializer.get_run_info(run_name)
         btc_loss = 7.0 - 41.0  # -34.0 loss
         self.assertAlmostEqual(run_data['current_balance'], 4932.0 + 7.0, places=7)  # Got $7 back
-        self.assertEqual(len(run_data['positions']), 1)  # Only tech recession position remains
+        
+        # Should have 2 positions: 1 active (tech_recession) and 1 closed (btc_crash)
+        self.assertEqual(len(run_data['positions']), 2)
+        
+        # Check that btc_crash position is closed
+        btc_position = next((p for p in run_data['positions'] if p['market_id'] == 'btc_crash'), None)
+        self.assertIsNotNone(btc_position)
+        self.assertEqual(btc_position['position_status'], 'CLOSED')
+        self.assertEqual(btc_position['num_shares'], 0.0)
+        
+        # Check that tech_recession position is still active
+        tech_position = next((p for p in run_data['positions'] if p['market_id'] == 'tech_recession'), None)
+        self.assertIsNotNone(tech_position)
+        self.assertEqual(tech_position['position_status'], 'ACTIVE')
+        self.assertGreater(tech_position['num_shares'], 0.0)
         
         print(f"Bear Market Results:")
         print(f"  Initial Investment: $68.00")
@@ -1311,7 +1330,12 @@ class TestIntegrationScenarios(unittest.TestCase):
         
         # Loss should be contained to manageable amount
         self.assertLess(loss, 1200.0)  # Less than 6% of total portfolio
-        self.assertEqual(len(run_data['positions']), 0)  # Position closed
+        self.assertEqual(len(run_data['positions']), 1)  # Position kept as CLOSED for history
+        
+        # Check that the position is marked as closed
+        position = run_data['positions'][0]
+        self.assertEqual(position['position_status'], 'CLOSED')
+        self.assertEqual(position['num_shares'], 0.0)
         
         expected_cash = 20000.0 - initial_cost + sale_proceeds
         self.assertAlmostEqual(run_data['current_balance'], expected_cash, places=2)
@@ -1354,20 +1378,34 @@ class TestIntegrationScenarios(unittest.TestCase):
         # Final risk management check
         final_data = self.initializer.get_run_info(run_name)
         
-        # Should have one remaining position (half of safe bet)
-        self.assertEqual(len(final_data['positions']), 1)
+        # Should have two positions: one closed (meme_stock) and one active (safe_bet)
+        self.assertEqual(len(final_data['positions']), 2)
+        
+        # Check that we have one active and one closed position
+        active_positions = [p for p in final_data['positions'] if p['position_status'] == 'ACTIVE']
+        closed_positions = [p for p in final_data['positions'] if p['position_status'] == 'CLOSED']
+        
+        self.assertEqual(len(active_positions), 1)  # The remaining half of safe_bet
+        self.assertEqual(len(closed_positions), 1)  # The completely sold meme_stock
+        
+        # Verify the active position is safe_bet with remaining shares
+        active_position = active_positions[0]
+        self.assertEqual(active_position['market_id'], 'safe_bet')
+        self.assertGreater(active_position['num_shares'], 0)
+        
+        # Verify the closed position is meme_stock with 0 shares
+        closed_position = closed_positions[0]
+        self.assertEqual(closed_position['market_id'], 'meme_stock')
+        self.assertEqual(closed_position['num_shares'], 0.0)
         
         # Total transactions: 1 risky buy + 1 stop loss + 1 safe buy + 1 partial sale = 4
         self.assertEqual(len(final_data['transactions']), 4)
-        
-        # Portfolio should be close to break-even or slightly positive
-        total_return = final_data['total_balance'] - 20000.0
         
         print(f"Risk Management Results:")
         print(f"  Initial Portfolio: $20,000.00")
         print(f"  Stop Loss Amount: ${loss:.2f}")
         print(f"  Final Portfolio: ${final_data['total_balance']:,.2f}")
-        print(f"  Net Return: ${total_return:+.2f}")
+        print(f"  Net Return: ${final_data['total_balance'] - 20000.0:+.2f}")
         print(f"  Max Risk Per Trade: Limited to 5-15% of portfolio")
         print(f"  Risk Management: Stop loss executed automatically")
 
@@ -1841,8 +1879,14 @@ class TestIntegrationScenarios(unittest.TestCase):
         # Verify position was completely removed
         run_data = self.initializer.get_run_info(run_name)
         ai_position_exists = any(pos['market_id'] == 'technology_ai' for pos in run_data['positions'])
-        self.assertFalse(ai_position_exists)
-        print(f"✅ Complete position sale: technology_ai position completely removed")
+        self.assertTrue(ai_position_exists)  # Position should still exist but be CLOSED
+        
+        # Check that the AI position is marked as closed
+        ai_position = next((pos for pos in run_data['positions'] if pos['market_id'] == 'technology_ai'), None)
+        self.assertIsNotNone(ai_position)
+        self.assertEqual(ai_position['position_status'], 'CLOSED')
+        self.assertEqual(ai_position['num_shares'], 0.0)
+        print(f"✅ Complete position sale: technology_ai position kept as CLOSED for history")
         
         # Test selling error cases
         print("\n--- Testing Position Selling Error Cases ---")
