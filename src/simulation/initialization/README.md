@@ -1,17 +1,257 @@
 # Polymarket Simulation Initialization
 
-This module provides tools for initializing and managing Polymarket trading simulations. It creates structured simulation runs with comprehensive tracking of balances, positions, transactions, and market data with proper bid/ask pricing.
+This package provides comprehensive tools for initializing and managing Polymarket trading simulation runs. It creates structured JSON files containing all necessary simulation data including balances, positions, transactions, and market information.
 
 ## Features
 
-- ✅ **Create simulation runs** with initial market and balance setup
-- ✅ **Market management** - create markets with bid/ask pricing and price history
-- ✅ **Position management** - buy at ask price, sell at bid price
-- ✅ **Balance management** - add/remove funds with transaction tracking
-- ✅ **Price updates** - update market prices (price/bid/ask) with historical tracking
-- ✅ **Portfolio tracking** - real-time balance and position monitoring with proper P&L
-- ✅ **Transaction history** - complete audit trail of all activities
-- ✅ **Command-line interface** - easy-to-use CLI for all operations
+- **Run Creation**: Create new simulation runs with unique IDs and timestamps
+- **Real Market Integration**: Initialize markets using live Polymarket data
+- **Position Management**: Add, update, and sell positions with automatic duplicate handling
+- **Balance Management**: Add/remove balance with transaction logging and negative balance protection
+- **Price Updates**: Update market prices and calculate profit/loss percentages
+- **Transaction History**: Complete audit trail of all operations
+- **Command-Line Interface**: Full CLI for all operations
+
+## Quick Start
+
+### 1. Create a New Run
+
+```bash
+python -m src.simulation.initialization --create --run "run name" --market-name "Elon Tweet Prediction" --balance 1000
+```
+
+### 2. Initialize Markets from Real Polymarket Data
+
+```bash
+python -m src.simulation.initialization --init-markets-from-polymarket my_run
+```
+
+This will fetch all currently active markets from Polymarket and add them to your simulation with real prices.
+
+### 3. Add Positions
+
+```bash
+python -m src.simulation.initialization --add-position my_run market_id 100
+```
+
+### 4. Sell Positions
+
+```bash
+python -m src.simulation.initialization --sell-position my_run market_id 50
+```
+
+## Installation Requirements
+
+For real Polymarket data integration, ensure you have:
+
+- The `py_clob_client` library installed
+- The `src.polymarket.order_book.get_prices` module available
+- Network access to fetch market data
+
+## Command Reference
+
+### Core Commands
+
+#### Create New Run
+
+```bash
+python -m src.simulation.initialization --create --market-name "Market Name" --balance 1000 [--run-name custom_name]
+```
+
+#### Initialize Markets from Polymarket
+
+```bash
+python -m src.simulation.initialization --init-markets-from-polymarket RUN_NAME [--category prediction]
+```
+
+- Fetches all active markets from Polymarket
+- Creates markets with current bid/ask prices
+- Calculates mid-price for market value
+- Skips markets with invalid or missing price data
+- Provides detailed progress feedback
+
+#### List All Runs
+
+```bash
+python -m src.simulation.initialization --list
+```
+
+#### Get Run Information
+
+```bash
+python -m src.simulation.initialization --info RUN_NAME
+```
+
+### Position Management
+
+#### Add Position
+
+```bash
+python -m src.simulation.initialization --add-position RUN_NAME MARKET_ID NUM_SHARES [--allow-negative]
+```
+
+- Purchases at current ask price
+- Automatically merges with existing positions for same market
+- Prevents transactions exceeding available balance (unless `--allow-negative`)
+
+#### Sell Position
+
+```bash
+python -m src.simulation.initialization --sell-position RUN_NAME MARKET_ID NUM_SHARES
+```
+
+- Sells at current bid price
+- Calculates profit/loss based on cost basis
+- Supports partial sales
+- Maintains transaction history
+
+### Price Management
+
+#### Update Market Prices
+
+```bash
+python -m src.simulation.initialization --update-prices RUN_NAME MARKET_ID PRICE BID ASK
+```
+
+- Updates market prices and recalculates position values
+- Adds price history entries
+- Updates profit/loss percentages for all positions
+
+### Balance Management
+
+#### Add Balance
+
+```bash
+python -m src.simulation.initialization --add-balance RUN_NAME AMOUNT [--description "reason"]
+```
+
+#### Remove Balance
+
+```bash
+python -m src.simulation.initialization --remove-balance RUN_NAME AMOUNT [--description "reason"] [--allow-negative]
+```
+
+## Data Structure
+
+Each simulation run creates a `simulation_data.json` file with the following structure:
+
+```json
+{
+  "whole_market_name": "Market category name",
+  "run_id": "unique-uuid",
+  "run_name": "run_name",
+  "start_time": "2024-01-01T12:00:00.000000",
+  "current_balance": 1000.0,
+  "initial_balance": 1000.0,
+  "total_balance": 1000.0,
+  "balance_of_shares": 0.0,
+  "balance_invested": 0.0,
+  "shares": [],
+  "transactions": [],
+  "total_balances": [],
+  "positions": [],
+  "markets": []
+}
+```
+
+### Markets Structure
+
+When using `--init-markets-from-polymarket`, markets are created with:
+
+```json
+{
+  "market_id": "polymarket_token_id",
+  "market_name": "Market question from Polymarket",
+  "description": "Polymarket prediction: [question]",
+  "category": "prediction",
+  "initial_price": 0.5,
+  "current_price": 0.5,
+  "current_bid": 0.49,
+  "current_ask": 0.51,
+  "price_history": [...]
+}
+```
+
+### Position Tracking
+
+Positions include comprehensive tracking:
+
+- **Transaction History**: All buy/sell transactions with timestamps
+- **Profit/Loss Calculation**: Real-time P&L based on current market prices
+- **Cost Basis Tracking**: Accurate cost basis for tax/accounting purposes
+- **Status Management**: ACTIVE/CLOSED position status
+
+### Balance Protection
+
+- **Negative Balance Prevention**: Configurable protection against overdrafts
+- **Transaction Validation**: All transactions validated before execution
+- **Audit Trail**: Complete history of all balance changes
+
+## Error Handling
+
+The system includes robust error handling:
+
+- **Price Validation**: Prevents negative prices
+- **Market Validation**: Ensures markets exist before position creation
+- **Balance Validation**: Prevents overdrafts unless explicitly allowed
+- **Data Integrity**: Validates all inputs and maintains consistent state
+
+## Advanced Features
+
+### Real-time Market Integration
+
+- Automatic fetching of current Polymarket data
+- Live price updates from order book
+- Seamless integration with existing simulation framework
+
+### Duplicate Position Handling
+
+- Automatic merging of positions for same market
+- Weighted average cost basis calculation
+- Consolidated transaction history
+
+### Comprehensive Reporting
+
+- Detailed transaction logs
+- Time-series balance tracking
+- Position-level profit/loss analysis
+- Market performance metrics
+
+## Examples
+
+### Complete Workflow
+
+```bash
+# 1. Create run
+python -m src.simulation.initialization --create --market-name "Crypto Predictions" --balance 5000
+
+# 2. Initialize with real markets
+python -m src.simulation.initialization --init-markets-from-polymarket crypto_predictions
+
+# 3. Add positions
+python -m src.simulation.initialization --add-position crypto_predictions market123 100
+
+# 4. Check status
+python -m src.simulation.initialization --info crypto_predictions
+
+# 5. Update prices (if needed)
+python -m src.simulation.initialization --update-prices crypto_predictions market123 0.75 0.74 0.76
+
+# 6. Sell position
+python -m src.simulation.initialization --sell-position crypto_predictions market123 50
+```
+
+### Working with Real Data
+
+The `--init-markets-from-polymarket` command automatically:
+
+1. Fetches all active markets from Polymarket
+2. Validates price data quality
+3. Creates markets with current bid/ask spreads
+4. Provides detailed feedback on success/failures
+5. Skips invalid markets with clear error messages
+
+This integration allows you to start trading simulations immediately with real market conditions and current pricing data.
 
 ## Important Workflow
 

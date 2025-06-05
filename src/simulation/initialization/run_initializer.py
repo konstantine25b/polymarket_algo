@@ -5,6 +5,14 @@ from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 
+# Import Polymarket price fetching
+try:
+    from src.polymarket.order_book.get_prices import get_prices
+    POLYMARKET_AVAILABLE = True
+except ImportError:
+    POLYMARKET_AVAILABLE = False
+    print("⚠️  Polymarket order book module not available. Real market initialization will be disabled.")
+
 
 class RunInitializer:
     """
@@ -950,4 +958,130 @@ class RunInitializer:
             "total_proceeds": total_proceeds,
             "net_pnl": net_pnl,
             "net_pnl_percentage": (net_pnl / total_cost * 100) if total_cost > 0 else 0.0
-        } 
+        }
+    
+    def initialize_markets_from_polymarket(
+        self,
+        run_name: str,
+        category: str = "prediction"
+    ) -> bool:
+        """
+        Initialize markets for a simulation run using real Polymarket data.
+        Fetches current market data and creates markets with current prices.
+        
+        Args:
+            run_name: Name of the run to add markets to
+            category: Category to assign to all markets (default: "prediction")
+            
+        Returns:
+            bool: True if markets were initialized successfully
+        """
+        if not POLYMARKET_AVAILABLE:
+            print("❌ Polymarket order book module is not available!")
+            print("   Make sure the polymarket module is properly installed.")
+            return False
+        
+        json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
+        
+        if not json_file_path.exists():
+            print(f"❌ Run '{run_name}' not found!")
+            return False
+        
+        print("🔄 Fetching real Polymarket data...")
+        
+        # Get real market prices from Polymarket
+        market_data = get_prices()
+        
+        if not market_data:
+            print("❌ Failed to fetch Polymarket data!")
+            return False
+        
+        print(f"✅ Found {len(market_data)} active markets from Polymarket")
+        
+        # Load existing run data
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            run_data = json.load(f)
+        
+        created_markets = 0
+        skipped_markets = 0
+        
+        for token_id, data in market_data.items():
+            market_name = data.get('question', 'Unknown Market')
+            market_id_from_data = data.get('market_id', token_id)
+            buy_price = data.get('BUY')
+            sell_price = data.get('SELL')
+            
+            # Skip if prices are not available
+            if buy_price is None or sell_price is None:
+                print(f"⚠️  Skipping {market_name} - missing price data")
+                skipped_markets += 1
+                continue
+            
+            # Convert prices to float and validate
+            try:
+                buy_price = float(buy_price)
+                sell_price = float(sell_price)
+                
+                if buy_price < 0 or sell_price < 0:
+                    print(f"⚠️  Skipping {market_name} - invalid prices (negative)")
+                    skipped_markets += 1
+                    continue
+                    
+            except (ValueError, TypeError):
+                print(f"⚠️  Skipping {market_name} - invalid price format")
+                skipped_markets += 1
+                continue
+            
+            # Use token_id as market_id to ensure uniqueness
+            market_id = token_id
+            
+            # Check if market already exists
+            market_exists = any(market["market_id"] == market_id for market in run_data.get("markets", []))
+            if market_exists:
+                print(f"⚠️  Skipping {market_name} - already exists")
+                skipped_markets += 1
+                continue
+            
+            # Calculate mid price for initial and current price
+            mid_price = (buy_price + sell_price) / 2
+            
+            # Create timestamp
+            timestamp = datetime.now().isoformat()
+            
+            # Create market entry
+            market_entry = {
+                "market_id": market_id,
+                "market_name": market_name,
+                "description": f"Polymarket prediction: {market_name}",
+                "category": category,
+                "initial_price": mid_price,
+                "current_price": mid_price,
+                "current_bid": buy_price,  # BUY price is what we can sell at (bid)
+                "current_ask": sell_price,  # SELL price is what we need to pay to buy (ask)
+                "price_history": [
+                    {
+                        "timestamp": timestamp,
+                        "price": mid_price,
+                        "bid": buy_price,
+                        "ask": sell_price
+                    }
+                ]
+            }
+            
+            run_data["markets"].append(market_entry)
+            created_markets += 1
+            
+            print(f"✅ Added market: {market_name}")
+            print(f"   📊 Mid Price: ${mid_price:.4f}")
+            print(f"   💰 Bid: ${buy_price:.4f} | Ask: ${sell_price:.4f}")
+        
+        # Save updated data
+        with open(json_file_path, 'w', encoding='utf-8') as f:
+            json.dump(run_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n🎉 Market initialization complete!")
+        print(f"   ✅ Created: {created_markets} markets")
+        print(f"   ⚠️  Skipped: {skipped_markets} markets")
+        print(f"   📁 Run: {run_name}")
+        
+        return True 
