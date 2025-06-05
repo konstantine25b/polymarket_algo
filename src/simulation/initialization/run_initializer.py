@@ -893,10 +893,10 @@ class RunInitializer:
     
     def list_runs(self) -> List[str]:
         """
-        List all existing simulation runs.
+        List all available simulation runs.
         
         Returns:
-            List of run names
+            List of run names (directory names)
         """
         if not self.base_runs_dir.exists():
             return []
@@ -907,6 +907,19 @@ class RunInitializer:
                 runs.append(item.name)
         
         return sorted(runs)
+    
+    def run_exists(self, run_name: str) -> bool:
+        """
+        Check if a simulation run exists.
+        
+        Args:
+            run_name: Name of the run to check
+            
+        Returns:
+            bool: True if the run exists and has a valid simulation_data.json file
+        """
+        json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
+        return json_file_path.exists()
     
     def get_run_info(self, run_name: str) -> Optional[Dict[str, Any]]:
         """
