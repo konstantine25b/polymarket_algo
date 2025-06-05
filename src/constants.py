@@ -61,18 +61,16 @@ POLYMARKET_TIMEZONE = ET_TIMEZONE
 # ]
 
 TWEET_COUNT_FRAMES = [
-    {"name": "<80", "min": 0, "max": 79},
-    {"name": "80–94", "min": 80, "max": 94},
-    {"name": "95–109", "min": 95, "max": 109},
-    {"name": "110–124", "min": 110, "max": 124},
-    {"name": "125–139", "min": 125, "max": 139},
-    {"name": "140–154", "min": 140, "max": 154},
-    {"name": "155–169", "min": 155, "max": 169},
-    {"name": "170–184", "min": 170, "max": 184},
-    {"name": "185–199", "min": 185, "max": 199},
-    {"name": "200–214", "min": 200, "max": 214},
-    {"name": "215–229", "min": 215, "max": 229},
-    {"name": "230 or more", "min": 230, "max": float('inf')}
+    {"name": "less than 230", "min": 0, "max": 229},
+    {"name": "230–244", "min": 230, "max": 244},
+    {"name": "245–259", "min": 245, "max": 259},
+    {"name": "260–274", "min": 260, "max": 274},
+    {"name": "275–289", "min": 275, "max": 289},
+    {"name": "290–304", "min": 290, "max": 304},
+    {"name": "305–319", "min": 305, "max": 319},
+    {"name": "320–334", "min": 320, "max": 334},
+    {"name": "335–349", "min": 335, "max": 349},
+    {"name": "350 or more", "min": 350, "max": float('inf')}
 ]
 
 # Apify Constants
