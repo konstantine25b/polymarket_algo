@@ -38,6 +38,9 @@ Examples:
   Initialize markets from Polymarket:
     python -m src.simulation.initialization --init-markets-from-polymarket my_run
 
+  Update markets from Polymarket:
+    python -m src.simulation.initialization --update-markets-from-polymarket my_run
+
   Add position:
     python -m src.simulation.initialization --add-position my_run market123 100
 
@@ -61,6 +64,8 @@ Examples:
     parser.add_argument('--info', metavar='RUN_NAME', help='Get information about a run')
     parser.add_argument('--init-markets-from-polymarket', metavar='RUN_NAME', 
                        help='Initialize markets for a run using real Polymarket data')
+    parser.add_argument('--update-markets-from-polymarket', metavar='RUN_NAME', 
+                       help='Update existing market prices using real Polymarket data')
     
     # Position management
     parser.add_argument('--add-position', nargs=3, metavar=('RUN_NAME', 'MARKET_ID', 'NUM_SHARES'),
@@ -164,6 +169,13 @@ Examples:
         success = initializer.initialize_markets_from_polymarket(
             run_name=args.init_markets_from_polymarket,
             category=args.category
+        )
+        if not success:
+            sys.exit(1)
+    
+    elif args.update_markets_from_polymarket:
+        success = initializer.update_markets_from_polymarket(
+            run_name=args.update_markets_from_polymarket
         )
         if not success:
             sys.exit(1)

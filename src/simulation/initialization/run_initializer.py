@@ -1084,4 +1084,248 @@ class RunInitializer:
         print(f"   ⚠️  Skipped: {skipped_markets} markets")
         print(f"   📁 Run: {run_name}")
         
+        return True
+    
+    def update_markets_from_polymarket(
+        self,
+        run_name: str
+    ) -> bool:
+        """
+        Update existing market prices using real Polymarket data.
+        Markets that no longer exist on Polymarket will be marked as inactive with 0 prices.
+        
+        Args:
+            run_name: Name of the run to update markets for
+            
+        Returns:
+            bool: True if markets were updated successfully
+        """
+        if not POLYMARKET_AVAILABLE:
+            print("❌ Polymarket order book module is not available!")
+            print("   Make sure the polymarket module is properly installed.")
+            return False
+        
+        json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
+        
+        if not json_file_path.exists():
+            print(f"❌ Run '{run_name}' not found!")
+            return False
+        
+        print("🔄 Fetching real Polymarket data to update existing markets...")
+        
+        # Get real market prices from Polymarket
+        market_data = get_prices()
+        
+        if market_data is None:
+            print("❌ Failed to fetch Polymarket data!")
+            return False
+        
+        print(f"✅ Found {len(market_data)} active markets from Polymarket")
+        
+        # Load existing run data
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            run_data = json.load(f)
+        
+        existing_markets = run_data.get("markets", [])
+        if not existing_markets:
+            print("⚠️  No existing markets found in this run to update!")
+            return True
+        
+        updated_markets = 0
+        inactive_markets = 0
+        timestamp = datetime.now().isoformat()
+        
+        for market in existing_markets:
+            market_id = market["market_id"]
+            market_name = market["market_name"]
+            
+            # Check if this market exists in current Polymarket data
+            if market_id in market_data:
+                # Market is still active - update with real prices
+                data = market_data[market_id]
+                buy_price = data.get('BUY')
+                sell_price = data.get('SELL')
+                
+                # Validate prices
+                if buy_price is None or sell_price is None:
+                    print(f"⚠️  Marking {market_name} as inactive - missing price data")
+                    # Mark as inactive
+                    old_price = market["current_price"]
+                    old_bid = market["current_bid"]
+                    old_ask = market["current_ask"]
+                    
+                    market["current_price"] = 0.0
+                    market["current_bid"] = 0.0
+                    market["current_ask"] = 0.0
+                    market["market_status"] = "INACTIVE"
+                    
+                    # Add to price history
+                    market["price_history"].append({
+                        "timestamp": timestamp,
+                        "price": 0.0,
+                        "bid": 0.0,
+                        "ask": 0.0,
+                        "status": "INACTIVE",
+                        "reason": "Missing price data"
+                    })
+                    
+                    print(f"   📊 Marked as INACTIVE: {market_name}")
+                    print(f"   💰 Previous - Price: ${old_price:.4f}, Bid: ${old_bid:.4f}, Ask: ${old_ask:.4f}")
+                    inactive_markets += 1
+                    continue
+                
+                try:
+                    buy_price = float(buy_price)
+                    sell_price = float(sell_price)
+                    
+                    if buy_price < 0 or sell_price < 0:
+                        print(f"⚠️  Marking {market_name} as inactive - invalid prices (negative)")
+                        # Mark as inactive
+                        market["current_price"] = 0.0
+                        market["current_bid"] = 0.0
+                        market["current_ask"] = 0.0
+                        market["market_status"] = "INACTIVE"
+                        
+                        market["price_history"].append({
+                            "timestamp": timestamp,
+                            "price": 0.0,
+                            "bid": 0.0,
+                            "ask": 0.0,
+                            "status": "INACTIVE",
+                            "reason": "Invalid prices (negative)"
+                        })
+                        
+                        inactive_markets += 1
+                        continue
+                        
+                except (ValueError, TypeError):
+                    print(f"⚠️  Marking {market_name} as inactive - invalid price format")
+                    # Mark as inactive
+                    market["current_price"] = 0.0
+                    market["current_bid"] = 0.0
+                    market["current_ask"] = 0.0
+                    market["market_status"] = "INACTIVE"
+                    
+                    market["price_history"].append({
+                        "timestamp": timestamp,
+                        "price": 0.0,
+                        "bid": 0.0,
+                        "ask": 0.0,
+                        "status": "INACTIVE",
+                        "reason": "Invalid price format"
+                    })
+                    
+                    inactive_markets += 1
+                    continue
+                
+                # Update with valid prices
+                old_price = market["current_price"]
+                old_bid = market["current_bid"]
+                old_ask = market["current_ask"]
+                
+                # Calculate mid price
+                mid_price = (buy_price + sell_price) / 2
+                
+                # Update market data
+                market["current_price"] = mid_price
+                market["current_bid"] = buy_price  # BUY price is what we can sell at (bid)
+                market["current_ask"] = sell_price  # SELL price is what we need to pay to buy (ask)
+                market["market_status"] = "ACTIVE"
+                
+                # Add to price history
+                market["price_history"].append({
+                    "timestamp": timestamp,
+                    "price": mid_price,
+                    "bid": buy_price,
+                    "ask": sell_price,
+                    "status": "ACTIVE"
+                })
+                
+                print(f"✅ Updated {market_name}")
+                print(f"   📊 Price: ${old_price:.4f} → ${mid_price:.4f}")
+                print(f"   💰 Bid: ${old_bid:.4f} → ${buy_price:.4f}")
+                print(f"   💰 Ask: ${old_ask:.4f} → ${sell_price:.4f}")
+                
+                updated_markets += 1
+                
+            else:
+                # Market no longer exists on Polymarket - mark as inactive
+                old_price = market["current_price"]
+                old_bid = market["current_bid"]
+                old_ask = market["current_ask"]
+                
+                market["current_price"] = 0.0
+                market["current_bid"] = 0.0
+                market["current_ask"] = 0.0
+                market["market_status"] = "INACTIVE"
+                
+                # Add to price history
+                market["price_history"].append({
+                    "timestamp": timestamp,
+                    "price": 0.0,
+                    "bid": 0.0,
+                    "ask": 0.0,
+                    "status": "INACTIVE",
+                    "reason": "Market no longer available on Polymarket"
+                })
+                
+                print(f"⚠️  Marked as INACTIVE: {market_name} (no longer available on Polymarket)")
+                print(f"   📊 Previous - Price: ${old_price:.4f}, Bid: ${old_bid:.4f}, Ask: ${old_ask:.4f}")
+                inactive_markets += 1
+        
+        # Update all positions based on new market prices
+        total_current_value = 0
+        for position in run_data["positions"]:
+            position_market_id = position["market_id"]
+            
+            # Find the market for this position
+            market = None
+            for m in run_data["markets"]:
+                if m["market_id"] == position_market_id:
+                    market = m
+                    break
+            
+            if market:
+                # Update position with current market data
+                position["current_price_per_share"] = market["current_price"]
+                position["current_total_price"] = position["num_shares"] * market["current_price"]
+                position["current_value_if_sold"] = position["num_shares"] * market["current_bid"]
+                
+                # Recalculate win/loss percentage based on current market price vs total invested
+                total_invested = position["total_invested"]
+                current_market_value = position["current_total_price"]
+                position["win_loss_percentage"] = ((current_market_value - total_invested) / total_invested) * 100 if total_invested > 0 else 0
+                
+                total_current_value += current_market_value
+        
+        # Update total balance with current market values
+        run_data["total_balance"] = run_data["current_balance"] + total_current_value
+        
+        # Update balance_of_shares to current market value and balance_invested to total invested
+        run_data["balance_of_shares"] = total_current_value
+        total_invested_in_shares = sum(pos["total_invested"] for pos in run_data["positions"])
+        run_data["balance_invested"] = total_invested_in_shares
+        
+        # Add balance snapshot
+        balance_snapshot = {
+            "timestamp": timestamp,
+            "total_balance": run_data["total_balance"],
+            "current_balance": run_data["current_balance"],
+            "balance_of_shares": run_data["balance_of_shares"],
+            "balance_invested": run_data["balance_invested"],
+            "total_market_value": total_current_value
+        }
+        run_data["total_balances"].append(balance_snapshot)
+        
+        # Save updated data
+        with open(json_file_path, 'w', encoding='utf-8') as f:
+            json.dump(run_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n🎉 Market update complete!")
+        print(f"   ✅ Updated: {updated_markets} active markets")
+        print(f"   ⚠️  Inactive: {inactive_markets} markets")
+        print(f"   💰 New total balance: ${run_data['total_balance']:,.2f}")
+        print(f"   📈 Total market value: ${total_current_value:,.2f}")
+        print(f"   📁 Run: {run_name}")
+        
         return True 

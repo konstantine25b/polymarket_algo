@@ -70,6 +70,19 @@ python -m src.simulation.initialization --init-markets-from-polymarket RUN_NAME 
 - Skips markets with invalid or missing price data
 - Provides detailed progress feedback
 
+#### Update Markets from Polymarket
+
+```bash
+python -m src.simulation.initialization --update-markets-from-polymarket RUN_NAME
+```
+
+- Updates existing market prices using real Polymarket data
+- Markets still active on Polymarket get updated with current prices
+- Markets no longer available on Polymarket are marked as INACTIVE with 0 prices
+- Maintains complete price history including status changes
+- Updates all position values based on new market prices
+- Provides detailed feedback on active vs inactive markets
+
 #### List All Runs
 
 ```bash
