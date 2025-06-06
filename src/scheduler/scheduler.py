@@ -7,12 +7,16 @@ This module provides functionality to periodically:
 2. Run the Polymarket predictor to update predictions
 3. Run the auto-bidder to place orders based on statistical opportunities
 4. Add the auto-seller to place sell orders based on statistical opportunities
+5. Run simulation mode using the simulation framework
 
 Usage:
     python -m src.scheduler.scheduler [options]
 
 Options:
     --interval MINUTES     Set the interval between runs (default: 20 minutes)
+    --tweet-interval MINUTES Interval between tweet fetching runs in minutes (overrides global interval)
+    --buy-interval MINUTES  Interval between auto-bidder runs in minutes (overrides global interval)
+    --sell-interval MINUTES Interval between auto-seller runs in minutes (overrides global interval)
     --tweets-only          Only run the tweet fetching job
     --predictions-only     Only run the prediction job
     --max-tweets N         Set maximum number of tweets to fetch (default: 40)
@@ -44,6 +48,9 @@ Options:
     --max-count-retries    Maximum number of retries for tweet count retrieval (default: 3)
     --show-positions       Show all current positions when running
     --show-active-positions Show positions for active market when running
+    --simulate RUN_NAME    Run in simulation mode using the specified simulation run
+    --strategy STRATEGY    Strategy to use for simulation (default: strategy_1)
+    --sim-balance FLOAT    Initial balance for new simulation runs (default: 1000.0)
 """
 
 import argparse
@@ -142,6 +149,12 @@ def setup_argparse():
                         help='Show all current positions when running')
     parser.add_argument('--show-active-positions', action='store_true',
                         help='Show positions for active market when running')
+    parser.add_argument('--simulate', type=str, default=None,
+                        help='Run in simulation mode using the specified simulation run')
+    parser.add_argument('--strategy', type=str, default='strategy_1',
+                        help='Strategy to use for simulation (default: strategy_1)')
+    parser.add_argument('--sim-balance', type=float, default=1000.0,
+                        help='Initial balance for new simulation runs (default: 1000.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -396,6 +409,204 @@ def check_wallet_balance():
     except Exception as e:
         logger.error(f"Error checking wallet balance: {e}")
         return {"success": False, "error": str(e), "usdc_balance": 0, "matic_balance": 0}
+
+def initialize_simulation_run(run_name, balance, strategy="strategy_1"):
+    """Initialize a new simulation run if it doesn't exist.
+    
+    Args:
+        run_name: Name of the simulation run
+        balance: Initial balance for the simulation
+        strategy: Strategy to use (default: strategy_1)
+    
+    Returns:
+        bool: Whether initialization was successful
+    """
+    logger.info(f"Initializing simulation run: {run_name} with balance: ${balance}")
+    
+    # Check if run already exists
+    check_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--info", run_name
+    ]
+    
+    try:
+        process = subprocess.run(check_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Check if the output contains "not found" to determine if run exists
+        if "not found" not in process.stdout:
+            logger.info(f"Simulation run '{run_name}' already exists, skipping initialization")
+            return True
+    except Exception as e:
+        logger.debug(f"Error checking existing run (expected if run doesn't exist): {e}")
+    
+    # Create new simulation run
+    create_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--create", 
+        "--market-name", f"Scheduler Simulation - {strategy}",
+        "--balance", str(balance),
+        "--run-name", run_name
+    ]
+    
+    try:
+        logger.info("Creating new simulation run...")
+        process = subprocess.run(create_cmd)
+        if process.returncode != 0:
+            logger.error("Failed to create simulation run")
+            return False
+            
+        logger.info("Simulation run created successfully")
+    except Exception as e:
+        logger.error(f"Error creating simulation run: {e}")
+        return False
+    
+    # Initialize markets from Polymarket
+    init_markets_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--init-markets-from-polymarket", run_name
+    ]
+    
+    try:
+        logger.info("Initializing markets from Polymarket...")
+        process = subprocess.run(init_markets_cmd)
+        if process.returncode != 0:
+            logger.error("Failed to initialize markets")
+            return False
+            
+        logger.info("Markets initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing markets: {e}")
+        return False
+
+def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount=1.0, dry_run=False, 
+                         show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False):
+    """Run the simulation bidder for the specified strategy.
+    
+    Args:
+        run_name: Name of the simulation run
+        strategy: Strategy to use (default: strategy_1)
+        threshold: Minimum opportunity percentage to place bids
+        amount: Amount to bid in USD
+        dry_run: Whether to run in dry run mode
+        show_stats: Whether to show full statistics table
+        weighted_selection: Whether to use weighted selection
+        min_prediction: Minimum prediction percentage required
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the bidding was successful
+    """
+    logger.info(f"Running simulation bidder for run '{run_name}' with strategy '{strategy}'")
+    
+    cmd = [
+        sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
+        "--run", run_name,
+        f"--threshold={threshold}",
+        f"--amount={amount}"
+    ]
+    
+    if dry_run:
+        cmd.append("--dry-run")
+        
+    if not show_stats:
+        cmd.append("--no-stats")
+        
+    if weighted_selection:
+        cmd.append("--weighted-selection")
+        
+    if min_prediction > 0:
+        cmd.append(f"--min-prediction={min_prediction}")
+    
+    try:
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Simulation bidder failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Simulation bidder completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Simulation bidder failed")
+            else:
+                logger.info("Simulation bidder completed successfully")
+    except Exception as e:
+        logger.error(f"Error running simulation bidder: {e}")
+        return False
+    
+    return process.returncode == 0
+
+def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
+                         show_stats=True, debug=False, quiet=False):
+    """Run the simulation seller for the specified strategy.
+    
+    Args:
+        run_name: Name of the simulation run
+        strategy: Strategy to use (default: strategy_1)
+        threshold: Minimum opportunity percentage to sell positions
+        sell_below: Sell positions with prediction below this percentage
+        dry_run: Whether to run in dry run mode
+        show_stats: Whether to show full statistics table
+        debug: Whether to show detailed debugging information
+        quiet: Whether to suppress output
+    
+    Returns:
+        bool: Whether the selling was successful
+    """
+    logger.info(f"Running simulation seller for run '{run_name}' with strategy '{strategy}'")
+    
+    cmd = [
+        sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
+        "--sell", run_name,
+        f"--threshold={threshold}"
+    ]
+    
+    if not dry_run:
+        cmd.append("--auto-sell")
+    else:
+        cmd.append("--dry-run")
+    
+    if sell_below > 0.0:
+        cmd.append(f"--sell-below={sell_below}")
+    
+    if debug:
+        cmd.append("--debug")
+        cmd.append("--verbose")
+    
+    if not show_stats:
+        cmd.append("--no-stats")
+    
+    # Focus on active market only
+    cmd.append("--active-market-only")
+    
+    try:
+        process = subprocess.run(cmd, check=True)
+        logger.info("Simulation seller completed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Simulation seller failed with error code {e.returncode}")
+        return False
+
+def display_simulation_info(run_name):
+    """Display information about the simulation run.
+    
+    Args:
+        run_name: Name of the simulation run
+    """
+    print(f"\n🎯 SIMULATION RUN: {run_name}")
+    print("=" * 60)
+    
+    cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--info", run_name
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        print(f"❌ Could not retrieve information for simulation run: {run_name}")
 
 def display_wallet_balance():
     """Display the wallet balance in a formatted way."""
@@ -938,78 +1149,130 @@ def run_scheduled_jobs(args):
             use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
         )
         
-        # Check wallet balance if needed
-        if prediction_success and not args.no_bidding and not args.skip_balance_check:
-            balance_info = display_wallet_balance()
-            has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+        # Handle simulation mode
+        if args.simulate:
+            # Initialize simulation run if needed
+            if not initialize_simulation_run(args.simulate, args.sim_balance, args.strategy):
+                logger.error("Failed to initialize simulation run")
+                return False
             
-            if not has_sufficient_balance and not args.dry_run and not args.no_buy:
-                logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
-                logger.warning("Skipping auto-bidder due to insufficient USDC balance")
-                print("\n" + "=" * 60)
-                print(f"⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance")
-                print("=" * 60)
-                print(f"💲 Current balance: {balance_info.get('usdc_balance', 0)} USDC")
-                print(f"💲 Minimum required: {args.min_usdc} USDC")
-                print("=" * 60 + "\n")
+            # Display simulation info
+            display_simulation_info(args.simulate)
+            
+            # Run simulation bidder if bidding not disabled
+            if prediction_success and not args.no_bidding:
+                # If --no-buy is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_buy
+                
+                # Log the appropriate mode
+                if args.no_buy and not args.dry_run:
+                    logger.info("Running simulation bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                
+                run_simulation_bidder(
+                    run_name=args.simulate,
+                    strategy=args.strategy,
+                    threshold=args.buy_threshold,
+                    amount=args.amount,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    weighted_selection=args.weighted_selection,
+                    min_prediction=args.min_prediction,
+                    quiet=args.quiet
+                )
+                
+            # Run simulation seller if selling not disabled
+            if prediction_success and not args.no_selling:
+                # If --no-sell is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_sell
+                
+                # Log the appropriate mode
+                if args.no_sell and not args.dry_run:
+                    logger.info("Running simulation seller in no-sell mode (opportunities will be shown but no orders placed)")
+                
+                run_simulation_seller(
+                    run_name=args.simulate,
+                    strategy=args.strategy,
+                    threshold=args.sell_threshold,
+                    sell_below=args.sell_below,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    debug=args.debug_seller,
+                    quiet=args.quiet
+                )
+        else:
+            # Normal mode - real bidding and selling
+            # Check wallet balance if needed
+            if prediction_success and not args.no_bidding and not args.skip_balance_check:
+                balance_info = display_wallet_balance()
+                has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+                
+                if not has_sufficient_balance and not args.dry_run and not args.no_buy:
+                    logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
+                    logger.warning("Skipping auto-bidder due to insufficient USDC balance")
+                    print("\n" + "=" * 60)
+                    print(f"⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance")
+                    print("=" * 60)
+                    print(f"💲 Current balance: {balance_info.get('usdc_balance', 0)} USDC")
+                    print(f"💲 Minimum required: {args.min_usdc} USDC")
+                    print("=" * 60 + "\n")
+                elif prediction_success and not args.no_bidding:
+                    # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
+                    if has_sufficient_balance or args.dry_run or args.no_buy:
+                        # If --no-buy is specified, force dry run mode
+                        effective_dry_run = args.dry_run or args.no_buy
+                        
+                        # Log the appropriate mode
+                        if args.no_buy and not args.dry_run:
+                            logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                        
+                        run_auto_bidder(
+                            quiet=args.quiet,
+                            threshold=args.buy_threshold,
+                            amount=args.amount,
+                            dry_run=effective_dry_run,
+                            show_stats=not args.no_stats,
+                            weighted_selection=args.weighted_selection,
+                            min_prediction=args.min_prediction
+                        )
             elif prediction_success and not args.no_bidding:
-                # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
-                if has_sufficient_balance or args.dry_run or args.no_buy:
-                    # If --no-buy is specified, force dry run mode
-                    effective_dry_run = args.dry_run or args.no_buy
-                    
-                    # Log the appropriate mode
-                    if args.no_buy and not args.dry_run:
-                        logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
-                    
-                    run_auto_bidder(
-                        quiet=args.quiet,
-                        threshold=args.buy_threshold,
-                        amount=args.amount,
-                        dry_run=effective_dry_run,
-                        show_stats=not args.no_stats,
-                        weighted_selection=args.weighted_selection,
-                        min_prediction=args.min_prediction
-                    )
-        elif prediction_success and not args.no_bidding:
-            # Skip balance check if requested
-            # If --no-buy is specified, force dry run mode
-            effective_dry_run = args.dry_run or args.no_buy
-            
-            # Log the appropriate mode
-            if args.no_buy and not args.dry_run:
-                logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
-            
-            run_auto_bidder(
-                quiet=args.quiet,
-                threshold=args.buy_threshold,
-                amount=args.amount,
-                dry_run=effective_dry_run,
-                show_stats=not args.no_stats,
-                weighted_selection=args.weighted_selection,
-                min_prediction=args.min_prediction
-            )
-            
-        # Run the auto-seller if prediction succeeded and selling not disabled
-        # (always run auto-seller regardless of balance)
-        if prediction_success and not args.no_selling:
-            # If --no-sell is specified, force dry run mode
-            effective_dry_run = args.dry_run or args.no_sell
-            
-            # Log the appropriate mode
-            if args.no_sell and not args.dry_run:
-                logger.info("Running auto-seller in no-sell mode (opportunities will be shown but no orders placed)")
-            
-            run_auto_seller(
-                quiet=args.quiet,
-                threshold=args.sell_threshold,
-                sell_below=args.sell_below,
-                dry_run=effective_dry_run,
-                show_stats=not args.no_stats,
-                debug=args.debug_seller,
-                show_positions=args.show_positions,
-                show_active_positions=args.show_active_positions
-            )
+                # Skip balance check if requested
+                # If --no-buy is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_buy
+                
+                # Log the appropriate mode
+                if args.no_buy and not args.dry_run:
+                    logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                
+                run_auto_bidder(
+                    quiet=args.quiet,
+                    threshold=args.buy_threshold,
+                    amount=args.amount,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    weighted_selection=args.weighted_selection,
+                    min_prediction=args.min_prediction
+                )
+                
+            # Run the auto-seller if prediction succeeded and selling not disabled
+            # (always run auto-seller regardless of balance)
+            if prediction_success and not args.no_selling:
+                # If --no-sell is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_sell
+                
+                # Log the appropriate mode
+                if args.no_sell and not args.dry_run:
+                    logger.info("Running auto-seller in no-sell mode (opportunities will be shown but no orders placed)")
+                
+                run_auto_seller(
+                    quiet=args.quiet,
+                    threshold=args.sell_threshold,
+                    sell_below=args.sell_below,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    debug=args.debug_seller,
+                    show_positions=args.show_positions,
+                    show_active_positions=args.show_active_positions
+                )
     
     return tweets_success and prediction_success or skip_tweet_fetching
 
@@ -1088,13 +1351,22 @@ def main():
     
     # Display a clear startup banner
     print("\n" + "=" * 80)
-    print("🤖 POLYMARKET AUTOMATED SCHEDULER STARTING")
+    if args.simulate:
+        print("🎯 POLYMARKET SIMULATION SCHEDULER STARTING")
+        print("=" * 80)
+        print(f"🎮 Simulation run:       {args.simulate}")
+        print(f"🧠 Strategy:             {args.strategy}")
+        print(f"💰 Initial balance:      ${args.sim_balance}")
+    else:
+        print("🤖 POLYMARKET AUTOMATED SCHEDULER STARTING")
     print("=" * 80)
     print(f"📊 Tweet checking interval: {tweet_interval} minutes")
     print(f"💰 Auto-bidder interval:    {buy_interval} minutes")
     print(f"💸 Auto-seller interval:    {sell_interval} minutes")
     if args.dry_run:
         print("🔒 Running in DRY RUN mode - no real orders will be placed")
+    if args.simulate:
+        print("🎯 Running in SIMULATION mode - using simulation framework")
     print("=" * 80 + "\n")
     
     # Log the scheduler startup
@@ -1105,6 +1377,13 @@ def main():
         logger.info(f"Auto-bidder interval: {buy_interval} minutes")
     if args.sell_interval is not None:
         logger.info(f"Auto-seller interval: {sell_interval} minutes")
+    
+    # Log simulation mode if enabled
+    if args.simulate:
+        logger.info(f"Running in SIMULATION mode")
+        logger.info(f"Simulation run: {args.simulate}")
+        logger.info(f"Simulation strategy: {args.strategy}")
+        logger.info(f"Initial balance for new runs: ${args.sim_balance}")
     
     if args.tweets_only:
         logger.info("Configured to run tweet fetching only")

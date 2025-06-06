@@ -187,6 +187,12 @@ python -m src.scheduler.scheduler --interval 15 --max-tweets 50 --quiet --buy-th
 - `--show-positions`: Show all current positions when running
 - `--show-active-positions`: Show positions for active market when running
 
+### Simulation Options
+
+- `--simulate RUN_NAME`: Run in simulation mode using the specified simulation run name
+- `--strategy STRATEGY`: Strategy to use for simulation (default: strategy_1)
+- `--sim-balance FLOAT`: Initial balance for new simulation runs (default: $1000.0)
+
 ## Command-Line Examples
 
 ```bash
@@ -217,6 +223,165 @@ python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sel
 # --sell-below 2.0         : Automatically sell positions with predictions below 2%
 # --dry-run                : Test without placing actual orders
 # --show-active-positions  : Display only positions for the active market week
+```
+
+## Simulation Mode
+
+The scheduler includes a comprehensive simulation mode that allows you to test trading strategies without using real money. The simulation uses the same prediction algorithms and bidding strategies as the real trading system, but operates on virtual funds and simulated positions.
+
+### Quick Start with Simulation
+
+```bash
+# Basic simulation run with default settings
+python -m src.scheduler.scheduler --simulate my_test_run --run-once --dry-run
+
+# Advanced simulation with custom parameters
+python -m src.scheduler.scheduler \
+  --simulate advanced_test \
+  --strategy strategy_1 \
+  --sim-balance 1000 \
+  --amount 50.0 \
+  --buy-threshold 3.0 \
+  --weighted-selection \
+  --min-prediction 10.0 \
+  --sell-threshold 2.0 \
+  --sell-below 20.0 \
+  --run-once
+
+# Continuous simulation (runs every 20 minutes)
+python -m src.scheduler.scheduler \
+  --simulate continuous_test \
+  --amount 25.0 \
+  --buy-threshold 2.0 \
+  --sell-threshold 1.0 \
+  --weighted-selection
+```
+
+### Simulation Features
+
+**Automatic Run Creation**: If the specified simulation run doesn't exist, it will be automatically created with:
+
+- The specified initial balance (--sim-balance)
+- Real Polymarket market data initialization
+- Proper tracking of all simulation metrics
+
+**Real Market Data**: Simulations use real, up-to-date Polymarket data including:
+
+- Current market prices and spreads
+- Real order book data (bid/ask prices)
+- Live prediction data from your models
+
+**Complete Position Tracking**:
+
+- Tracks all buy/sell transactions
+- Calculates profit/loss for each position
+- Maintains balance and share inventories
+- Provides detailed transaction history
+
+**Strategy Integration**: Uses the same bidding strategies as real trading:
+
+- Same opportunity identification algorithms
+- Same weighted selection logic
+- Same prediction filtering and thresholds
+
+### Simulation Examples
+
+```bash
+# ese kaia
+
+python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 2 --sell-interval 1 --simulate pirvelad --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
+
+# Conservative simulation - only bid on high-confidence opportunities
+python -m src.scheduler.scheduler \
+  --simulate conservative_strategy \
+  --sim-balance 500 \
+  --amount 20.0 \
+  --buy-threshold 5.0 \
+  --min-prediction 15.0 \
+  --sell-threshold 3.0 \
+  --sell-below 10.0 \
+  --run-once
+
+# Aggressive simulation - bid on more opportunities with larger amounts
+python -m src.scheduler.scheduler \
+  --simulate aggressive_strategy \
+  --sim-balance 2000 \
+  --amount 100.0 \
+  --buy-threshold 1.0 \
+  --min-prediction 5.0 \
+  --weighted-selection \
+  --sell-threshold 0.5 \
+  --sell-below 25.0 \
+  --run-once
+
+# Testing simulation - see what would happen without making any trades
+python -m src.scheduler.scheduler \
+  --simulate testing_strategy \
+  --amount 30.0 \
+  --buy-threshold 2.0 \
+  --min-prediction 8.0 \
+  --dry-run \
+  --run-once
+
+# Long-running simulation - test strategy over time
+python -m src.scheduler.scheduler \
+  --simulate long_term_test \
+  --sim-balance 1500 \
+  --amount 40.0 \
+  --buy-threshold 2.5 \
+  --sell-threshold 1.5 \
+  --weighted-selection \
+  --interval 30
+```
+
+### Viewing Simulation Results
+
+After running simulations, you can view detailed results using the simulation initialization tool:
+
+```bash
+# View simulation run information
+python -m src.simulation.initialization --info my_test_run
+
+# List all simulation runs
+python -m src.simulation.initialization --list
+
+# View specific position details
+python -m src.simulation.bidding_decision.strategy_1 --analyze my_test_run
+```
+
+### Simulation vs Real Trading
+
+| Feature        | Real Trading            | Simulation                           |
+| -------------- | ----------------------- | ------------------------------------ |
+| **Funds**      | Real USDC from wallet   | Virtual balance                      |
+| **Markets**    | Real Polymarket orders  | Real market data, simulated orders   |
+| **Strategies** | Live bidding algorithms | Same algorithms, simulated execution |
+| **Risk**       | Real money at risk      | No financial risk                    |
+| **Data**       | Real-time market data   | Same real-time data                  |
+| **Results**    | Real profit/loss        | Simulated profit/loss tracking       |
+
+### Best Practices for Simulation
+
+1. **Start with small amounts**: Use realistic bid amounts that you would actually trade with
+2. **Test different strategies**: Try conservative vs aggressive approaches
+3. **Use realistic thresholds**: Don't set thresholds too low or you'll trade on everything
+4. **Monitor over time**: Run continuous simulations to see how strategies perform over multiple market cycles
+5. **Compare with dry-run**: Use `--dry-run` within simulation to see opportunities without taking them
+
+Example workflow:
+
+```bash
+# 1. Test with dry-run to see opportunities
+python -m src.scheduler.scheduler --simulate test1 --dry-run --run-once
+
+# 2. Run actual simulation with conservative settings
+python -m src.scheduler.scheduler --simulate test1 --buy-threshold 3.0 --run-once
+
+# 3. Check results
+python -m src.simulation.initialization --info test1
+
+# 4. Continue simulation or adjust parameters
+python -m src.scheduler.scheduler --simulate test1 --buy-threshold 2.0 --run-once
 ```
 
 ## Tweet Count Verification
