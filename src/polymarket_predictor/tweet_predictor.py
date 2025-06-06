@@ -692,22 +692,7 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
             print(f"Event has ended. Final tweet count: {final_count}")
             
             # Map the final count to a frame
-            count_frames = [
-                {"name": "less than 100", "min": 0, "max": 99},
-                {"name": "100–124", "min": 100, "max": 124},
-                {"name": "125–149", "min": 125, "max": 149},
-                {"name": "150–174", "min": 150, "max": 174},
-                {"name": "175–199", "min": 175, "max": 199},
-                {"name": "200–224", "min": 200, "max": 224},
-                {"name": "225–249", "min": 225, "max": 249},
-                {"name": "250–274", "min": 250, "max": 274},
-                {"name": "275–299", "min": 275, "max": 299},
-                {"name": "300–324", "min": 300, "max": 324},
-                {"name": "325–349", "min": 325, "max": 349},
-                {"name": "350–374", "min": 350, "max": 374},
-                {"name": "375–399", "min": 375, "max": 399},
-                {"name": "400 or more", "min": 400, "max": float('inf')}
-            ]
+            count_frames = TWEET_COUNT_FRAMES
             
             winning_frame = None
             for frame in count_frames:
@@ -729,14 +714,10 @@ def predict_tweet_frame_probabilities(data_path=DEFAULT_DATA_PATH,
         traceback.print_exc()
         
         # Return a default of 0 for all frames on error
-        count_frames = [
-            "less than 100", "100–124", "125–149", "150–174", "175–199",
-            "200–224", "225–249", "250–274", "275–299", "300–324",
-            "325–349", "350–374", "375–399", "400 or more"
-        ]
+        frame_names = [frame["name"] for frame in TWEET_COUNT_FRAMES]
         
         print("Using 0 as the current tweet count due to error")
-        return {frame: 0.0 for frame in count_frames}
+        return {frame: 0.0 for frame in frame_names}
 
 def main():
     parser = argparse.ArgumentParser(description='Predict Elon Musk tweet counts for Polymarket')

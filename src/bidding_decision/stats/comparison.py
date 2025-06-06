@@ -13,6 +13,7 @@ import logging
 import datetime
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -100,46 +101,63 @@ def get_market_data(refresh: bool = True) -> Dict[str, Any]:
 
 def normalize_range_name(range_name: str) -> str:
     """
-    Normalize range names to ensure consistent formatting between data sources.
+    Normalize range names to ensure consistency between prediction and market data sources.
     
     Args:
-        range_name: Original range name
-    
+        range_name: The range name to normalize
+        
     Returns:
-        Normalized range name
+        str: Normalized range name
     """
     # Convert to lowercase for case-insensitive comparison
-    name = range_name.lower()
+    name = range_name.lower().strip()
     
-    # Handle "less than X" format
+    # Remove any date suffixes first (e.g., "June 6–13?", "April 25–May 2")
+    # Look for patterns like "june 6–13?" or "april 25–may 2"
+    # Remove date patterns at the end
+    name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-]\d+\??.*$', '', name)
+    name = re.sub(r'\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d+[–-]\d+\??.*$', '', name)
+    # Also handle cases like "June 6–13?" 
+    name = re.sub(r'\s+\w+\s+\d+[–-]\d+\??.*$', '', name)
+    name = name.strip()
+    
+    # Handle "less than X" format - extract the actual number
     if "less than" in name:
-        return "less than 100"  # Common format for both sources
+        # Try to extract the number after "less than"
+        try:
+            match = re.search(r'less than (\d+)', name)
+            if match:
+                num = int(match.group(1))
+                return f"less than {num}"
+            else:
+                # Fallback to the current frames from constants
+                from src.constants import TWEET_COUNT_FRAMES
+                for frame in TWEET_COUNT_FRAMES:
+                    if frame["name"].lower().startswith("less than"):
+                        return frame["name"]
+                return "less than 150"  # Default fallback
+        except (ValueError, ImportError):
+            return "less than 150"  # Default fallback
     
     # Handle "X or more" format
     if "or more" in name:
-        if "350 or more" in name or "350 or more" in range_name:
-            return "350 or more"  # Handle the 350 or more case specifically
-        elif "400 or more" in name or "400 or more" in range_name:
-            return "400 or more"  # Common format for both sources
-        else:
-            # Extract the number before "or more"
-            try:
+        # Extract the number before "or more"
+        try:
+            match = re.search(r'(\d+)\s*or more', name)
+            if match:
+                num = int(match.group(1))
+                return f"{num} or more"
+            else:
+                # Fallback to extracting any number
                 num = int(''.join(filter(str.isdigit, name.split("or more")[0])))
                 return f"{num} or more"
-            except ValueError:
-                # If we can't extract a number, return the original format
-                return "400 or more"  # Default case
+        except (ValueError, ImportError):
+            # If we can't extract a number, return the original format
+            return "500 or more"  # Default case for new frames
     
-    # Strip any "Will Elon tweet" prefix and dates
+    # Strip any "Will Elon tweet" prefix 
     if "will elon tweet" in name:
         name = name.replace("will elon tweet", "").strip()
-    
-    # Remove any date ranges (e.g., "April 25–May 2")
-    if "april" in name or "may" in name:
-        # Find the position of "April" or any month
-        month_pos = min([p for p in [name.find(m) for m in ["april", "may", "june", "july"]] if p >= 0], default=-1)
-        if month_pos >= 0:
-            name = name[:month_pos].strip()
     
     # Remove " times" suffix if present
     name = name.replace(" times", "").strip()
@@ -161,8 +179,8 @@ def normalize_range_name(range_name: str) -> str:
             except ValueError:
                 pass
     
-    # If all else fails, return the original name
-    return range_name
+    # If all else fails, return the original name, but clean it up
+    return name.strip()
 
 def generate_comparison_table(
     prediction_data: Optional[Dict[str, Any]] = None, 
