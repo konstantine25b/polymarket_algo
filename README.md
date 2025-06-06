@@ -49,7 +49,10 @@ python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sel
 
 # for simulation:
 
-python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 2 --sell-interval 1 --simulate pirvelad --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
+python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
+
+
+python -m src.terminal_logger.logger -n simulation_1 "python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad_1 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0"
 
 # Run the automated scheduler with reasonable defaults when 1-2 days remain in the market
 python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
