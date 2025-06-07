@@ -144,6 +144,15 @@ Examples:
             print(f"   📊 Balance of Shares: ${run_data.get('balance_of_shares', 0):,.2f}")
             print(f"   💼 Balance Invested: ${run_data.get('balance_invested', 0):,.2f}")
             
+            # Display new portfolio metrics
+            win_loss_pct = run_data.get('win_loss_percentage', 0)
+            win_loss_if_sold_pct = run_data.get('win_loss_percentage_if_sold_now', 0)
+            total_if_sold = run_data.get('total_balance_if_all_positions_sold', 0)
+            
+            print(f"   📈 Win/Loss %: {win_loss_pct:+.2f}% (market prices)")
+            print(f"   💰 Win/Loss % if sold now: {win_loss_if_sold_pct:+.2f}% (bid prices)")
+            print(f"   🏦 Total balance if all sold: ${total_if_sold:,.2f}")
+            
             markets = run_data.get('markets', [])
             positions = run_data.get('positions', [])
             transactions = run_data.get('transactions', [])

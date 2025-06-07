@@ -78,6 +78,9 @@ class RunInitializer:
             "total_balance": initial_balance,
             "balance_of_shares": 0.0,
             "balance_invested": 0.0,
+            "win_loss_percentage_if_sold_now": 0.0,  # Win/loss percentage based on current bid prices
+            "win_loss_percentage": 0.0,  # Win/loss percentage based on current market prices
+            "total_balance_if_all_positions_sold": initial_balance,  # Total balance if all positions sold at current bid prices
             "shares": [],  # List of {"market_id": str, "market_name": str, "num_shares": int}
             "transactions": [],  # List of all transactions
             "total_balances": [  # Time series of total balances
@@ -86,7 +89,10 @@ class RunInitializer:
                     "total_balance": initial_balance,
                     "current_balance": initial_balance,
                     "balance_of_shares": 0.0,
-                    "balance_invested": 0.0
+                    "balance_invested": 0.0,
+                    "win_loss_percentage_if_sold_now": 0.0,
+                    "win_loss_percentage": 0.0,
+                    "total_balance_if_all_positions_sold": initial_balance
                 }
             ],
             "positions": [],  # List of current positions with detailed info
@@ -388,6 +394,12 @@ class RunInitializer:
         # Calculate new total balance (current_balance + current market value of all positions)
         run_data["total_balance"] = run_data["current_balance"] + total_current_value
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add transaction record
         transaction = {
             "timestamp": datetime.now().isoformat(),
@@ -407,6 +419,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -587,6 +602,12 @@ class RunInitializer:
         # Calculate new total balance (current_balance + current market value of all positions)
         run_data["total_balance"] = run_data["current_balance"] + total_current_value
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add transaction record
         transaction = {
             "timestamp": datetime.now().isoformat(),
@@ -608,6 +629,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -730,6 +754,12 @@ class RunInitializer:
         total_invested_in_shares = sum(pos["total_invested"] for pos in run_data["positions"])
         run_data["balance_invested"] = total_invested_in_shares
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add balance snapshot
         balance_snapshot = {
             "timestamp": timestamp,
@@ -737,6 +767,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -971,6 +1004,48 @@ class RunInitializer:
             "total_proceeds": total_proceeds,
             "net_pnl": net_pnl,
             "net_pnl_percentage": (net_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        }
+
+    def _calculate_portfolio_metrics(self, run_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Calculate portfolio-wide metrics including win/loss percentages and potential balance if all sold.
+        
+        Args:
+            run_data: The complete run data dictionary
+            
+        Returns:
+            Dict containing calculated metrics
+        """
+        positions = run_data.get("positions", [])
+        current_balance = run_data.get("current_balance", 0.0)
+        balance_invested = run_data.get("balance_invested", 0.0)
+        
+        # Calculate total current market value and total value if sold at bid prices
+        total_current_market_value = 0.0
+        total_value_if_sold_at_bid = 0.0
+        
+        for position in positions:
+            if position.get("position_status") == "ACTIVE" and position.get("num_shares", 0) > 0:
+                total_current_market_value += position.get("current_total_price", 0.0)
+                total_value_if_sold_at_bid += position.get("current_value_if_sold", 0.0)
+        
+        # Calculate win/loss percentage based on market prices
+        win_loss_percentage = 0.0
+        if balance_invested > 0:
+            win_loss_percentage = ((total_current_market_value - balance_invested) / balance_invested) * 100
+        
+        # Calculate win/loss percentage if sold at current bid prices
+        win_loss_percentage_if_sold_now = 0.0
+        if balance_invested > 0:
+            win_loss_percentage_if_sold_now = ((total_value_if_sold_at_bid - balance_invested) / balance_invested) * 100
+        
+        # Calculate total balance if all positions were sold at current bid prices
+        total_balance_if_all_positions_sold = current_balance + total_value_if_sold_at_bid
+        
+        return {
+            "win_loss_percentage": win_loss_percentage,
+            "win_loss_percentage_if_sold_now": win_loss_percentage_if_sold_now,
+            "total_balance_if_all_positions_sold": total_balance_if_all_positions_sold
         }
     
     def initialize_markets_from_polymarket(
@@ -1319,6 +1394,12 @@ class RunInitializer:
         total_invested_in_shares = sum(pos["total_invested"] for pos in run_data["positions"])
         run_data["balance_invested"] = total_invested_in_shares
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add balance snapshot
         balance_snapshot = {
             "timestamp": timestamp,
@@ -1326,6 +1407,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
