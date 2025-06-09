@@ -11,7 +11,7 @@ import sys
 import os
 
 # Add the src directory to the path to import constants
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from constants import (
     DEFAULT_DATA_PATH, ET_TIMEZONE, POLYMARKET_START_TIME, 
     POLYMARKET_END_TIME, GEORGIA_TIMESTAMP_FORMAT

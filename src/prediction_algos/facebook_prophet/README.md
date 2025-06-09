@@ -23,7 +23,7 @@ The predictor analyzes historical tweet data and generates predictions for speci
 ## Files Structure
 
 ```
-src/facebook_prophet/
+src/prediction_algos/facebook_prophet/
 ├── __init__.py              # Module initialization
 ├── data_processor.py        # Data loading and preprocessing
 ├── predictor.py            # Original Prophet prediction logic
@@ -62,10 +62,10 @@ Run predictions with default settings:
 source venv/bin/activate
 
 # Run original predictor
-python -m src.facebook_prophet.main
+python -m src.prediction_algos.facebook_prophet.main
 
 # Run enhanced predictor (recommended)
-python -m src.facebook_prophet.enhanced_main
+python -m src.prediction_algos.facebook_prophet.enhanced_main
 ```
 
 ### Advanced Usage
@@ -74,35 +74,35 @@ python -m src.facebook_prophet.enhanced_main
 
 ```bash
 # Custom data path
-python -m src.facebook_prophet.main --data-path /path/to/your/tweets.csv
+python -m src.prediction_algos.facebook_prophet.main --data-path /path/to/your/tweets.csv
 
 # Custom current time (useful for testing)
-python -m src.facebook_prophet.main --current-time "2025-06-08 15:30:00"
+python -m src.prediction_algos.facebook_prophet.main --current-time "2025-06-08 15:30:00"
 
 # Disable plots
-python -m src.facebook_prophet.main --no-plots
+python -m src.prediction_algos.facebook_prophet.main --no-plots
 
 # Custom Prophet parameters
-python -m src.facebook_prophet.main --changepoint-prior 0.1 --seasonality-prior 20.0
+python -m src.prediction_algos.facebook_prophet.main --changepoint-prior 0.1 --seasonality-prior 20.0
 
 # Combined options
-python -m src.facebook_prophet.main --current-time "2025-06-08 12:00:00" --changepoint-prior 0.08
+python -m src.prediction_algos.facebook_prophet.main --current-time "2025-06-08 12:00:00" --changepoint-prior 0.08
 ```
 
 #### Enhanced Predictor (Recommended)
 
 ```bash
 # Basic enhanced prediction
-python -m src.facebook_prophet.enhanced_main
+python -m src.prediction_algos.facebook_prophet.enhanced_main
 
 # Custom current time
-python -m src.facebook_prophet.enhanced_main --current-time "2025-06-09 14:49:37"
+python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-09 14:49:37"
 
 # Custom data path
-python -m src.facebook_prophet.enhanced_main --data-path /path/to/your/tweets.csv
+python -m src.prediction_algos.facebook_prophet.enhanced_main --data-path /path/to/your/tweets.csv
 
 # Example with specific time for testing
-python -m src.facebook_prophet.enhanced_main --current-time "2025-06-10 10:00:00"
+python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-10 10:00:00"
 ```
 
 ### Programmatic Usage
@@ -110,7 +110,7 @@ python -m src.facebook_prophet.enhanced_main --current-time "2025-06-10 10:00:00
 #### Original Predictor
 
 ```python
-from src.facebook_prophet import TweetPredictor
+from src.prediction_algos.facebook_prophet import TweetPredictor
 from datetime import datetime
 
 # Initialize predictor
@@ -133,7 +133,7 @@ for frame_name, data in predictions['predictions_by_frame'].items():
 #### Enhanced Predictor (Recommended)
 
 ```python
-from src.facebook_prophet import EnhancedTweetPredictor
+from src.prediction_algos.facebook_prophet import EnhancedTweetPredictor
 from datetime import datetime
 
 # Initialize enhanced predictor
@@ -280,7 +280,7 @@ weights = {
 
 ### Common Issues
 
-1. **Import Errors**: Ensure you're running from the main project directory with `python -m src.facebook_prophet.enhanced_main`
+1. **Import Errors**: Ensure you're running from the main project directory with `python -m src.prediction_algos.facebook_prophet.enhanced_main`
 2. **Data Path Issues**: Check that the CSV file exists and has the correct columns
 3. **Timezone Issues**: The enhanced predictor handles DST ambiguity automatically
 4. **Memory Usage**: Hourly model uses more memory (~10K data points vs 417)
@@ -296,17 +296,17 @@ weights = {
 
 ```bash
 # Quick prediction
-python -m src.facebook_prophet.enhanced_main
+python -m src.prediction_algos.facebook_prophet.enhanced_main
 
 # Test with specific time
-python -m src.facebook_prophet.enhanced_main --current-time "2025-06-10 12:00:00"
+python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-10 12:00:00"
 
 # Use custom data
-python -m src.facebook_prophet.enhanced_main --data-path src/data/custom_tweets.csv
+python -m src.prediction_algos.facebook_prophet.enhanced_main --data-path src/data/custom_tweets.csv
 
 # Compare with original
-python -m src.facebook_prophet.main --current-time "2025-06-09 14:49:37"
-python -m src.facebook_prophet.enhanced_main --current-time "2025-06-09 14:49:37"
+python -m src.prediction_algos.facebook_prophet.main --current-time "2025-06-09 14:49:37"
+python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-09 14:49:37"
 ```
 
 ## Future Improvements

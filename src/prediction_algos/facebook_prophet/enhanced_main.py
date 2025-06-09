@@ -9,9 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from facebook_prophet import EnhancedTweetPredictor
+from prediction_algos.facebook_prophet import EnhancedTweetPredictor
 
 
 def main():

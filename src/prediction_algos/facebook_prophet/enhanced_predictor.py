@@ -19,8 +19,9 @@ from scipy.special import erf
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-# Add the src directory to the path to import constants
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# Add parent directory to path for imports
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
 from constants import TWEET_COUNT_FRAMES, ET_TIMEZONE
 
 from .data_processor import TweetDataProcessor
