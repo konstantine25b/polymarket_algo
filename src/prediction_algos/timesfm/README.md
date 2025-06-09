@@ -38,7 +38,7 @@ python -m src.prediction_algos.timesfm.fast_main --normal
 
 ```bash
 # Multiple TimesFM configurations ensemble (slower but most comprehensive)
-python -m src.prediction_algos.timesfm.enhanced_main
+python -m src.prediction_algos.timesfm.enhanced_main --no-plots
 ```
 
 ## ⚡ Speed Comparison
