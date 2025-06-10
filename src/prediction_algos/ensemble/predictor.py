@@ -10,10 +10,42 @@ warnings.filterwarnings('ignore')
 
 # Suppress verbose logging from Neural Prophet and Prophet
 import logging
-logging.getLogger('neuralprophet').setLevel(logging.ERROR)
-logging.getLogger('prophet').setLevel(logging.ERROR)
-logging.getLogger('cmdstanpy').setLevel(logging.ERROR)
-logging.getLogger('pytorch_lightning').setLevel(logging.ERROR)
+
+# Set all relevant loggers to CRITICAL level to suppress everything
+loggers_to_suppress = [
+    'neuralprophet',
+    'prophet', 
+    'cmdstanpy',
+    'pytorch_lightning',
+    'pytorch_lightning.utilities.rank_zero',
+    'pytorch_lightning.accelerators.gpu',
+    'pytorch_lightning.callbacks',
+    'pytorch_lightning.core',
+    'pytorch_lightning.utilities.distributed',
+    'pytorch_lightning.accelerators',
+    'pytorch_lightning.trainer',
+    'pytorch_lightning.utilities.warnings',
+    'NP.config',
+    'NP.forecaster',
+    'NP.df_utils',
+    'NP.data.processing',
+    'NP.data.splitting'
+]
+
+for logger_name in loggers_to_suppress:
+    logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+    logging.getLogger(logger_name).disabled = True
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+
+# Suppress matplotlib warnings
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -21,6 +53,8 @@ from pathlib import Path
 import sys
 import os
 from scipy import stats
+import contextlib
+import io
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -32,6 +66,23 @@ from prediction_algos.neural_prophet import NeuralTweetPredictor, FastNeuralTwee
 from prediction_algos.facebook_prophet import TweetPredictor as FacebookTweetPredictor, EnhancedTweetPredictor as EnhancedFacebookTweetPredictor
 from prediction_algos.timesfm import TimesFMTweetPredictor, FastTimesFMTweetPredictor, EnhancedTimesFMTweetPredictor
 
+# Suppress TensorFlow/PyTorch warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+@contextlib.contextmanager
+def suppress_stdout_stderr():
+    """Context manager to suppress all stdout and stderr output."""
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        try:
+            sys.stdout = devnull
+            sys.stderr = devnull
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 class EnsembleTweetPredictor:
     """Ensemble predictor combining multiple forecasting models with weight control and additional prediction methods."""
@@ -113,7 +164,7 @@ class EnsembleTweetPredictor:
         Args:
             fast_mode (bool): Whether to use fast training mode
         """
-        print("🔥 Preparing forecasting models...")
+        print("🔥 Preparing models...")
         
         # Determine which models to use
         use_fast = self.use_fast_models or fast_mode
@@ -121,104 +172,106 @@ class EnsembleTweetPredictor:
         # Only prepare models with weight > 0
         active_models = [model for model, weight in self.model_weights.items() if weight > 0]
         
-        model_count = 0
-        
         # 1. Neural Prophet Model
         if 'neural_prophet' in active_models:
             try:
-                model_count += 1
-                print(f"📊 [{model_count}/{len(active_models)}] Neural Prophet...")
+                print("📊 Neural Prophet...", end=" ", flush=True)
                 if use_fast:
-                    self.neural_prophet_predictor = FastNeuralTweetPredictor(
-                        data_path=self.data_processor.data_path,
-                        save_plots=False  # Disable individual plots
-                    )
-                    self.neural_prophet_predictor.prepare_model()
+                    with suppress_stdout_stderr():
+                        self.neural_prophet_predictor = FastNeuralTweetPredictor(
+                            data_path=self.data_processor.data_path,
+                            save_plots=False  # Disable individual plots
+                        )
+                        self.neural_prophet_predictor.prepare_model()
+                    print("✅ (Fast)")
                 else:
-                    # Use Enhanced Neural Prophet by default
-                    self.neural_prophet_predictor = EnhancedNeuralTweetPredictor(
-                        data_path=self.data_processor.data_path,
-                        save_plots=False
-                    )
-                    self.neural_prophet_predictor.prepare_model()  # Enhanced Neural Prophet uses prepare_model() not prepare_models()
-                
-                print("   ✅ Ready")
-                
-            except Exception as e:
-                print(f"   ❌ Enhanced failed: {e}")
-                # Fallback to basic Neural Prophet
-                try:
+                    # Use Basic Neural Prophet by default (faster, shows progress)
+                    print("") # New line for progress display
                     self.neural_prophet_predictor = NeuralTweetPredictor(
                         data_path=self.data_processor.data_path,
                         save_plots=False
                     )
+                    # Don't suppress output so we can see epoch progress
                     self.neural_prophet_predictor.prepare_model()
-                    print("   ✅ Ready (Basic)")
+                    print("✅ Neural Prophet ready")
+                
+            except Exception as e:
+                print("❌ Basic failed, trying Enhanced...", end=" ", flush=True)
+                # Fallback to Enhanced Neural Prophet
+                try:
+                    with suppress_stdout_stderr():
+                        self.neural_prophet_predictor = EnhancedNeuralTweetPredictor(
+                            data_path=self.data_processor.data_path,
+                            save_plots=False
+                        )
+                        self.neural_prophet_predictor.prepare_models()  # Enhanced Neural Prophet uses prepare_models() (plural)
+                    print("✅ (Enhanced)")
                 except Exception as e2:
-                    print(f"   ❌ Both failed: {e2}")
+                    print(f"❌ Failed")
                     self.neural_prophet_predictor = None
                     self.model_weights['neural_prophet'] = 0.0
         
         # 2. Facebook Prophet Model
         if 'facebook_prophet' in active_models:
             try:
-                model_count += 1
-                print(f"📈 [{model_count}/{len(active_models)}] Facebook Prophet...")
-                # Use Enhanced Facebook Prophet by default
-                self.facebook_prophet_predictor = EnhancedFacebookTweetPredictor(
-                    data_path=self.data_processor.data_path,
-                    save_plots=False
-                )
-                self.facebook_prophet_predictor.prepare_models()  # Enhanced model uses prepare_models()
-                
-                print("   ✅ Ready")
-                
-            except Exception as e:
-                print(f"   ❌ Enhanced failed: {e}")
-                # Fallback to basic Prophet
-                try:
-                    self.facebook_prophet_predictor = FacebookTweetPredictor(
+                print("📈 Facebook Prophet...", end=" ", flush=True)
+                with suppress_stdout_stderr():
+                    # Use Enhanced Facebook Prophet by default
+                    self.facebook_prophet_predictor = EnhancedFacebookTweetPredictor(
                         data_path=self.data_processor.data_path,
                         save_plots=False
                     )
-                    self.facebook_prophet_predictor.prepare_model()
-                    print("   ✅ Ready (Basic)")
+                    self.facebook_prophet_predictor.prepare_models()  # Enhanced model uses prepare_models()
+                
+                print("✅")
+                
+            except Exception as e:
+                print("❌ Enhanced failed, trying basic...", end=" ", flush=True)
+                # Fallback to basic Prophet
+                try:
+                    with suppress_stdout_stderr():
+                        self.facebook_prophet_predictor = FacebookTweetPredictor(
+                            data_path=self.data_processor.data_path,
+                            save_plots=False
+                        )
+                        self.facebook_prophet_predictor.prepare_model()
+                    print("✅ (Basic)")
                 except Exception as e2:
-                    print(f"   ❌ Both failed: {e2}")
+                    print(f"❌ Failed")
                     self.facebook_prophet_predictor = None
                     self.model_weights['facebook_prophet'] = 0.0
         
         # 3. TimesFM Model
         if 'timesfm' in active_models:
             try:
-                model_count += 1
-                print(f"🤖 [{model_count}/{len(active_models)}] TimesFM...")
-                if use_fast:
-                    self.timesfm_predictor = FastTimesFMTweetPredictor(
-                        data_path=self.data_processor.data_path,
-                        save_plots=False
-                    )
-                    self.timesfm_predictor.prepare_model()
-                else:
-                    # Use Enhanced TimesFM by default
-                    try:
-                        self.timesfm_predictor = EnhancedTimesFMTweetPredictor(
-                            data_path=self.data_processor.data_path,
-                            save_plots=False
-                        )
-                        self.timesfm_predictor.prepare_models()  # Enhanced version uses prepare_models()
-                    except ImportError:
-                        # Fallback to basic TimesFM if enhanced not available
-                        self.timesfm_predictor = TimesFMTweetPredictor(
+                print("🤖 TimesFM...", end=" ", flush=True)
+                with suppress_stdout_stderr():
+                    if use_fast:
+                        self.timesfm_predictor = FastTimesFMTweetPredictor(
                             data_path=self.data_processor.data_path,
                             save_plots=False
                         )
                         self.timesfm_predictor.prepare_model()
+                    else:
+                        # Use Enhanced TimesFM by default
+                        try:
+                            self.timesfm_predictor = EnhancedTimesFMTweetPredictor(
+                                data_path=self.data_processor.data_path,
+                                save_plots=False
+                            )
+                            self.timesfm_predictor.prepare_models()  # Enhanced version uses prepare_models()
+                        except ImportError:
+                            # Fallback to basic TimesFM if enhanced not available
+                            self.timesfm_predictor = TimesFMTweetPredictor(
+                                data_path=self.data_processor.data_path,
+                                save_plots=False
+                            )
+                            self.timesfm_predictor.prepare_model()
                 
-                print("   ✅ Ready")
+                print("✅")
                 
             except Exception as e:
-                print(f"   ❌ Failed: {e}")
+                print(f"❌ Failed")
                 self.timesfm_predictor = None
         
         # Renormalize weights after any failures
@@ -228,8 +281,7 @@ class EnsembleTweetPredictor:
                                             self.facebook_prophet_predictor, 
                                             self.timesfm_predictor] if p is not None)
         
-        print(f"\n🎯 Ensemble ready with {active_models_final}/{len(active_models)} models active")
-        print(f"Final model weights: {self.model_weights}")
+        print(f"🎯 {active_models_final}/{len(active_models)} models ready")
         
         # Check if we have any prediction methods available
         has_prediction_methods = (active_models_final > 0 or 
@@ -386,11 +438,12 @@ class EnsembleTweetPredictor:
         # Neural Prophet prediction
         if self.neural_prophet_predictor is not None and self.model_weights['neural_prophet'] > 0:
             try:
-                # Check if it's enhanced version
-                if hasattr(self.neural_prophet_predictor, 'generate_enhanced_predictions'):
-                    neural_pred = self.neural_prophet_predictor.generate_enhanced_predictions(current_time)
-                else:
-                    neural_pred = self.neural_prophet_predictor.generate_predictions(current_time)
+                with suppress_stdout_stderr():
+                    # Check if it's enhanced version
+                    if hasattr(self.neural_prophet_predictor, 'generate_enhanced_predictions'):
+                        neural_pred = self.neural_prophet_predictor.generate_enhanced_predictions(current_time)
+                    else:
+                        neural_pred = self.neural_prophet_predictor.generate_predictions(current_time)
                 individual_results['neural_prophet'] = neural_pred
                 
                 # Extract total_predicted for display (handle nested format)
@@ -398,37 +451,39 @@ class EnsembleTweetPredictor:
                     total_pred = neural_pred['prediction_results'].get('total_predicted', 'N/A')
                 else:
                     total_pred = neural_pred.get('total_predicted', 'N/A')
-                print(f"   📊 Neural Prophet: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   📊 Neural Prophet: {total_pred}")
+                print(f"   📊 Neural Prophet: {total_pred:.1f}" if isinstance(total_pred, (int, float)) else f"   📊 Neural Prophet: {total_pred}")
             except Exception as e:
-                print(f"   ❌ Neural Prophet failed: {e}")
+                print(f"   ❌ Neural Prophet failed")
         
         # Facebook Prophet prediction
         if self.facebook_prophet_predictor is not None and self.model_weights['facebook_prophet'] > 0:
             try:
-                if hasattr(self.facebook_prophet_predictor, 'generate_enhanced_predictions'):
-                    # Enhanced version
-                    facebook_pred = self.facebook_prophet_predictor.generate_enhanced_predictions(current_time)
-                else:
-                    # Basic version
-                    facebook_pred = self.facebook_prophet_predictor.generate_predictions(current_time)
+                with suppress_stdout_stderr():
+                    if hasattr(self.facebook_prophet_predictor, 'generate_enhanced_predictions'):
+                        # Enhanced version
+                        facebook_pred = self.facebook_prophet_predictor.generate_enhanced_predictions(current_time)
+                    else:
+                        # Basic version
+                        facebook_pred = self.facebook_prophet_predictor.generate_predictions(current_time)
                 individual_results['facebook_prophet'] = facebook_pred
                 
                 # Extract total_predicted for display
                 total_pred = facebook_pred.get('total_predicted', 'N/A')
-                print(f"   📈 Facebook Prophet: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   📈 Facebook Prophet: {total_pred}")
+                print(f"   📈 Facebook Prophet: {total_pred:.1f}" if isinstance(total_pred, (int, float)) else f"   📈 Facebook Prophet: {total_pred}")
             except Exception as e:
-                print(f"   ❌ Facebook Prophet failed: {e}")
+                print(f"   ❌ Facebook Prophet failed")
         
         # TimesFM prediction
         if self.timesfm_predictor is not None and self.model_weights['timesfm'] > 0:
             try:
-                # Enhanced TimesFM uses generate_predictions(), not generate_enhanced_predictions()
-                if hasattr(self.timesfm_predictor, 'models') and hasattr(self.timesfm_predictor, '_create_ensemble_prediction'):
-                    # This is Enhanced TimesFM
-                    timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
-                else:
-                    # This is basic TimesFM
-                    timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
+                with suppress_stdout_stderr():
+                    # Enhanced TimesFM uses generate_predictions(), not generate_enhanced_predictions()
+                    if hasattr(self.timesfm_predictor, 'models') and hasattr(self.timesfm_predictor, '_create_ensemble_prediction'):
+                        # This is Enhanced TimesFM
+                        timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
+                    else:
+                        # This is basic TimesFM
+                        timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
                 individual_results['timesfm'] = timesfm_pred
                 
                 # Extract total_predicted for display (handle different enhanced formats)
@@ -441,9 +496,9 @@ class EnsembleTweetPredictor:
                 else:
                     # Fallback
                     total_pred = timesfm_pred.get('total_predicted', 'N/A')
-                print(f"   🤖 TimesFM: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   🤖 TimesFM: {total_pred}")
+                print(f"   🤖 TimesFM: {total_pred:.1f}" if isinstance(total_pred, (int, float)) else f"   🤖 TimesFM: {total_pred}")
             except Exception as e:
-                print(f"   ❌ TimesFM failed: {e}")
+                print(f"   ❌ TimesFM failed")
         
         # Additional prediction methods
         additional_predictions = {}
@@ -452,17 +507,17 @@ class EnsembleTweetPredictor:
             try:
                 ma_pred = self.calculate_moving_average_prediction(current_time)
                 additional_predictions['moving_average'] = ma_pred
-                print(f"   📊 Moving Average: {ma_pred['total_predicted']:.1f} tweets")
+                print(f"   📊 Moving Average: {ma_pred['total_predicted']:.1f}")
             except Exception as e:
-                print(f"   ❌ Moving Average failed: {e}")
+                print(f"   ❌ Moving Average failed")
         
         if self.include_linear_trend:
             try:
                 trend_pred = self.calculate_linear_trend_prediction(current_time)
                 additional_predictions['linear_trend'] = trend_pred
-                print(f"   📈 Linear Trend: {trend_pred['total_predicted']:.1f} tweets")
+                print(f"   📈 Linear Trend: {trend_pred['total_predicted']:.1f}")
             except Exception as e:
-                print(f"   ❌ Linear Trend failed: {e}")
+                print(f"   ❌ Linear Trend failed")
         
         # Store individual predictions for analysis
         self.individual_predictions = {**individual_results, **additional_predictions}
@@ -473,8 +528,7 @@ class EnsembleTweetPredictor:
         # Combine predictions using weighted average (main models) + additional methods
         ensemble_prediction = self._combine_predictions(individual_results, additional_predictions, current_time)
         
-        print(f"\n🎯 ENSEMBLE RESULT: {ensemble_prediction['total_predicted']:.1f} tweets")
-        print(f"   Confidence: {ensemble_prediction['confidence_interval']['lower']:.1f} - {ensemble_prediction['confidence_interval']['upper']:.1f}")
+        print(f"🎯 ENSEMBLE: {ensemble_prediction['total_predicted']:.1f} tweets ({ensemble_prediction['confidence_interval']['lower']:.1f}-{ensemble_prediction['confidence_interval']['upper']:.1f})")
         
         return ensemble_prediction
     
