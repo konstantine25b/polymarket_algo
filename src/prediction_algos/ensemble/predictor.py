@@ -8,6 +8,13 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
+# Suppress verbose logging from Neural Prophet and Prophet
+import logging
+logging.getLogger('neuralprophet').setLevel(logging.ERROR)
+logging.getLogger('prophet').setLevel(logging.ERROR)
+logging.getLogger('cmdstanpy').setLevel(logging.ERROR)
+logging.getLogger('pytorch_lightning').setLevel(logging.ERROR)
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -21,16 +28,17 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from constants import TWEET_COUNT_FRAMES, ET_TIMEZONE
 
 from .data_processor import EnsembleTweetDataProcessor
-from prediction_algos.neural_prophet import NeuralTweetPredictor, FastNeuralTweetPredictor
+from prediction_algos.neural_prophet import NeuralTweetPredictor, FastNeuralTweetPredictor, EnhancedNeuralTweetPredictor
 from prediction_algos.facebook_prophet import TweetPredictor as FacebookTweetPredictor, EnhancedTweetPredictor as EnhancedFacebookTweetPredictor
-from prediction_algos.timesfm import TimesFMTweetPredictor, FastTimesFMTweetPredictor
+from prediction_algos.timesfm import TimesFMTweetPredictor, FastTimesFMTweetPredictor, EnhancedTimesFMTweetPredictor
 
 
 class EnsembleTweetPredictor:
     """Ensemble predictor combining multiple forecasting models with weight control and additional prediction methods."""
     
     def __init__(self, data_path=None, save_plots=True, use_fast_models=False, 
-                 neural_prophet_weight=0.33, facebook_prophet_weight=0.34, timesfm_weight=0.33,
+                 neural_prophet_weight=0.15, facebook_prophet_weight=0.40, timesfm_weight=0.40,
+                 moving_average_weight=0.025, linear_trend_weight=0.025,
                  include_moving_average=True, include_linear_trend=True):
         """
         Initialize the ensemble predictor.
@@ -42,6 +50,8 @@ class EnsembleTweetPredictor:
             neural_prophet_weight (float): Weight for Neural Prophet model (0 to exclude)
             facebook_prophet_weight (float): Weight for Facebook Prophet model (0 to exclude)
             timesfm_weight (float): Weight for TimesFM model (0 to exclude)
+            moving_average_weight (float): Weight for moving average predictions (0 to exclude)
+            linear_trend_weight (float): Weight for linear trend predictions (0 to exclude)
             include_moving_average (bool): Whether to include moving average predictions
             include_linear_trend (bool): Whether to include linear trend predictions
         """
@@ -50,42 +60,35 @@ class EnsembleTweetPredictor:
         self.use_fast_models = use_fast_models
         self.plots_dir = Path("src/prediction_algos/ensemble/plots")
         
-        # Weight control - normalize weights if any are provided
-        raw_weights = {
+        # Store all weights
+        self.raw_weights = {
             'neural_prophet': neural_prophet_weight,
             'facebook_prophet': facebook_prophet_weight,
-            'timesfm': timesfm_weight
+            'timesfm': timesfm_weight,
+            'moving_average': moving_average_weight,
+            'linear_trend': linear_trend_weight
         }
         
-        # Filter out models with 0 weight
-        active_weights = {k: v for k, v in raw_weights.items() if v > 0}
+        # Filter out methods with 0 weight
+        active_weights = {k: v for k, v in self.raw_weights.items() if v > 0}
         
-        # Check if we have models or additional methods
-        has_additional_methods = include_moving_average or include_linear_trend
+        if not active_weights:
+            raise ValueError("At least one prediction method must have weight > 0!")
         
-        if not active_weights and not has_additional_methods:
-            raise ValueError("At least one model weight must be greater than 0, or additional methods must be enabled!")
+        # Normalize weights to sum to 1
+        total_weight = sum(active_weights.values())
+        self.normalized_weights = {k: v/total_weight for k, v in active_weights.items()}
         
-        # Normalize weights to sum to 1 (only if we have active weights)
-        if active_weights:
-            total_weight = sum(active_weights.values())
-            self.model_weights = {k: v/total_weight for k, v in active_weights.items()}
-            
-            # Add remaining models with 0 weight
-            for model in ['neural_prophet', 'facebook_prophet', 'timesfm']:
-                if model not in self.model_weights:
-                    self.model_weights[model] = 0.0
-        else:
-            # No models active, set all weights to 0
-            self.model_weights = {
-                'neural_prophet': 0.0,
-                'facebook_prophet': 0.0,
-                'timesfm': 0.0
-            }
+        # Set model weights (only for ML models)
+        self.model_weights = {
+            'neural_prophet': self.normalized_weights.get('neural_prophet', 0.0),
+            'facebook_prophet': self.normalized_weights.get('facebook_prophet', 0.0),
+            'timesfm': self.normalized_weights.get('timesfm', 0.0)
+        }
         
         # Additional prediction methods
-        self.include_moving_average = include_moving_average
-        self.include_linear_trend = include_linear_trend
+        self.include_moving_average = include_moving_average and moving_average_weight > 0
+        self.include_linear_trend = include_linear_trend and linear_trend_weight > 0
         
         # Create plots directory
         if self.save_plots:
@@ -99,11 +102,9 @@ class EnsembleTweetPredictor:
         # Store individual predictions for analysis
         self.individual_predictions = {}
         
-        print(f"🎯 Ensemble initialized with weights: {self.model_weights}")
-        if self.include_moving_average:
-            print("📊 Including moving average predictions")
-        if self.include_linear_trend:
-            print("📈 Including linear trend predictions")
+        # Simplified initialization message
+        active_methods = [f"{k}: {v:.1%}" for k, v in self.normalized_weights.items()]
+        print(f"🎯 Ensemble initialized: {', '.join(active_methods)}")
         
     def prepare_models(self, fast_mode=False):
         """
@@ -112,7 +113,7 @@ class EnsembleTweetPredictor:
         Args:
             fast_mode (bool): Whether to use fast training mode
         """
-        print("🔥 ENSEMBLE MODE: Preparing selected forecasting models...")
+        print("🔥 Preparing forecasting models...")
         
         # Determine which models to use
         use_fast = self.use_fast_models or fast_mode
@@ -126,7 +127,7 @@ class EnsembleTweetPredictor:
         if 'neural_prophet' in active_models:
             try:
                 model_count += 1
-                print(f"\n📊 [{model_count}/{len(active_models)}] Preparing Neural Prophet model...")
+                print(f"📊 [{model_count}/{len(active_models)}] Neural Prophet...")
                 if use_fast:
                     self.neural_prophet_predictor = FastNeuralTweetPredictor(
                         data_path=self.data_processor.data_path,
@@ -134,34 +135,46 @@ class EnsembleTweetPredictor:
                     )
                     self.neural_prophet_predictor.prepare_model()
                 else:
+                    # Use Enhanced Neural Prophet by default
+                    self.neural_prophet_predictor = EnhancedNeuralTweetPredictor(
+                        data_path=self.data_processor.data_path,
+                        save_plots=False
+                    )
+                    self.neural_prophet_predictor.prepare_model()  # Enhanced Neural Prophet uses prepare_model() not prepare_models()
+                
+                print("   ✅ Ready")
+                
+            except Exception as e:
+                print(f"   ❌ Enhanced failed: {e}")
+                # Fallback to basic Neural Prophet
+                try:
                     self.neural_prophet_predictor = NeuralTweetPredictor(
                         data_path=self.data_processor.data_path,
                         save_plots=False
                     )
                     self.neural_prophet_predictor.prepare_model()
-                
-                print("✅ Neural Prophet model ready")
-                
-            except Exception as e:
-                print(f"❌ Neural Prophet model failed: {e}")
-                self.neural_prophet_predictor = None
-                self.model_weights['neural_prophet'] = 0.0
+                    print("   ✅ Ready (Basic)")
+                except Exception as e2:
+                    print(f"   ❌ Both failed: {e2}")
+                    self.neural_prophet_predictor = None
+                    self.model_weights['neural_prophet'] = 0.0
         
         # 2. Facebook Prophet Model
         if 'facebook_prophet' in active_models:
             try:
                 model_count += 1
-                print(f"\n📈 [{model_count}/{len(active_models)}] Preparing Facebook Prophet model...")
+                print(f"📈 [{model_count}/{len(active_models)}] Facebook Prophet...")
+                # Use Enhanced Facebook Prophet by default
                 self.facebook_prophet_predictor = EnhancedFacebookTweetPredictor(
                     data_path=self.data_processor.data_path,
                     save_plots=False
                 )
                 self.facebook_prophet_predictor.prepare_models()  # Enhanced model uses prepare_models()
                 
-                print("✅ Facebook Prophet (Enhanced) model ready")
+                print("   ✅ Ready")
                 
             except Exception as e:
-                print(f"❌ Facebook Prophet model failed: {e}")
+                print(f"   ❌ Enhanced failed: {e}")
                 # Fallback to basic Prophet
                 try:
                     self.facebook_prophet_predictor = FacebookTweetPredictor(
@@ -169,9 +182,9 @@ class EnsembleTweetPredictor:
                         save_plots=False
                     )
                     self.facebook_prophet_predictor.prepare_model()
-                    print("✅ Facebook Prophet (Basic) model ready")
+                    print("   ✅ Ready (Basic)")
                 except Exception as e2:
-                    print(f"❌ Facebook Prophet fallback also failed: {e2}")
+                    print(f"   ❌ Both failed: {e2}")
                     self.facebook_prophet_predictor = None
                     self.model_weights['facebook_prophet'] = 0.0
         
@@ -179,7 +192,7 @@ class EnsembleTweetPredictor:
         if 'timesfm' in active_models:
             try:
                 model_count += 1
-                print(f"\n🤖 [{model_count}/{len(active_models)}] Preparing TimesFM model...")
+                print(f"🤖 [{model_count}/{len(active_models)}] TimesFM...")
                 if use_fast:
                     self.timesfm_predictor = FastTimesFMTweetPredictor(
                         data_path=self.data_processor.data_path,
@@ -187,18 +200,26 @@ class EnsembleTweetPredictor:
                     )
                     self.timesfm_predictor.prepare_model()
                 else:
-                    self.timesfm_predictor = TimesFMTweetPredictor(
-                        data_path=self.data_processor.data_path,
-                        save_plots=False
-                    )
-                    self.timesfm_predictor.prepare_model()
+                    # Use Enhanced TimesFM by default
+                    try:
+                        self.timesfm_predictor = EnhancedTimesFMTweetPredictor(
+                            data_path=self.data_processor.data_path,
+                            save_plots=False
+                        )
+                        self.timesfm_predictor.prepare_models()  # Enhanced version uses prepare_models()
+                    except ImportError:
+                        # Fallback to basic TimesFM if enhanced not available
+                        self.timesfm_predictor = TimesFMTweetPredictor(
+                            data_path=self.data_processor.data_path,
+                            save_plots=False
+                        )
+                        self.timesfm_predictor.prepare_model()
                 
-                print("✅ TimesFM model ready")
+                print("   ✅ Ready")
                 
             except Exception as e:
-                print(f"❌ TimesFM model failed: {e}")
+                print(f"   ❌ Failed: {e}")
                 self.timesfm_predictor = None
-                self.model_weights['timesfm'] = 0.0
         
         # Renormalize weights after any failures
         self._renormalize_weights()
@@ -357,7 +378,7 @@ class EnsembleTweetPredictor:
         if not available_models and not self.include_moving_average and not self.include_linear_trend:
             raise RuntimeError("No models or prediction methods available!")
         
-        print("\n🔮 Generating ensemble predictions...")
+        print("🔮 Generating predictions...")
         
         # Collect individual predictions
         individual_results = {}
@@ -365,8 +386,11 @@ class EnsembleTweetPredictor:
         # Neural Prophet prediction
         if self.neural_prophet_predictor is not None and self.model_weights['neural_prophet'] > 0:
             try:
-                print("📊 Neural Prophet predicting...")
-                neural_pred = self.neural_prophet_predictor.generate_predictions(current_time)
+                # Check if it's enhanced version
+                if hasattr(self.neural_prophet_predictor, 'generate_enhanced_predictions'):
+                    neural_pred = self.neural_prophet_predictor.generate_enhanced_predictions(current_time)
+                else:
+                    neural_pred = self.neural_prophet_predictor.generate_predictions(current_time)
                 individual_results['neural_prophet'] = neural_pred
                 
                 # Extract total_predicted for display (handle nested format)
@@ -374,14 +398,13 @@ class EnsembleTweetPredictor:
                     total_pred = neural_pred['prediction_results'].get('total_predicted', 'N/A')
                 else:
                     total_pred = neural_pred.get('total_predicted', 'N/A')
-                print(f"   Neural Prophet: {total_pred:.1f} tweets (weight: {self.model_weights['neural_prophet']:.3f})" if isinstance(total_pred, (int, float)) else f"   Neural Prophet: {total_pred}")
+                print(f"   📊 Neural Prophet: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   📊 Neural Prophet: {total_pred}")
             except Exception as e:
-                print(f"❌ Neural Prophet prediction failed: {e}")
+                print(f"   ❌ Neural Prophet failed: {e}")
         
         # Facebook Prophet prediction
         if self.facebook_prophet_predictor is not None and self.model_weights['facebook_prophet'] > 0:
             try:
-                print("📈 Facebook Prophet predicting...")
                 if hasattr(self.facebook_prophet_predictor, 'generate_enhanced_predictions'):
                     # Enhanced version
                     facebook_pred = self.facebook_prophet_predictor.generate_enhanced_predictions(current_time)
@@ -392,46 +415,54 @@ class EnsembleTweetPredictor:
                 
                 # Extract total_predicted for display
                 total_pred = facebook_pred.get('total_predicted', 'N/A')
-                print(f"   Facebook Prophet: {total_pred:.1f} tweets (weight: {self.model_weights['facebook_prophet']:.3f})" if isinstance(total_pred, (int, float)) else f"   Facebook Prophet: {total_pred}")
+                print(f"   📈 Facebook Prophet: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   📈 Facebook Prophet: {total_pred}")
             except Exception as e:
-                print(f"❌ Facebook Prophet prediction failed: {e}")
+                print(f"   ❌ Facebook Prophet failed: {e}")
         
         # TimesFM prediction
         if self.timesfm_predictor is not None and self.model_weights['timesfm'] > 0:
             try:
-                print("🤖 TimesFM predicting...")
-                timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
+                # Enhanced TimesFM uses generate_predictions(), not generate_enhanced_predictions()
+                if hasattr(self.timesfm_predictor, 'models') and hasattr(self.timesfm_predictor, '_create_ensemble_prediction'):
+                    # This is Enhanced TimesFM
+                    timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
+                else:
+                    # This is basic TimesFM
+                    timesfm_pred = self.timesfm_predictor.generate_predictions(current_time)
                 individual_results['timesfm'] = timesfm_pred
                 
-                # Extract total_predicted for display (handle nested format)
-                if 'prediction_results' in timesfm_pred:
+                # Extract total_predicted for display (handle different enhanced formats)
+                if 'ensemble_results' in timesfm_pred:
+                    # Enhanced TimesFM format: {'ensemble_results': {'total_predicted': ...}}
+                    total_pred = timesfm_pred['ensemble_results'].get('total_predicted', 'N/A')
+                elif 'prediction_results' in timesfm_pred:
+                    # Basic TimesFM format: {'prediction_results': {'total_predicted': ...}}
                     total_pred = timesfm_pred['prediction_results'].get('total_predicted', 'N/A')
                 else:
+                    # Fallback
                     total_pred = timesfm_pred.get('total_predicted', 'N/A')
-                print(f"   TimesFM: {total_pred:.1f} tweets (weight: {self.model_weights['timesfm']:.3f})" if isinstance(total_pred, (int, float)) else f"   TimesFM: {total_pred}")
+                print(f"   🤖 TimesFM: {total_pred:.1f} tweets" if isinstance(total_pred, (int, float)) else f"   🤖 TimesFM: {total_pred}")
             except Exception as e:
-                print(f"❌ TimesFM prediction failed: {e}")
+                print(f"   ❌ TimesFM failed: {e}")
         
         # Additional prediction methods
         additional_predictions = {}
         
         if self.include_moving_average:
             try:
-                print("📊 Moving Average predicting...")
                 ma_pred = self.calculate_moving_average_prediction(current_time)
                 additional_predictions['moving_average'] = ma_pred
-                print(f"   Moving Average: {ma_pred['total_predicted']:.1f} tweets")
+                print(f"   📊 Moving Average: {ma_pred['total_predicted']:.1f} tweets")
             except Exception as e:
-                print(f"❌ Moving Average prediction failed: {e}")
+                print(f"   ❌ Moving Average failed: {e}")
         
         if self.include_linear_trend:
             try:
-                print("📈 Linear Trend predicting...")
                 trend_pred = self.calculate_linear_trend_prediction(current_time)
                 additional_predictions['linear_trend'] = trend_pred
-                print(f"   Linear Trend: {trend_pred['total_predicted']:.1f} tweets (slope: {trend_pred.get('daily_trend', 0):.2f})")
+                print(f"   📈 Linear Trend: {trend_pred['total_predicted']:.1f} tweets")
             except Exception as e:
-                print(f"❌ Linear Trend prediction failed: {e}")
+                print(f"   ❌ Linear Trend failed: {e}")
         
         # Store individual predictions for analysis
         self.individual_predictions = {**individual_results, **additional_predictions}
@@ -449,7 +480,7 @@ class EnsembleTweetPredictor:
     
     def _combine_predictions(self, individual_results, additional_predictions, current_time):
         """
-        Combine individual model predictions using weighted averaging with additional methods.
+        Combine individual model predictions using the normalized weight system.
         
         Args:
             individual_results (dict): Individual model predictions
@@ -463,15 +494,26 @@ class EnsembleTweetPredictor:
         weights = []
         confidence_intervals = []
         
-        # Extract predictions and weights from main models
+        # Extract predictions and weights from main models using normalized weights
         for model_name, result in individual_results.items():
-            if model_name in self.model_weights and self.model_weights[model_name] > 0:
+            model_weight = self.normalized_weights.get(model_name, 0.0)
+            if model_weight > 0:
                 # Handle different return formats from individual models
                 total_predicted = None
                 confidence_interval = None
                 
+                # Enhanced TimesFM format: {'ensemble_results': {'total_predicted': ...}}
+                if 'ensemble_results' in result:
+                    total_predicted = result['ensemble_results'].get('total_predicted')
+                    if 'confidence_interval' in result['ensemble_results']:
+                        ci = result['ensemble_results']['confidence_interval']
+                        if isinstance(ci, dict):
+                            confidence_interval = (ci['lower'], ci['upper'])
+                        else:
+                            confidence_interval = ci
+                
                 # Neural Prophet format: {'prediction_results': {'total_predicted': ...}}
-                if 'prediction_results' in result:
+                elif 'prediction_results' in result:
                     total_predicted = result['prediction_results'].get('total_predicted')
                     if 'confidence_interval' in result['prediction_results']:
                         ci = result['prediction_results']['confidence_interval']
@@ -498,7 +540,7 @@ class EnsembleTweetPredictor:
                     continue
                 
                 predictions.append(total_predicted)
-                weights.append(self.model_weights[model_name])
+                weights.append(model_weight)
                 
                 # Handle confidence intervals
                 if confidence_interval is None:
@@ -509,33 +551,33 @@ class EnsembleTweetPredictor:
                 
                 confidence_intervals.append(confidence_interval)
         
-        # Handle case where no main model predictions are available
-        if not predictions:
-            print("⚠️  No main model predictions available, using additional methods only")
-            
-            # Use additional predictions if available
-            if additional_predictions:
-                for method_name, result in additional_predictions.items():
-                    total_predicted = result.get('total_predicted')
-                    confidence_interval = result.get('confidence_interval', {})
+        # Add additional prediction methods using normalized weights
+        for method_name, result in additional_predictions.items():
+            method_weight = self.normalized_weights.get(method_name, 0.0)
+            if method_weight > 0:
+                total_predicted = result.get('total_predicted')
+                confidence_interval = result.get('confidence_interval', {})
+                
+                if total_predicted is not None:
+                    predictions.append(total_predicted)
+                    weights.append(method_weight)
                     
-                    if total_predicted is not None:
-                        predictions.append(total_predicted)
-                        weights.append(1.0 / len(additional_predictions))  # Equal weight for additional methods
-                        
-                        if isinstance(confidence_interval, dict):
-                            ci = (confidence_interval.get('lower', total_predicted * 0.9), 
-                                  confidence_interval.get('upper', total_predicted * 1.1))
-                        else:
-                            ci = (total_predicted * 0.9, total_predicted * 1.1)
-                        confidence_intervals.append(ci)
-            
-            if not predictions:
-                raise ValueError("No valid predictions to combine!")
+                    if isinstance(confidence_interval, dict):
+                        ci = (confidence_interval.get('lower', total_predicted * 0.9), 
+                              confidence_interval.get('upper', total_predicted * 1.1))
+                    else:
+                        ci = (total_predicted * 0.9, total_predicted * 1.1)
+                    confidence_intervals.append(ci)
         
-        # Normalize weights
+        if not predictions:
+            raise ValueError("No valid predictions to combine!")
+        
+        # Use weights as-is since they're already normalized
         total_weight = sum(weights)
-        weights = [w / total_weight for w in weights]
+        if total_weight > 0:
+            weights = [w / total_weight for w in weights]  # Re-normalize in case some methods failed
+        else:
+            weights = [1.0 / len(predictions)] * len(predictions)  # Equal weights fallback
         
         # Weighted average prediction
         ensemble_prediction = sum(p * w for p, w in zip(predictions, weights))
@@ -550,29 +592,30 @@ class EnsembleTweetPredictor:
         # Get current week data for context
         week_data = self.data_processor.get_current_week_data(current_time)
         
-        # Build model contributions including additional methods
+        # Build model contributions
         model_contributions = {}
         
         # Add main model contributions
         main_model_names = list(individual_results.keys())
         for i, model in enumerate(main_model_names):
-            if i < len(predictions):
+            if i < len(predictions) and model in individual_results:
                 model_contributions[model] = {
                     'prediction': predictions[i], 
                     'weight': weights[i],
                     'type': 'main_model'
                 }
         
-        # Add additional method contributions if main models failed
-        if not individual_results and additional_predictions:
-            additional_names = list(additional_predictions.keys())
-            for i, method in enumerate(additional_names):
-                if i < len(predictions):
-                    model_contributions[method] = {
-                        'prediction': predictions[i], 
-                        'weight': weights[i],
-                        'type': 'additional_method'
-                    }
+        # Add additional method contributions  
+        additional_names = list(additional_predictions.keys())
+        main_count = len([m for m in main_model_names if m in individual_results])
+        for i, method in enumerate(additional_names):
+            pred_index = main_count + i
+            if pred_index < len(predictions):
+                model_contributions[method] = {
+                    'prediction': predictions[pred_index], 
+                    'weight': weights[pred_index],
+                    'type': 'additional_method'
+                }
         
         # Build ensemble result
         ensemble_result = {
@@ -588,7 +631,7 @@ class EnsembleTweetPredictor:
             'model_contributions': model_contributions,
             'individual_predictions': individual_results,
             'additional_predictions': additional_predictions,
-            'ensemble_method': 'weighted_average_with_additionals'
+            'ensemble_method': 'weighted_average_normalized'
         }
         
         return ensemble_result
@@ -689,38 +732,38 @@ class EnsembleTweetPredictor:
     
     def print_prediction_summary(self, prediction_summary):
         """
-        Print a comprehensive ensemble prediction summary.
+        Print a simplified ensemble prediction summary.
         
         Args:
             prediction_summary (dict): Results from generate_predictions()
         """
-        print("\n" + "="*60)
+        print("\n" + "="*50)
         print("🔥 ENSEMBLE PREDICTION SUMMARY")
-        print("="*60)
+        print("="*50)
         
         print(f"Current tweets: {prediction_summary['current_tweets']}")
         print(f"Total predicted: {prediction_summary['total_predicted']:.1f}")
-        print(f"80% Confidence interval: {prediction_summary['confidence_interval']['lower']:.1f} - {prediction_summary['confidence_interval']['upper']:.1f}")
+        print(f"80% Confidence: {prediction_summary['confidence_interval']['lower']:.1f} - {prediction_summary['confidence_interval']['upper']:.1f}")
         
         print(f"\n🤖 MODEL CONTRIBUTIONS:")
         for model, contrib in prediction_summary['model_contributions'].items():
             print(f"   {model}: {contrib['prediction']:.1f} tweets (weight: {contrib['weight']:.3f})")
         
-        print(f"\n📊 PROBABILITIES BY TIME FRAME:")
+        print(f"\n📊 TOP PROBABILITIES:")
         
-        # Sort by probability (descending)
+        # Sort by probability (descending) and show top 8
         sorted_frames = sorted(
             prediction_summary['predictions_by_frame'].items(),
             key=lambda x: x[1]['probability'],
             reverse=True
         )
         
-        for frame_name, frame_data in sorted_frames:
+        for frame_name, frame_data in sorted_frames[:8]:
             prob = frame_data['probability']
             range_str = frame_data['range']
-            print(f"{range_str:20s}: {prob:8.3f} ({prob*100:5.1f}%)")
+            print(f"{range_str:20s}: {prob*100:5.1f}%")
         
-        print("\n" + "="*60)
+        print("\n" + "="*50)
     
     def plot_predictions(self, prediction_summary, save_path=None):
         """
@@ -770,8 +813,18 @@ class EnsembleTweetPredictor:
                 total_predicted = None
                 confidence_interval = None
                 
+                # Enhanced TimesFM format: {'ensemble_results': {'total_predicted': ...}}
+                if 'ensemble_results' in pred:
+                    total_predicted = pred['ensemble_results'].get('total_predicted')
+                    if 'confidence_interval' in pred['ensemble_results']:
+                        ci = pred['ensemble_results']['confidence_interval']
+                        if isinstance(ci, dict):
+                            confidence_interval = (ci['lower'], ci['upper'])
+                        else:
+                            confidence_interval = ci
+                
                 # Neural Prophet format: {'prediction_results': {'total_predicted': ...}}
-                if 'prediction_results' in pred:
+                elif 'prediction_results' in pred:
                     total_predicted = pred['prediction_results'].get('total_predicted')
                     if 'confidence_interval' in pred['prediction_results']:
                         ci = pred['prediction_results']['confidence_interval']
@@ -853,8 +906,14 @@ class EnsembleTweetPredictor:
                 current_tweets = None
                 predicted_remaining = None
                 
+                # Enhanced TimesFM format: {'ensemble_results': {'total_predicted': ...}}
+                if 'ensemble_results' in pred_data:
+                    total_predicted = pred_data['ensemble_results'].get('total_predicted')
+                    current_tweets = pred_data['ensemble_results'].get('current_tweets')
+                    predicted_remaining = pred_data['ensemble_results'].get('remaining_tweets')
+                
                 # Neural Prophet format: {'prediction_results': {'total_predicted': ...}}
-                if 'prediction_results' in pred_data:
+                elif 'prediction_results' in pred_data:
                     total_predicted = pred_data['prediction_results'].get('total_predicted')
                     current_tweets = pred_data['prediction_results'].get('current_tweets')
                     predicted_remaining = pred_data['prediction_results'].get('remaining_tweets')

@@ -1,238 +1,258 @@
-# Ensemble Tweet Count Predictor
+# Ensemble Tweet Prediction Model
 
-A **flexible ensemble implementation** that combines Neural Prophet, Facebook Prophet, and TimesFM models with **custom weight controls** and **additional prediction methods** (moving averages, linear trends) for predicting Elon Musk's weekly tweet counts.
+An ensemble forecasting model that combines multiple prediction algorithms to generate robust tweet count predictions with confidence intervals and probabilities.
 
-## 🚀 Quick Start Commands
+## Features
 
-### Basic Ensemble (Default Weights)
+- **Enhanced Models by Default**: Uses Enhanced Neural Prophet, Enhanced Facebook Prophet, and Enhanced TimesFM
+- **Configurable Model Weights**: Flexible weight system for combining predictions
+- **Additional Prediction Methods**: Moving average and linear trend analysis
+- **Comprehensive Analysis**: Confidence intervals, probabilities, and detailed comparisons
+- **Minimal Output**: Reduced verbosity with essential information only
+- **No Plots by Default**: Lightweight execution without automatic plot generation
+
+## Default Configuration
+
+```
+📊 Model Weights:
+   Neural Prophet: 15.0%      (Enhanced version)
+   Facebook Prophet: 40.0%    (Enhanced version)
+   TimesFM: 40.0%            (Enhanced version)
+   Moving Average: 2.5%       (7-day window)
+   Linear Trend: 2.5%         (14-day trend)
+```
+
+## Quick Start
+
+### Basic Usage (Enhanced Models, No Plots)
 
 ```bash
-# Standard ensemble with all models (recommended)
 python -m src.prediction_algos.ensemble.main
+```
 
-# Fast ensemble mode (using fast individual models)
+### With Custom Weights
+
+```bash
+python -m src.prediction_algos.ensemble.main \
+    --neural-prophet-weight 0.2 \
+    --facebook-prophet-weight 0.5 \
+    --timesfm-weight 0.3 \
+    --moving-average-weight 0 \
+    --linear-trend-weight 0
+```
+
+### Enable Plots
+
+```bash
+python -m src.prediction_algos.ensemble.main --plots
+```
+
+### Fast Mode (Uses Basic Models)
+
+```bash
 python -m src.prediction_algos.ensemble.main --fast
 ```
 
-### Custom Model Weights
-
-```bash
-# Only Facebook Prophet (disable others with weight 0)
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --timesfm-weight 0 --facebook-prophet-weight 1
-
-# Heavy Facebook Prophet, light others
-python -m src.prediction_algos.ensemble.main --facebook-prophet-weight 0.7 --neural-prophet-weight 0.2 --timesfm-weight 0.1
-
-# Only Neural Prophet and TimesFM (no Facebook Prophet)
-python -m src.prediction_algos.ensemble.main --facebook-prophet-weight 0 --neural-prophet-weight 0.6 --timesfm-weight 0.4
-```
-
-### Additional Prediction Methods Control
-
-```bash
-# Disable additional methods (only use main models)
-python -m src.prediction_algos.ensemble.main --no-moving-average --no-linear-trend
-
-# Only moving average predictions (disable all main models)
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --facebook-prophet-weight 0 --timesfm-weight 0
-
-# Only linear trend predictions
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --facebook-prophet-weight 0 --timesfm-weight 0 --no-moving-average
-```
-
-## 🎛️ Weight Control System
-
-### Model Weight Arguments
-
-| Argument                    | Default | Description                               |
-| --------------------------- | ------- | ----------------------------------------- |
-| `--neural-prophet-weight`   | 0.33    | Weight for Neural Prophet (0 = exclude)   |
-| `--facebook-prophet-weight` | 0.34    | Weight for Facebook Prophet (0 = exclude) |
-| `--timesfm-weight`          | 0.33    | Weight for TimesFM (0 = exclude)          |
-
-**Important Notes:**
-
-- Weights are automatically normalized (don't need to sum to 1)
-- Setting weight to `0` completely excludes that model
-- At least one model weight must be > 0
-
-### Examples of Weight Control
-
-```bash
-# Equal weights (default behavior)
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 1 --facebook-prophet-weight 1 --timesfm-weight 1
-
-# Facebook Prophet only
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --timesfm-weight 0
-
-# Neural Prophet dominant
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0.8 --facebook-prophet-weight 0.1 --timesfm-weight 0.1
-```
-
-## 📊 Additional Prediction Methods
-
-### Moving Average Prediction
-
-- Uses historical weekly tweet counts
-- 7-day window by default
-- Provides baseline statistical prediction
-- Enabled by default (use `--no-moving-average` to disable)
-
-### Linear Trend Prediction
-
-- Calculates recent trend from last 14 days
-- Projects trend forward for remaining week days
-- Shows daily trend slope in output
-- Enabled by default (use `--no-linear-trend` to disable)
-
-### Fallback Behavior
-
-- If all main models fail, additional methods provide backup predictions
-- If main models succeed, additional methods complement the ensemble
-- Always ensures at least one prediction method is available
-
-## 📋 Complete Command Reference
+## Command Line Options
 
 ### Basic Options
 
-```bash
-# Standard ensemble
-python -m src.prediction_algos.ensemble.main
+- `--data-path`: Path to tweet data CSV file
+- `--current-time`: Current time in YYYY-MM-DD HH:MM:SS format
+- `--fast`: Use fast mode (basic models instead of enhanced)
+- `--plots`: Enable plot generation (disabled by default)
 
-# Fast mode (quicker training)
-python -m src.prediction_algos.ensemble.main --fast
+### Model Weights (0.0 to exclude model)
 
-# No plots (faster execution)
-python -m src.prediction_algos.ensemble.main --no-plots
+- `--neural-prophet-weight`: Neural Prophet weight (default: 0.15)
+- `--facebook-prophet-weight`: Facebook Prophet weight (default: 0.40)
+- `--timesfm-weight`: TimesFM weight (default: 0.40)
+- `--moving-average-weight`: Moving average weight (default: 0.025)
+- `--linear-trend-weight`: Linear trend weight (default: 0.025)
 
-# Custom data path
-python -m src.prediction_algos.ensemble.main --data-path path/to/tweets.csv
+### Legacy Options (for backward compatibility)
 
-# Custom prediction time
-python -m src.prediction_algos.ensemble.main --current-time "2025-06-09 14:30:00"
+- `--no-moving-average`: Sets moving average weight to 0
+- `--no-linear-trend`: Sets linear trend weight to 0
+
+## Model Architecture
+
+### Enhanced Models (Default)
+
+1. **Enhanced Neural Prophet**: Advanced deep learning with multiple regressors
+2. **Enhanced Facebook Prophet**: Bayesian forecasting with seasonal components
+3. **Enhanced TimesFM**: Transformer-based time series model with attention
+
+### Fallback Strategy
+
+If enhanced models fail, the system automatically falls back to basic versions:
+
+- Enhanced Neural Prophet → Neural Prophet → Skip
+- Enhanced Facebook Prophet → Facebook Prophet → Skip
+- Enhanced TimesFM → TimesFM → Skip
+
+### Additional Methods
+
+- **Moving Average**: 7-day rolling average prediction
+- **Linear Trend**: 14-day linear regression trend analysis
+
+## Weight System
+
+Weights are automatically normalized to sum to 1.0:
+
+```python
+# Example: Custom weights
+raw_weights = {
+    'neural_prophet': 0.15,
+    'facebook_prophet': 0.40,
+    'timesfm': 0.40,
+    'moving_average': 0.025,
+    'linear_trend': 0.025
+}
+# Total: 1.0 (already normalized)
 ```
 
-### Weight Control Examples
+If any model fails, weights are re-normalized among remaining active models.
 
-```bash
-# Facebook Prophet only
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --timesfm-weight 0
+## Output Format
 
-# Neural Prophet + TimesFM (no Facebook Prophet)
-python -m src.prediction_algos.ensemble.main --facebook-prophet-weight 0
-
-# Custom weights with additional methods disabled
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0.5 --facebook-prophet-weight 0.3 --timesfm-weight 0.2 --no-moving-average --no-linear-trend
-```
-
-### Method Control Examples
-
-```bash
-# Only moving average (no models)
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --facebook-prophet-weight 0 --timesfm-weight 0 --no-linear-trend
-
-# Only linear trend (no models, no moving average)
-python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --facebook-prophet-weight 0 --timesfm-weight 0 --no-moving-average
-
-# Models + moving average only (no linear trend)
-python -m src.prediction_algos.ensemble.main --no-linear-trend
-```
-
-## 🔧 Technical Features
-
-### Weight Normalization
-
-- Input weights are automatically normalized to sum to 1.0
-- Example: `--neural-prophet-weight 2 --facebook-prophet-weight 1` becomes 0.667 and 0.333
-
-### Model Exclusion
-
-- Setting any weight to `0` completely excludes that model from:
-  - Training/preparation phase
-  - Prediction generation
-  - Ensemble combination
-  - Resource usage
-
-### Graceful Fallbacks
-
-- If a model fails during training → excluded automatically
-- If all main models fail → additional methods provide predictions
-- If some models fail → remaining models get renormalized weights
-
-### Additional Method Integration
-
-- Moving average and linear trend are calculated independently
-- Used as fallback when main models unavailable
-- Can be primary prediction source if all models disabled
-
-## 📊 Output Example
+### Minimal Console Output
 
 ```
 🔥 Ensemble Tweet Count Predictor
 ==================================================
 📊 Model Weights:
-   Neural Prophet: 0.500
-   Facebook Prophet: 0.500
-   TimesFM: DISABLED
-📈 Additional Methods: Moving Average, Linear Trend
+   Neural Prophet: 15.0%
+   Facebook Prophet: 40.0%
+   TimesFM: 40.0%
+   Moving Average: 2.5%
+   Linear Trend: 2.5%
 
-🎯 Ensemble initialized with weights: {'neural_prophet': 0.5, 'facebook_prophet': 0.5, 'timesfm': 0.0}
-📊 Including moving average predictions
-📈 Including linear trend predictions
+🔥 Preparing forecasting models...
+📊 [1/3] Neural Prophet...
+   ✅ Ready
+📈 [2/3] Facebook Prophet...
+   ✅ Ready
+🤖 [3/3] TimesFM...
+   ✅ Ready
 
-🔮 Generating ensemble predictions...
-📊 Neural Prophet predicting...
-   Neural Prophet: 194.8 tweets (weight: 0.500)
-📈 Facebook Prophet predicting...
-   Facebook Prophet: 193.7 tweets (weight: 0.500)
-📊 Moving Average predicting...
-   Moving Average: 185.2 tweets
-📈 Linear Trend predicting...
-   Linear Trend: 189.3 tweets (slope: 2.15)
+🎯 Ensemble ready with 3/3 models active
 
-🎯 ENSEMBLE RESULT: 194.3 tweets
-   Confidence: 140.1 - 238.5
+🔮 Generating predictions...
+   📊 Neural Prophet: 125.3 tweets
+   📈 Facebook Prophet: 142.7 tweets
+   🤖 TimesFM: 138.9 tweets
+   📊 Moving Average: 135.2 tweets
+   📈 Linear Trend: 140.1 tweets
 
-============================================================
+🎯 ENSEMBLE RESULT: 139.2 tweets
+   Confidence: 118.4 - 160.0
+
+==================================================
 🔥 ENSEMBLE PREDICTION SUMMARY
-============================================================
-Current tweets: 84
-Total predicted: 194.3
-80% Confidence interval: 140.1 - 238.5
+==================================================
+Current tweets: 85
+Total predicted: 139.2
+80% Confidence: 118.4 - 160.0
 
 🤖 MODEL CONTRIBUTIONS:
-   neural_prophet: 194.8 tweets (weight: 0.500)
-   facebook_prophet: 193.7 tweets (weight: 0.500)
+   neural_prophet: 125.3 tweets (weight: 0.150)
+   facebook_prophet: 142.7 tweets (weight: 0.400)
+   timesfm: 138.9 tweets (weight: 0.400)
+   moving_average: 135.2 tweets (weight: 0.025)
+   linear_trend: 140.1 tweets (weight: 0.025)
+
+📊 TOP PROBABILITIES:
+100-149              : 45.2%
+150-199              : 28.7%
+50-99                : 15.8%
+200-249              : 6.9%
+250-299              : 2.4%
+300-399              : 0.8%
+25-49                : 0.2%
+0-24                 : 0.0%
+==================================================
 ```
 
-## 🏗️ Project Structure
+## Example Use Cases
+
+### Disable Specific Models
+
+```bash
+# Only Facebook Prophet + TimesFM
+python -m src.prediction_algos.ensemble.main \
+    --neural-prophet-weight 0 \
+    --moving-average-weight 0 \
+    --linear-trend-weight 0
+```
+
+### Statistical Methods Only
+
+```bash
+# Moving Average + Linear Trend only
+python -m src.prediction_algos.ensemble.main \
+    --neural-prophet-weight 0 \
+    --facebook-prophet-weight 0 \
+    --timesfm-weight 0
+```
+
+### High TimesFM Weight
+
+```bash
+# Favor TimesFM heavily
+python -m src.prediction_algos.ensemble.main \
+    --neural-prophet-weight 0.1 \
+    --facebook-prophet-weight 0.1 \
+    --timesfm-weight 0.8
+```
+
+### Legacy Mode (Backward Compatibility)
+
+```bash
+# Old style flags still work
+python -m src.prediction_algos.ensemble.main \
+    --neural-prophet-weight 0 \
+    --facebook-prophet-weight 0 \
+    --timesfm-weight 0 \
+    --no-moving-average \
+    --no-linear-trend
+```
+
+## Technical Details
+
+### Model Integration
+
+- Each model provides predictions in different formats
+- Automatic format detection and normalization
+- Graceful error handling with fallbacks
+- Confidence interval estimation and aggregation
+
+### Performance Optimizations
+
+- Enhanced models disabled in fast mode for speed
+- Parallel model preparation where possible
+- Efficient weight normalization
+- Minimal logging and output
+
+### Dependencies
+
+- Uses existing individual model packages
+- Shared data processor for consistency
+- Compatible with all existing data formats
+- Follows workspace virtual environment rules
+
+## Files Structure
 
 ```
 src/prediction_algos/ensemble/
-├── __init__.py              # Module initialization
-├── data_processor.py        # Data loading and preprocessing
-├── predictor.py            # Main ensemble predictor with weight control
-├── main.py                 # CLI interface with all options
-└── README.md              # This file
+├── __init__.py              # Module exports
+├── data_processor.py        # Ensemble data processing
+├── predictor.py            # Main ensemble predictor
+├── main.py                 # CLI interface
+└── README.md               # This file
 ```
 
-## ⚙️ Installation
-
-All dependencies are included with the individual model packages:
-
-```bash
-# Neural Prophet dependencies
-pip install neuralprophet torch pytorch-lightning
-
-# Facebook Prophet dependencies
-pip install prophet
-
-# TimesFM dependencies
-pip install timesfm  # Optional - will use mock if unavailable
-
-# Additional dependencies
-pip install pandas numpy matplotlib seaborn scipy scikit-learn
-```
+The ensemble system provides a robust, configurable, and efficient way to combine multiple forecasting approaches while maintaining simplicity and reliability.
 
 ## 🎯 Model Comparison
 

@@ -23,32 +23,42 @@ def main():
                         help='Current time in YYYY-MM-DD HH:MM:SS format')
     parser.add_argument('--fast', action='store_true',
                         help='Use fast mode for quicker training')
-    parser.add_argument('--no-plots', action='store_true',
-                        help='Disable plot generation')
+    parser.add_argument('--plots', action='store_true',
+                        help='Enable plot generation (disabled by default)')
     
-    # Model weight controls
-    parser.add_argument('--neural-prophet-weight', type=float, default=0.33,
+    # Model weight controls - Updated defaults
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.15,
                         help='Weight for Neural Prophet model (0 to exclude)')
-    parser.add_argument('--facebook-prophet-weight', type=float, default=0.34,
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.40,
                         help='Weight for Facebook Prophet model (0 to exclude)')
-    parser.add_argument('--timesfm-weight', type=float, default=0.33,
+    parser.add_argument('--timesfm-weight', type=float, default=0.40,
                         help='Weight for TimesFM model (0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.025,
+                        help='Weight for moving average predictions (0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.025,
+                        help='Weight for linear trend predictions (0 to exclude)')
     
-    # Additional prediction methods
+    # Legacy flags for backward compatibility
     parser.add_argument('--no-moving-average', action='store_true',
-                        help='Disable moving average predictions')
+                        help='Disable moving average predictions (legacy)')
     parser.add_argument('--no-linear-trend', action='store_true',
-                        help='Disable linear trend predictions')
+                        help='Disable linear trend predictions (legacy)')
     
     # Parse arguments
     args = parser.parse_args()
     
-    # Validate weights
-    total_weight = args.neural_prophet_weight + args.facebook_prophet_weight + args.timesfm_weight
-    has_additional_methods = not args.no_moving_average or not args.no_linear_trend
+    # Handle legacy flags - override weights if legacy flags are used
+    if args.no_moving_average:
+        args.moving_average_weight = 0.0
+    if args.no_linear_trend:
+        args.linear_trend_weight = 0.0
     
-    if total_weight <= 0 and not has_additional_methods:
-        print("❌ Error: At least one model weight must be greater than 0, or additional methods must be enabled!")
+    # Validate that at least one method is enabled
+    total_weight = (args.neural_prophet_weight + args.facebook_prophet_weight + 
+                   args.timesfm_weight + args.moving_average_weight + args.linear_trend_weight)
+    
+    if total_weight <= 0:
+        print("❌ Error: At least one prediction method must have weight > 0!")
         sys.exit(1)
     
     # Parse current time if provided
@@ -64,49 +74,36 @@ def main():
         print("🔥 Ensemble Tweet Count Predictor")
         print("=" * 50)
         
-        # Display configuration
+        # Display configuration - only show active methods
         print(f"📊 Model Weights:")
         if args.neural_prophet_weight > 0:
-            print(f"   Neural Prophet: {args.neural_prophet_weight:.3f}")
-        else:
-            print(f"   Neural Prophet: DISABLED")
-        
+            print(f"   Neural Prophet: {args.neural_prophet_weight:.1%}")
         if args.facebook_prophet_weight > 0:
-            print(f"   Facebook Prophet: {args.facebook_prophet_weight:.3f}")
-        else:
-            print(f"   Facebook Prophet: DISABLED")
-        
+            print(f"   Facebook Prophet: {args.facebook_prophet_weight:.1%}")
         if args.timesfm_weight > 0:
-            print(f"   TimesFM: {args.timesfm_weight:.3f}")
-        else:
-            print(f"   TimesFM: DISABLED")
-        
-        additional_methods = []
-        if not args.no_moving_average:
-            additional_methods.append("Moving Average")
-        if not args.no_linear_trend:
-            additional_methods.append("Linear Trend")
-        
-        if additional_methods:
-            print(f"📈 Additional Methods: {', '.join(additional_methods)}")
-        else:
-            print(f"📈 Additional Methods: DISABLED")
+            print(f"   TimesFM: {args.timesfm_weight:.1%}")
+        if args.moving_average_weight > 0:
+            print(f"   Moving Average: {args.moving_average_weight:.1%}")
+        if args.linear_trend_weight > 0:
+            print(f"   Linear Trend: {args.linear_trend_weight:.1%}")
         
         if args.fast:
-            print("⚡ FAST MODE: Using fast individual models")
+            print("⚡ FAST MODE: Using optimized training")
         
         print()
         
         # Initialize ensemble predictor
         predictor = EnsembleTweetPredictor(
             data_path=args.data_path,
-            save_plots=not args.no_plots,
+            save_plots=args.plots,
             use_fast_models=args.fast,
             neural_prophet_weight=args.neural_prophet_weight,
             facebook_prophet_weight=args.facebook_prophet_weight,
             timesfm_weight=args.timesfm_weight,
-            include_moving_average=not args.no_moving_average,
-            include_linear_trend=not args.no_linear_trend
+            moving_average_weight=args.moving_average_weight,
+            linear_trend_weight=args.linear_trend_weight,
+            include_moving_average=args.moving_average_weight > 0,
+            include_linear_trend=args.linear_trend_weight > 0
         )
         
         # Prepare models
@@ -119,7 +116,7 @@ def main():
         predictor.print_prediction_summary(prediction_summary)
         
         # Generate plots
-        if not args.no_plots:
+        if args.plots:
             predictor.plot_predictions(prediction_summary)
         
     except KeyboardInterrupt:
