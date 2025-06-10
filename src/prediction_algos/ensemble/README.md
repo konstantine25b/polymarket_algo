@@ -5,26 +5,66 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 ## Features
 
 - **Enhanced Models by Default**: Uses Enhanced Neural Prophet, Enhanced Facebook Prophet, and Enhanced TimesFM
+- **Basic Prophet Integration**: Includes the custom Basic Prophet algorithm from polymarket_predictor
 - **Configurable Model Weights**: Flexible weight system for combining predictions
 - **Additional Prediction Methods**: Moving average and linear trend analysis
 - **Comprehensive Analysis**: Confidence intervals, probabilities, and detailed comparisons
 - **Minimal Output**: Reduced verbosity with essential information only
-- **No Plots by Default**: Lightweight execution without automatic plot generation
+- **Configurable Plots**: Plot generation can be enabled or disabled
 
 ## Default Configuration
 
 ```
 📊 Model Weights:
-   Neural Prophet: 15.0%      (Enhanced version)
-   Facebook Prophet: 40.0%    (Enhanced version)
-   TimesFM: 40.0%            (Enhanced version)
-   Moving Average: 2.5%       (7-day window)
-   Linear Trend: 2.5%         (14-day trend)
+   Neural Prophet: 17.0%      (Enhanced version)
+   Facebook Prophet: 25.0%    (Enhanced version)
+   TimesFM: 35.0%            (Enhanced version)
+   Basic Prophet: 20.0%       (Custom polymarket algorithm)
+   Moving Average: 1.5%       (7-day window)
+   Linear Trend: 1.5%         (14-day trend)
 ```
+
+## Prediction Models
+
+### 1. Neural Prophet (17% weight)
+
+- **Type**: Deep learning time series model
+- **Strengths**: Complex pattern recognition, trend analysis
+- **Version**: Enhanced Neural Prophet with multiple regressors
+
+### 2. Facebook Prophet (25% weight)
+
+- **Type**: Bayesian forecasting model
+- **Strengths**: Seasonal decomposition, trend changes, holidays
+- **Version**: Enhanced Facebook Prophet with advanced seasonality
+
+### 3. TimesFM (35% weight)
+
+- **Type**: Transformer-based foundation model
+- **Strengths**: Attention mechanisms, large-scale pre-training
+- **Version**: Enhanced TimesFM with ensemble capabilities
+
+### 4. Basic Prophet (20% weight)
+
+- **Type**: Custom algorithm from polymarket_predictor
+- **Strengths**: Historical rate blending, lognormal distribution modeling
+- **Features**: Current vs historical rate weighting, confidence intervals
+
+### 5. Moving Average (1.5% weight)
+
+- **Type**: Statistical baseline
+- **Method**: 7-day rolling window average
+- **Purpose**: Smooth trend continuation
+
+### 6. Linear Trend (1.5% weight)
+
+- **Type**: Statistical baseline
+- **Method**: 14-day linear regression
+- **Purpose**: Recent trend extrapolation
 
 ## Quick Start
 
-### Basic Usage (Enhanced Models, No Plots)
+### Basic Usage (All Models, No Plots)
 
 ```bash
 python -m src.prediction_algos.ensemble.main
@@ -34,17 +74,18 @@ python -m src.prediction_algos.ensemble.main
 
 ```bash
 python -m src.prediction_algos.ensemble.main \
-    --neural-prophet-weight 0.2 \
-    --facebook-prophet-weight 0.5 \
-    --timesfm-weight 0.3 \
-    --moving-average-weight 0 \
-    --linear-trend-weight 0
+    --neural-prophet-weight 0.17 \
+    --facebook-prophet-weight 0.25 \
+    --timesfm-weight 0.35 \
+    --basic-prophet-weight 0.20 \
+    --moving-average-weight 0.015 \
+    --linear-trend-weight 0.015
 ```
 
 ### Enable Plots
 
 ```bash
-python -m src.prediction_algos.ensemble.main --plots
+python -m src.prediction_algos.ensemble.main --no-plots false
 ```
 
 ### Fast Mode (Uses Basic Models)
@@ -60,20 +101,17 @@ python -m src.prediction_algos.ensemble.main --fast
 - `--data-path`: Path to tweet data CSV file
 - `--current-time`: Current time in YYYY-MM-DD HH:MM:SS format
 - `--fast`: Use fast mode (basic models instead of enhanced)
-- `--plots`: Enable plot generation (disabled by default)
+- `--no-plots`: Disable plot generation
+- `--ensemble-method`: Combination method (weighted_average, median, best_performer)
 
 ### Model Weights (0.0 to exclude model)
 
-- `--neural-prophet-weight`: Neural Prophet weight (default: 0.15)
-- `--facebook-prophet-weight`: Facebook Prophet weight (default: 0.40)
-- `--timesfm-weight`: TimesFM weight (default: 0.40)
-- `--moving-average-weight`: Moving average weight (default: 0.025)
-- `--linear-trend-weight`: Linear trend weight (default: 0.025)
-
-### Legacy Options (for backward compatibility)
-
-- `--no-moving-average`: Sets moving average weight to 0
-- `--no-linear-trend`: Sets linear trend weight to 0
+- `--neural-prophet-weight`: Neural Prophet weight (default: 0.17)
+- `--facebook-prophet-weight`: Facebook Prophet weight (default: 0.25)
+- `--timesfm-weight`: TimesFM weight (default: 0.35)
+- `--basic-prophet-weight`: Basic Prophet weight (default: 0.20)
+- `--moving-average-weight`: Moving average weight (default: 0.015)
+- `--linear-trend-weight`: Linear trend weight (default: 0.015)
 
 ## Model Architecture
 
@@ -82,6 +120,7 @@ python -m src.prediction_algos.ensemble.main --fast
 1. **Enhanced Neural Prophet**: Advanced deep learning with multiple regressors
 2. **Enhanced Facebook Prophet**: Bayesian forecasting with seasonal components
 3. **Enhanced TimesFM**: Transformer-based time series model with attention
+4. **Basic Prophet**: Custom polymarket algorithm with rate blending
 
 ### Fallback Strategy
 
@@ -90,6 +129,7 @@ If enhanced models fail, the system automatically falls back to basic versions:
 - Enhanced Neural Prophet → Neural Prophet → Skip
 - Enhanced Facebook Prophet → Facebook Prophet → Skip
 - Enhanced TimesFM → TimesFM → Skip
+- Basic Prophet → Always available (stateless)
 
 ### Additional Methods
 
@@ -101,13 +141,14 @@ If enhanced models fail, the system automatically falls back to basic versions:
 Weights are automatically normalized to sum to 1.0:
 
 ```python
-# Example: Custom weights
+# Example: Default weights
 raw_weights = {
-    'neural_prophet': 0.15,
-    'facebook_prophet': 0.40,
-    'timesfm': 0.40,
-    'moving_average': 0.025,
-    'linear_trend': 0.025
+    'neural_prophet': 0.17,
+    'facebook_prophet': 0.25,
+    'timesfm': 0.35,
+    'basic_prophet': 0.20,
+    'moving_average': 0.015,
+    'linear_trend': 0.015
 }
 # Total: 1.0 (already normalized)
 ```
@@ -119,48 +160,40 @@ If any model fails, weights are re-normalized among remaining active models.
 ### Minimal Console Output
 
 ```
-🔥 Ensemble Tweet Count Predictor
-==================================================
-📊 Model Weights:
-   Neural Prophet: 15.0%
-   Facebook Prophet: 40.0%
-   TimesFM: 40.0%
-   Moving Average: 2.5%
-   Linear Trend: 2.5%
+🎯 Ensemble initialized: neural_prophet: 17.0%, facebook_prophet: 25.0%, timesfm: 35.0%, basic_prophet: 20.0%, moving_average: 1.5%, linear_trend: 1.5%
 
-🔥 Preparing forecasting models...
-📊 [1/3] Neural Prophet...
-   ✅ Ready
-📈 [2/3] Facebook Prophet...
-   ✅ Ready
-🤖 [3/3] TimesFM...
-   ✅ Ready
+🔥 Preparing models...
+📊 Neural Prophet: ✅ (Enhanced)
+📈 Facebook Prophet: ✅
+🤖 TimesFM: ✅
+🔮 Basic Prophet: ✅ (Ready)
 
-🎯 Ensemble ready with 3/3 models active
+🎯 4/4 models ready
 
 🔮 Generating predictions...
-   📊 Neural Prophet: 125.3 tweets
-   📈 Facebook Prophet: 142.7 tweets
-   🤖 TimesFM: 138.9 tweets
-   📊 Moving Average: 135.2 tweets
-   📈 Linear Trend: 140.1 tweets
+   📊 Neural Prophet: 125.3
+   📈 Facebook Prophet: 142.7
+   🤖 TimesFM: 138.9
+   🔮 Basic Prophet: 144.2
+   📊 Moving Average: 135.2
+   📈 Linear Trend: 140.1
 
-🎯 ENSEMBLE RESULT: 139.2 tweets
-   Confidence: 118.4 - 160.0
+🎯 ENSEMBLE: 139.8 tweets (118.4-160.0)
 
 ==================================================
 🔥 ENSEMBLE PREDICTION SUMMARY
 ==================================================
 Current tweets: 85
-Total predicted: 139.2
+Total predicted: 139.8
 80% Confidence: 118.4 - 160.0
 
 🤖 MODEL CONTRIBUTIONS:
-   neural_prophet: 125.3 tweets (weight: 0.150)
-   facebook_prophet: 142.7 tweets (weight: 0.400)
-   timesfm: 138.9 tweets (weight: 0.400)
-   moving_average: 135.2 tweets (weight: 0.025)
-   linear_trend: 140.1 tweets (weight: 0.025)
+   neural_prophet: 125.3 tweets (weight: 0.170)
+   facebook_prophet: 142.7 tweets (weight: 0.250)
+   timesfm: 138.9 tweets (weight: 0.350)
+   basic_prophet: 144.2 tweets (weight: 0.200)
+   moving_average: 135.2 tweets (weight: 0.015)
+   linear_trend: 140.1 tweets (weight: 0.015)
 
 📊 TOP PROBABILITIES:
 100-149              : 45.2%
@@ -179,9 +212,10 @@ Total predicted: 139.2
 ### Disable Specific Models
 
 ```bash
-# Only Facebook Prophet + TimesFM
+# Only Basic Prophet + TimesFM
 python -m src.prediction_algos.ensemble.main \
     --neural-prophet-weight 0 \
+    --facebook-prophet-weight 0 \
     --moving-average-weight 0 \
     --linear-trend-weight 0
 ```
@@ -193,66 +227,134 @@ python -m src.prediction_algos.ensemble.main \
 python -m src.prediction_algos.ensemble.main \
     --neural-prophet-weight 0 \
     --facebook-prophet-weight 0 \
-    --timesfm-weight 0
+    --timesfm-weight 0 \
+    --basic-prophet-weight 0
 ```
 
 ### High TimesFM Weight
 
 ```bash
-# Favor TimesFM heavily
+# TimesFM dominant ensemble
 python -m src.prediction_algos.ensemble.main \
     --neural-prophet-weight 0.1 \
     --facebook-prophet-weight 0.1 \
-    --timesfm-weight 0.8
+    --timesfm-weight 0.7 \
+    --basic-prophet-weight 0.1
 ```
 
-### Legacy Mode (Backward Compatibility)
+### Basic Prophet Focus
 
 ```bash
-# Old style flags still work
+# Basic Prophet + Polymarket algorithm focus
 python -m src.prediction_algos.ensemble.main \
-    --neural-prophet-weight 0 \
-    --facebook-prophet-weight 0 \
-    --timesfm-weight 0 \
-    --no-moving-average \
-    --no-linear-trend
+    --neural-prophet-weight 0.1 \
+    --facebook-prophet-weight 0.2 \
+    --timesfm-weight 0.2 \
+    --basic-prophet-weight 0.5
 ```
 
-## Technical Details
+## Integration Details
 
-### Model Integration
+### Basic Prophet Algorithm
 
-- Each model provides predictions in different formats
-- Automatic format detection and normalization
-- Graceful error handling with fallbacks
-- Confidence interval estimation and aggregation
+The Basic Prophet component integrates the custom prediction algorithm from `src/polymarket_predictor` that:
 
-### Performance Optimizations
+1. **Calculates Current Rate**: Tweets per day since event start
+2. **Analyzes Historical Patterns**: Daily tweet statistics from historical data
+3. **Blends Rates**: Weighted combination of current and historical rates
+4. **Monte Carlo Simulation**: Lognormal distribution modeling for confidence intervals
+5. **Frame Probabilities**: Maps predictions to polymarket outcome frames
 
-- Enhanced models disabled in fast mode for speed
-- Parallel model preparation where possible
-- Efficient weight normalization
-- Minimal logging and output
+**Key Features:**
 
-### Dependencies
+- Adapts weighting based on elapsed time (more current data = higher current rate weight)
+- Uses lognormal distribution for realistic count modeling
+- Provides 90% confidence intervals
+- Compatible with polymarket frame structures
 
-- Uses existing individual model packages
-- Shared data processor for consistency
-- Compatible with all existing data formats
-- Follows workspace virtual environment rules
-
-## Files Structure
+### Data Flow
 
 ```
-src/prediction_algos/ensemble/
-├── __init__.py              # Module exports
-├── data_processor.py        # Ensemble data processing
-├── predictor.py            # Main ensemble predictor
-├── main.py                 # CLI interface
-└── README.md               # This file
+Tweet Data → EnsembleTweetDataProcessor → Individual Models
+                                       ↓
+Enhanced Models (ML) ← → Basic Prophet (Statistical)
+                                       ↓
+            Weighted Combination → Final Prediction
 ```
 
-The ensemble system provides a robust, configurable, and efficient way to combine multiple forecasting approaches while maintaining simplicity and reliability.
+## API Usage
+
+```python
+from src.prediction_algos.ensemble import EnsembleTweetPredictor
+
+# Initialize with custom weights
+predictor = EnsembleTweetPredictor(
+    data_path='data/tweets.csv',
+    neural_prophet_weight=0.17,
+    facebook_prophet_weight=0.25,
+    timesfm_weight=0.35,
+    basic_prophet_weight=0.20,
+    moving_average_weight=0.015,
+    linear_trend_weight=0.015
+)
+
+# Generate predictions
+results = predictor.generate_predictions()
+print(f"Prediction: {results['total_predicted']:.1f}")
+```
+
+## Fast Ensemble
+
+For quicker predictions, use the Fast variant:
+
+```python
+from src.prediction_algos.ensemble import FastEnsembleTweetPredictor
+
+# Uses basic models instead of enhanced versions
+fast_predictor = FastEnsembleTweetPredictor()
+results = fast_predictor.generate_predictions()
+```
+
+## Dependencies
+
+- Neural Prophet: `neuralprophet`, `pytorch`
+- Facebook Prophet: `prophet`
+- TimesFM: `timesfm` (requires TensorFlow)
+- Basic Prophet: Custom implementation (no external dependencies)
+- Visualization: `matplotlib`, `seaborn`
+- Data: `pandas`, `numpy`, `scipy`
+
+## Performance
+
+| Model            | Preparation Time | Prediction Time | Accuracy    |
+| ---------------- | ---------------- | --------------- | ----------- |
+| Neural Prophet   | ~30s             | ~2s             | High        |
+| Facebook Prophet | ~10s             | ~1s             | High        |
+| TimesFM          | ~15s             | ~3s             | Very High   |
+| Basic Prophet    | 0s               | ~1s             | Medium-High |
+| Moving Average   | 0s               | <1s             | Baseline    |
+| Linear Trend     | 0s               | <1s             | Baseline    |
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Model Import Errors**: Ensure all dependencies are installed
+2. **Data Format Issues**: Check CSV structure and timestamp format
+3. **Memory Issues**: Use `--fast` mode for large datasets
+4. **GPU Issues**: TimesFM may require GPU for optimal performance
+
+### Debug Mode
+
+```bash
+# Enable verbose output for debugging
+PYTHONPATH=. python -c "
+import logging
+logging.basicConfig(level=logging.DEBUG)
+from src.prediction_algos.ensemble.main import main
+main()
+" --fast
+```
 
 ## 🎯 Model Comparison
 

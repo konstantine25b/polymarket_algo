@@ -66,6 +66,9 @@ from prediction_algos.neural_prophet import NeuralTweetPredictor, FastNeuralTwee
 from prediction_algos.facebook_prophet import TweetPredictor as FacebookTweetPredictor, EnhancedTweetPredictor as EnhancedFacebookTweetPredictor
 from prediction_algos.timesfm import TimesFMTweetPredictor, FastTimesFMTweetPredictor, EnhancedTimesFMTweetPredictor
 
+# Import basic prophet from polymarket_predictor
+from src.polymarket_predictor.prophet_prediction import predict_with_prophet
+
 # Suppress TensorFlow/PyTorch warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['PYTHONWARNINGS'] = 'ignore'
@@ -88,9 +91,9 @@ class EnsembleTweetPredictor:
     """Ensemble predictor combining multiple forecasting models with weight control and additional prediction methods."""
     
     def __init__(self, data_path=None, save_plots=True, use_fast_models=False, 
-                 neural_prophet_weight=0.15, facebook_prophet_weight=0.40, timesfm_weight=0.40,
-                 moving_average_weight=0.025, linear_trend_weight=0.025,
-                 include_moving_average=True, include_linear_trend=True):
+                 neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.35,
+                 basic_prophet_weight=0.20, moving_average_weight=0.015, linear_trend_weight=0.015,
+                 include_basic_prophet=True, include_moving_average=True, include_linear_trend=True):
         """
         Initialize the ensemble predictor.
         
@@ -101,8 +104,10 @@ class EnsembleTweetPredictor:
             neural_prophet_weight (float): Weight for Neural Prophet model (0 to exclude)
             facebook_prophet_weight (float): Weight for Facebook Prophet model (0 to exclude)
             timesfm_weight (float): Weight for TimesFM model (0 to exclude)
+            basic_prophet_weight (float): Weight for Basic Prophet model (0 to exclude)
             moving_average_weight (float): Weight for moving average predictions (0 to exclude)
             linear_trend_weight (float): Weight for linear trend predictions (0 to exclude)
+            include_basic_prophet (bool): Whether to include basic prophet predictions
             include_moving_average (bool): Whether to include moving average predictions
             include_linear_trend (bool): Whether to include linear trend predictions
         """
@@ -116,6 +121,7 @@ class EnsembleTweetPredictor:
             'neural_prophet': neural_prophet_weight,
             'facebook_prophet': facebook_prophet_weight,
             'timesfm': timesfm_weight,
+            'basic_prophet': basic_prophet_weight,
             'moving_average': moving_average_weight,
             'linear_trend': linear_trend_weight
         }
@@ -134,10 +140,12 @@ class EnsembleTweetPredictor:
         self.model_weights = {
             'neural_prophet': self.normalized_weights.get('neural_prophet', 0.0),
             'facebook_prophet': self.normalized_weights.get('facebook_prophet', 0.0),
-            'timesfm': self.normalized_weights.get('timesfm', 0.0)
+            'timesfm': self.normalized_weights.get('timesfm', 0.0),
+            'basic_prophet': self.normalized_weights.get('basic_prophet', 0.0)
         }
         
         # Additional prediction methods
+        self.include_basic_prophet = include_basic_prophet and basic_prophet_weight > 0
         self.include_moving_average = include_moving_average and moving_average_weight > 0
         self.include_linear_trend = include_linear_trend and linear_trend_weight > 0
         
@@ -169,8 +177,9 @@ class EnsembleTweetPredictor:
         # Determine which models to use
         use_fast = self.use_fast_models or fast_mode
         
-        # Only prepare models with weight > 0
-        active_models = [model for model, weight in self.model_weights.items() if weight > 0]
+        # Only prepare models with weight > 0 (basic prophet doesn't need preparation)
+        active_models = [model for model, weight in self.model_weights.items() 
+                        if weight > 0 and model != 'basic_prophet']
         
         # 1. Neural Prophet Model
         if 'neural_prophet' in active_models:
@@ -274,6 +283,10 @@ class EnsembleTweetPredictor:
                 print(f"❌ Failed")
                 self.timesfm_predictor = None
         
+        # 4. Basic Prophet (doesn't need preparation)
+        if self.include_basic_prophet and self.model_weights.get('basic_prophet', 0) > 0:
+            print("🔮 Basic Prophet: ✅ (Ready)")
+        
         # Renormalize weights after any failures
         self._renormalize_weights()
         
@@ -281,7 +294,11 @@ class EnsembleTweetPredictor:
                                             self.facebook_prophet_predictor, 
                                             self.timesfm_predictor] if p is not None)
         
-        print(f"🎯 {active_models_final}/{len(active_models)} models ready")
+        # Add basic prophet to count if active
+        if self.include_basic_prophet and self.model_weights.get('basic_prophet', 0) > 0:
+            active_models_final += 1
+        
+        print(f"🎯 {active_models_final}/{len([m for m in self.model_weights.keys() if self.model_weights[m] > 0])} models ready")
         
         # Check if we have any prediction methods available
         has_prediction_methods = (active_models_final > 0 or 
@@ -302,6 +319,7 @@ class EnsembleTweetPredictor:
             active_weights.pop('facebook_prophet', None)
         if self.timesfm_predictor is None:
             active_weights.pop('timesfm', None)
+        # Basic prophet is always available if enabled, no need to check predictor
         
         if active_weights:
             total_weight = sum(active_weights.values())
@@ -427,7 +445,11 @@ class EnsembleTweetPredictor:
                                        self.facebook_prophet_predictor, 
                                        self.timesfm_predictor] if p is not None]
         
-        if not available_models and not self.include_moving_average and not self.include_linear_trend:
+        # Check if basic prophet is available
+        basic_prophet_available = (self.include_basic_prophet and 
+                                 self.model_weights.get('basic_prophet', 0) > 0)
+        
+        if not available_models and not basic_prophet_available and not self.include_moving_average and not self.include_linear_trend:
             raise RuntimeError("No models or prediction methods available!")
         
         print("🔮 Generating predictions...")
@@ -500,6 +522,92 @@ class EnsembleTweetPredictor:
             except Exception as e:
                 print(f"   ❌ TimesFM failed")
         
+        # Basic Prophet prediction (from polymarket_predictor)
+        if self.include_basic_prophet and self.model_weights.get('basic_prophet', 0) > 0:
+            try:
+                # Use raw data directly - basic prophet expects original format
+                # Load raw CSV data if available
+                import pandas as pd
+                
+                if self.data_processor.data_path:
+                    # Load raw data directly
+                    df = pd.read_csv(self.data_processor.data_path)
+                    
+                    # Handle the custom timestamp format: 2024:04:18:18:41:57
+                    if 'created_at' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['created_at']):
+                        # Convert custom format to standard format
+                        df['created_at'] = df['created_at'].str.replace(':', '-', n=2).str.replace(':', ' ', n=1)
+                        df['created_at'] = pd.to_datetime(df['created_at'])
+                    
+                    # Add created_at_dt column if not present
+                    if 'created_at_dt' not in df.columns and 'created_at' in df.columns:
+                        df['created_at_dt'] = df['created_at']
+                else:
+                    # Fallback: convert from ensemble format if no raw data path
+                    df_standard = self.data_processor.load_and_prepare_data()
+                    df = pd.DataFrame()
+                    df['created_at'] = df_standard['ds'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                    df['created_at_dt'] = df_standard['ds']
+                    # Add other columns that might be expected
+                    for col in df_standard.columns:
+                        if col not in ['ds', 'created_at', 'created_at_dt']:
+                            df[col] = df_standard[col]
+                
+                # Parse time parameters
+                from datetime import datetime
+                from constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
+                
+                if current_time is None:
+                    current_time = datetime.now(ET_TIMEZONE)
+                
+                # Parse the constant strings to datetime objects
+                polymarket_start = ET_TIMEZONE.localize(
+                    datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S"), 
+                    is_dst=None
+                )
+                polymarket_end = ET_TIMEZONE.localize(
+                    datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S"), 
+                    is_dst=None
+                )
+                
+                # Get current tweet count
+                week_data = self.data_processor.get_current_week_data(current_time)
+                current_tweet_count = week_data['current_week_tweets']
+                
+                # Import TWEET_COUNT_FRAMES for basic prophet
+                from constants import TWEET_COUNT_FRAMES
+                
+                # Run basic prophet prediction with raw data
+                basic_prophet_result = predict_with_prophet(
+                    df=df,
+                    polymarket_start=polymarket_start,
+                    polymarket_end=polymarket_end,
+                    count_frames=TWEET_COUNT_FRAMES,
+                    current_tweet_count=current_tweet_count,
+                    num_simulations=5000
+                )
+                
+                # Convert to standard format
+                if 'error' not in basic_prophet_result:
+                    basic_prophet_pred = {
+                        'total_predicted': basic_prophet_result['expected_count'],
+                        'current_tweets': current_tweet_count,
+                        'predicted_remaining': basic_prophet_result['expected_count'] - current_tweet_count,
+                        'confidence_interval': {
+                            'lower': basic_prophet_result['confidence_interval'][0],
+                            'upper': basic_prophet_result['confidence_interval'][1]
+                        },
+                        'frame_probabilities': basic_prophet_result['frame_probabilities'],  # Preserve native probabilities
+                        'method': 'basic_prophet'
+                    }
+                    individual_results['basic_prophet'] = basic_prophet_pred
+                    print(f"   🔮 Basic Prophet: {basic_prophet_result['expected_count']:.1f}")
+                else:
+                    print(f"   ❌ Basic Prophet failed: {basic_prophet_result['error']}")
+                    
+            except Exception as e:
+                print(f"   ❌ Basic Prophet failed: {str(e)}")
+        
         # Additional prediction methods
         additional_predictions = {}
         
@@ -556,8 +664,18 @@ class EnsembleTweetPredictor:
                 total_predicted = None
                 confidence_interval = None
                 
+                # Basic Prophet format: simple dict with 'total_predicted' at top level
+                if model_name == 'basic_prophet':
+                    total_predicted = result.get('total_predicted')
+                    if 'confidence_interval' in result:
+                        ci = result['confidence_interval']
+                        if isinstance(ci, dict):
+                            confidence_interval = (ci['lower'], ci['upper'])
+                        else:
+                            confidence_interval = ci
+                
                 # Enhanced TimesFM format: {'ensemble_results': {'total_predicted': ...}}
-                if 'ensemble_results' in result:
+                elif 'ensemble_results' in result:
                     total_predicted = result['ensemble_results'].get('total_predicted')
                     if 'confidence_interval' in result['ensemble_results']:
                         ci = result['ensemble_results']['confidence_interval']
@@ -700,42 +818,123 @@ class EnsembleTweetPredictor:
         Returns:
             dict: Probabilities for each range defined in TWEET_COUNT_FRAMES
         """
-        total_predicted = ensemble_result['total_predicted']
-        ci_lower = ensemble_result['confidence_interval']['lower']
-        ci_upper = ensemble_result['confidence_interval']['upper']
+        # Check if we have individual model probabilities to combine
+        model_probabilities = {}
         
-        # Estimate standard deviation from confidence interval
-        # Assuming 80% CI (±1.28 standard deviations)
-        std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
+        # Extract probabilities from individual models
+        for model_name, result in ensemble_result.get('individual_predictions', {}).items():
+            model_weight = self.normalized_weights.get(model_name, 0.0)
+            if model_weight > 0:
+                probs = None
+                
+                # Basic Prophet: has native frame_probabilities 
+                if model_name == 'basic_prophet' and 'frame_probabilities' in result:
+                    # Convert percentages to probabilities (0-1 range)
+                    probs = {frame: prob/100.0 for frame, prob in result['frame_probabilities'].items()}
+                
+                # Other models: check for probabilities in their standard format
+                elif 'probabilities' in result:
+                    probs = result['probabilities']
+                elif 'predictions_by_frame' in result:
+                    probs = {frame: data['probability'] for frame, data in result['predictions_by_frame'].items()}
+                
+                if probs:
+                    model_probabilities[model_name] = probs
         
-        # Handle edge case where std is too small
-        if std_estimate < 1.0:
-            std_estimate = max(1.0, total_predicted * 0.1)
-        
-        probabilities = {}
-        
-        for frame in TWEET_COUNT_FRAMES:
-            frame_name = frame['name']
-            min_tweets = frame['min']
-            max_tweets = frame['max']
+        # If we have model probabilities, use weighted combination
+        if model_probabilities:
+            ensemble_probabilities = {}
             
-            if max_tweets == float('inf'):
-                # For "X or more" categories
-                prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-            else:
-                # For range categories
-                prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
-                prob = prob_upper - prob_lower
+            # Initialize all frame probabilities to 0
+            for frame in TWEET_COUNT_FRAMES:
+                ensemble_probabilities[frame['name']] = 0.0
             
-            probabilities[frame_name] = max(0, min(1, prob))
+            # Weight and combine model probabilities
+            total_weight = 0.0
+            for model_name, probs in model_probabilities.items():
+                model_weight = self.normalized_weights.get(model_name, 0.0)
+                total_weight += model_weight
+                
+                for frame_name, prob in probs.items():
+                    if frame_name in ensemble_probabilities:
+                        ensemble_probabilities[frame_name] += prob * model_weight
+            
+            # Normalize if we have weights
+            if total_weight > 0:
+                for frame_name in ensemble_probabilities:
+                    ensemble_probabilities[frame_name] /= total_weight
+            
+            # If we have some frames covered by model probabilities, 
+            # use normal distribution for remaining weight
+            remaining_weight = 1.0 - sum(self.normalized_weights.get(model, 0.0) 
+                                       for model in model_probabilities.keys())
+            
+            if remaining_weight > 0:
+                # Calculate normal distribution probabilities for remaining weight
+                total_predicted = ensemble_result['total_predicted']
+                ci_lower = ensemble_result['confidence_interval']['lower']
+                ci_upper = ensemble_result['confidence_interval']['upper']
+                
+                # Estimate standard deviation from confidence interval
+                std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
+                if std_estimate < 1.0:
+                    std_estimate = max(1.0, total_predicted * 0.1)
+                
+                normal_probabilities = {}
+                for frame in TWEET_COUNT_FRAMES:
+                    frame_name = frame['name']
+                    min_tweets = frame['min']
+                    max_tweets = frame['max']
+                    
+                    if max_tweets == float('inf'):
+                        prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
+                    else:
+                        prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
+                        prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
+                        prob = prob_upper - prob_lower
+                    
+                    normal_probabilities[frame_name] = max(0, min(1, prob))
+                
+                # Normalize normal probabilities
+                total_normal_prob = sum(normal_probabilities.values())
+                if total_normal_prob > 0:
+                    normal_probabilities = {k: v / total_normal_prob for k, v in normal_probabilities.items()}
+                
+                # Add remaining weight contribution
+                for frame_name in ensemble_probabilities:
+                    ensemble_probabilities[frame_name] += normal_probabilities.get(frame_name, 0.0) * remaining_weight
+            
+        else:
+            # Fallback: use normal distribution for all probabilities
+            total_predicted = ensemble_result['total_predicted']
+            ci_lower = ensemble_result['confidence_interval']['lower']
+            ci_upper = ensemble_result['confidence_interval']['upper']
+            
+            std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
+            if std_estimate < 1.0:
+                std_estimate = max(1.0, total_predicted * 0.1)
+            
+            ensemble_probabilities = {}
+            for frame in TWEET_COUNT_FRAMES:
+                frame_name = frame['name']
+                min_tweets = frame['min']
+                max_tweets = frame['max']
+                
+                if max_tweets == float('inf'):
+                    prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
+                else:
+                    prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
+                    prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
+                    prob = prob_upper - prob_lower
+                
+                ensemble_probabilities[frame_name] = max(0, min(1, prob))
         
-        # Normalize probabilities to sum to 1
-        total_prob = sum(probabilities.values())
+        # Final normalization to ensure probabilities sum to 1
+        total_prob = sum(ensemble_probabilities.values())
         if total_prob > 0:
-            probabilities = {k: v / total_prob for k, v in probabilities.items()}
+            ensemble_probabilities = {k: v / total_prob for k, v in ensemble_probabilities.items()}
         
-        return probabilities
+        return ensemble_probabilities
     
     def generate_predictions(self, current_time=None):
         """
@@ -766,15 +965,15 @@ class EnsembleTweetPredictor:
             'confidence_interval': ensemble_result['confidence_interval'],
             'time_remaining': ensemble_result['time_remaining'],
             'predictions_by_frame': {
-                frame_name: {
-                    'probability': prob,
-                    'range': f"{TWEET_COUNT_FRAMES[i]['min']}-{TWEET_COUNT_FRAMES[i]['max']}" 
-                            if TWEET_COUNT_FRAMES[i]['max'] != float('inf') 
-                            else f"{TWEET_COUNT_FRAMES[i]['min']}+",
-                    'min': TWEET_COUNT_FRAMES[i]['min'],
-                    'max': TWEET_COUNT_FRAMES[i]['max']
+                frame['name']: {
+                    'probability': probabilities.get(frame['name'], 0.0),  # Show ALL frames, even 0%
+                    'range': f"{frame['min']}-{frame['max']}" 
+                            if frame['max'] != float('inf') 
+                            else f"{frame['min']}+",
+                    'min': frame['min'],
+                    'max': frame['max']
                 }
-                for i, (frame_name, prob) in enumerate(probabilities.items())
+                for frame in TWEET_COUNT_FRAMES  # Use TWEET_COUNT_FRAMES to ensure all frames are included
             },
             'model_contributions': ensemble_result['model_contributions'],
             'individual_predictions': ensemble_result['individual_predictions'],
