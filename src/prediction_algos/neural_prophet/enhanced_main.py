@@ -35,6 +35,13 @@ def parse_arguments():
         help='Disable plot generation'
     )
     
+    parser.add_argument(
+        '--random-seed',
+        type=int,
+        default=42,
+        help='Random seed for reproducible results (default: 42)'
+    )
+    
     return parser.parse_args()
 
 
@@ -56,7 +63,8 @@ def main():
         # Initialize enhanced predictor
         predictor = EnhancedNeuralTweetPredictor(
             data_path=args.data_path,
-            save_plots=not args.no_plots
+            save_plots=not args.no_plots,
+            random_seed=args.random_seed
         )
         
         # Generate enhanced predictions

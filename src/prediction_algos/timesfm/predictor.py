@@ -41,18 +41,30 @@ class TimesFMTweetPredictor:
             data_path (str): Path to tweet data CSV file
             save_plots (bool): Whether to save prediction plots
         """
-        self.data_processor = TweetDataProcessor(data_path)
-        self.model = None
+        self.data_path = data_path
         self.save_plots = save_plots
-        self.plots_dir = Path("src/prediction_algos/timesfm/plots")
+        self.random_seed = 42  # Default seed
+        self.model = None
+        self.context_len = None
+        self.horizon_len = None
+        self.num_samples = None
+        self.quantiles = None
         
-        # Create plots directory
+        # Initialize data processor
+        self.data_processor = TweetDataProcessor(data_path)
+        
+        # Setup plots directory
+        self.plots_dir = Path("src/prediction_algos/timesfm/plots")
         if self.save_plots:
             self.plots_dir.mkdir(parents=True, exist_ok=True)
         
         # Check TimesFM availability
         if not TIMESFM_AVAILABLE:
             print("⚠️  TimesFM not available. Using mock predictor for testing.")
+    
+    def set_random_seed(self, seed):
+        """Set random seed for reproducible results."""
+        self.random_seed = seed
     
     def prepare_model(self, context_len=64, horizon_len=7, num_samples=100, 
                      quantiles=[0.1, 0.9], model_name="timesfm-1.0-200m"):
@@ -128,15 +140,22 @@ class TimesFMTweetPredictor:
         """Create a mock model for testing when TimesFM is not available."""
         
         class MockTimesFM:
-            def __init__(self, context_len, horizon_len, num_samples):
+            def __init__(self, context_len, horizon_len, num_samples, base_seed):
                 self.context_len = context_len
                 self.horizon_len = horizon_len
                 self.num_samples = num_samples
+                # Use the seed from the parent predictor instance
+                self.base_seed = base_seed
             
             def forecast(self, inputs, num_samples=None):
                 """Mock forecast using simple trend + seasonality."""
                 time_series = inputs[0]  # First input
                 samples = num_samples or self.num_samples
+                
+                # Set random seed for reproducible results
+                # Use context_len and horizon_len as part of seed for different model configs
+                seed = self.base_seed + self.context_len + self.horizon_len
+                np.random.seed(seed)
                 
                 # Calculate recent trend
                 recent_values = time_series[-7:]  # Last week
@@ -145,9 +164,12 @@ class TimesFMTweetPredictor:
                 # Add weekly seasonality pattern (simplified)
                 base_level = np.mean(time_series[-14:]) if len(time_series) >= 14 else np.mean(time_series)
                 
-                # Generate forecasts with some randomness
+                # Generate forecasts with controlled randomness
                 forecasts = []
-                for _ in range(samples):
+                for sample_idx in range(samples):
+                    # Use sample index for additional variation but keep it deterministic
+                    np.random.seed(seed + sample_idx)
+                    
                     forecast = []
                     current_level = base_level
                     
@@ -158,8 +180,9 @@ class TimesFMTweetPredictor:
                         # Add weekly seasonality (simplified pattern)
                         weekly_factor = 1 + 0.2 * np.sin(2 * np.pi * day / 7)
                         
-                        # Add noise
-                        noise = np.random.normal(0, np.std(time_series[-30:]) * 0.3)
+                        # Add controlled noise
+                        noise_std = np.std(time_series[-30:]) * 0.3 if len(time_series) >= 30 else 1.0
+                        noise = np.random.normal(0, noise_std)
                         
                         predicted = max(0, current_level * weekly_factor + noise)
                         forecast.append(predicted)
@@ -168,7 +191,7 @@ class TimesFMTweetPredictor:
                 
                 return np.array(forecasts)  # Shape: (num_samples, horizon_len)
         
-        return MockTimesFM(context_len, horizon_len, num_samples)
+        return MockTimesFM(context_len, horizon_len, num_samples, self.random_seed)
     
     def predict_remaining_tweets(self, current_time=None):
         """

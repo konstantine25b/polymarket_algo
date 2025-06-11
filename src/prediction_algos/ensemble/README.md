@@ -1,6 +1,6 @@
 # Ensemble Tweet Prediction Model
 
-An ensemble forecasting model that combines multiple prediction algorithms to generate robust tweet count predictions with confidence intervals and probabilities.
+An ensemble forecasting model that combines multiple prediction algorithms to generate robust tweet count predictions with confidence intervals and probabilities. **Features reproducible random seed control** for consistent results across runs.
 
 ## Features
 
@@ -11,6 +11,7 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 - **Comprehensive Analysis**: Confidence intervals, probabilities, and detailed comparisons
 - **Minimal Output**: Reduced verbosity with essential information only
 - **Configurable Plots**: Plot generation can be enabled or disabled
+- **🎯 Reproducible Results**: Random seed control for consistent predictions across runs
 
 ## Default Configuration
 
@@ -70,6 +71,20 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 python -m src.prediction_algos.ensemble.main
 ```
 
+### 🎯 Reproducible Results with Random Seeds
+
+```bash
+# Use specific random seed for reproducible results
+python -m src.prediction_algos.ensemble.main --random-seed 42
+
+# Compare runs with same seed (should be identical)
+python -m src.prediction_algos.ensemble.main --random-seed 123
+python -m src.prediction_algos.ensemble.main --random-seed 123  # Same results
+
+# Different seeds produce different but deterministic results
+python -m src.prediction_algos.ensemble.main --random-seed 456
+```
+
 ### With Custom Weights
 
 ```bash
@@ -79,19 +94,20 @@ python -m src.prediction_algos.ensemble.main \
     --timesfm-weight 0.30 \
     --basic-prophet-weight 0.25 \
     --moving-average-weight 0.015 \
-    --linear-trend-weight 0.015
+    --linear-trend-weight 0.015 \
+    --random-seed 42
 ```
 
 ### Enable Plots
 
 ```bash
-python -m src.prediction_algos.ensemble.main --no-plots false
+python -m src.prediction_algos.ensemble.main --no-plots false --random-seed 42
 ```
 
 ### Fast Mode (Uses Basic Models)
 
 ```bash
-python -m src.prediction_algos.ensemble.main --fast
+python -m src.prediction_algos.ensemble.main --fast --random-seed 42
 ```
 
 ## Command Line Options
@@ -103,6 +119,7 @@ python -m src.prediction_algos.ensemble.main --fast
 - `--fast`: Use fast mode (basic models instead of enhanced)
 - `--no-plots`: Disable plot generation
 - `--ensemble-method`: Combination method (weighted_average, median, best_performer)
+- `--random-seed`: Random seed for reproducible results (default: 42)
 
 ### Model Weights (0.0 to exclude model)
 
@@ -432,3 +449,82 @@ python -m src.prediction_algos.ensemble.main --neural-prophet-weight 0 --faceboo
 ## 📝 License
 
 This implementation is part of the Polymarket Algorithm project.
+
+## Reproducible Random Seed Control
+
+### Why Random Seeds Matter
+
+The ensemble combines multiple models that may use randomness:
+
+- **Neural Prophet**: PyTorch neural network training with random initialization
+- **TimesFM**: Sampling-based predictions with stochastic components
+- **Enhanced Models**: Random Forest components in enhanced algorithms
+- **Basic Prophet**: Monte Carlo simulations (5000 samples)
+
+Without seed control, each run produces slightly different results even with identical inputs.
+
+### How Seed Control Works
+
+```python
+# Random seed is propagated to all models:
+1. Global Python random seed
+2. NumPy random seed
+3. PyTorch random seed (for Neural Prophet)
+4. PyTorch Lightning seed (for Neural Prophet training)
+5. Individual model seeds (different but deterministic)
+6. Basic Prophet simulation seed
+```
+
+### Seed Distribution
+
+Each model gets a different but deterministic seed based on the main seed:
+
+```python
+base_seed = 42  # Your specified seed
+neural_prophet_seed = base_seed + 1     # 43
+facebook_prophet_seed = base_seed + 2   # 44
+timesfm_seed = base_seed + 3           # 45
+basic_prophet_seed = base_seed + 4     # 46
+```
+
+This ensures:
+
+- ✅ Reproducible results with same seed
+- ✅ Different models use different seeds (avoid correlation)
+- ✅ Deterministic behavior across runs
+- ✅ Consistent results on different machines
+
+### Usage Examples
+
+```bash
+# Production runs with fixed seed
+python -m src.prediction_algos.ensemble.main --random-seed 42
+
+# Testing with multiple seeds
+for seed in 42 123 456 789; do
+    python -m src.prediction_algos.ensemble.main --random-seed $seed --output "test_seed_${seed}.csv"
+done
+
+# Compare algorithms with same seed for fair comparison
+python -m src.prediction_algos.ensemble.main --random-seed 42 --output ensemble_results.csv
+python -m src.prediction_algos.neural_prophet.main --random-seed 42 --output neural_results.csv
+python -m src.prediction_algos.facebook_prophet.main --random-seed 42 --output facebook_results.csv
+```
+
+## Expected Reproducibility
+
+With `--random-seed 42`, you should get **identical results** across runs:
+
+```
+🎯 ENSEMBLE: 183.1 tweets (148.4-220.3)
+
+🤖 MODEL CONTRIBUTIONS:
+   neural_prophet: 178.9 tweets (weight: 0.170)
+   facebook_prophet: 183.0 tweets (weight: 0.250)
+   timesfm: 188.0 tweets (weight: 0.300)
+   basic_prophet: 179.5 tweets (weight: 0.250)
+   moving_average: 177.2 tweets (weight: 0.015)
+   linear_trend: 180.1 tweets (weight: 0.015)
+```
+
+Every run with `--random-seed 42` will produce these exact numbers.

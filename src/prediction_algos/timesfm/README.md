@@ -1,6 +1,6 @@
 # TimesFM Tweet Count Predictor
 
-A **Google TimesFM foundation model implementation** for predicting Elon Musk's weekly tweet counts using state-of-the-art time series forecasting.
+A **Google TimesFM foundation model implementation** for predicting Elon Musk's weekly tweet counts using state-of-the-art time series forecasting. **Features reproducible random seed control** for consistent sampling-based predictions across runs.
 
 ## 🚀 Quick Start (Speed-Optimized Commands)
 
@@ -8,47 +8,47 @@ A **Google TimesFM foundation model implementation** for predicting Elon Musk's 
 
 ```bash
 # Fastest possible prediction - 32 context, 10 samples, no plots
-python -m src.prediction_algos.timesfm.fast_main --ultra-fast --no-plots
+python -m src.prediction_algos.timesfm.fast_main --ultra-fast --no-plots --random-seed 42
 
-# Ultra-fast with plots
-python -m src.prediction_algos.timesfm.fast_main --ultra-fast
+# Ultra-fast with plots and reproducible results
+python -m src.prediction_algos.timesfm.fast_main --ultra-fast --random-seed 42
 ```
 
 ### Fast Mode (10 seconds processing)
 
 ```bash
 # Fast single TimesFM model - 48 context, 50 samples
-python -m src.prediction_algos.timesfm.main --fast
+python -m src.prediction_algos.timesfm.main --fast --random-seed 42
 
 # Or using fast_main interface
-python -m src.prediction_algos.timesfm.fast_main --fast
+python -m src.prediction_algos.timesfm.fast_main --fast --random-seed 42
 ```
 
 ### Normal Mode (20 seconds processing) - **RECOMMENDED**
 
 ```bash
 # Standard TimesFM foundation model - 64 context, 100 samples
-python -m src.prediction_algos.timesfm.main
+python -m src.prediction_algos.timesfm.main --random-seed 42
 
 # Or using fast_main interface
-python -m src.prediction_algos.timesfm.fast_main --normal
+python -m src.prediction_algos.timesfm.fast_main --normal --random-seed 42
 ```
 
 ### Enhanced Ensemble Mode (2-3 minutes processing)
 
 ```bash
 # Multiple TimesFM configurations ensemble (slower but most comprehensive)
-python -m src.prediction_algos.timesfm.enhanced_main --no-plots
+python -m src.prediction_algos.timesfm.enhanced_main --no-plots --random-seed 42
 ```
 
 ## ⚡ Speed Comparison
 
-| Command                  | Processing Time  | Context | Samples | Models              | Accuracy  | Use Case        |
-| ------------------------ | ---------------- | ------- | ------- | ------------------- | --------- | --------------- |
-| `fast_main --ultra-fast` | **~3 seconds**   | 32      | 10      | 1 foundation model  | Good      | Quick testing   |
-| `main --fast`            | **~10 seconds**  | 48      | 50      | 1 foundation model  | Very Good | Fast production |
-| `main` (normal)          | **~20 seconds**  | 64      | 100     | 1 foundation model  | Excellent | **Recommended** |
-| `enhanced_main`          | **~2-3 minutes** | 32-128  | 80-200  | 4 foundation models | Maximum   | Comprehensive   |
+| Command                  | Processing Time  | Context | Samples | Models              | Accuracy  | Use Case        | Reproducible |
+| ------------------------ | ---------------- | ------- | ------- | ------------------- | --------- | --------------- | ------------ |
+| `fast_main --ultra-fast` | **~3 seconds**   | 32      | 10      | 1 foundation model  | Good      | Quick testing   | ✅ with seed |
+| `main --fast`            | **~10 seconds**  | 48      | 50      | 1 foundation model  | Very Good | Fast production | ✅ with seed |
+| `main` (normal)          | **~20 seconds**  | 64      | 100     | 1 foundation model  | Excellent | **Recommended** | ✅ with seed |
+| `enhanced_main`          | **~2-3 minutes** | 32-128  | 80-200  | 4 foundation models | Maximum   | Comprehensive   | ✅ with seed |
 
 ## 📋 Command Options
 
@@ -56,38 +56,55 @@ python -m src.prediction_algos.timesfm.enhanced_main --no-plots
 
 ```bash
 # Ultra-fast TimesFM (32 context, 10 samples, ~3 seconds)
-python -m src.prediction_algos.timesfm.fast_main --ultra-fast
+python -m src.prediction_algos.timesfm.fast_main --ultra-fast --random-seed 42
 
 # Fast TimesFM (48 context, 50 samples, ~10 seconds)
-python -m src.prediction_algos.timesfm.main --fast
+python -m src.prediction_algos.timesfm.main --fast --random-seed 42
 
 # Normal TimesFM (64 context, 100 samples, ~20 seconds) - RECOMMENDED
-python -m src.prediction_algos.timesfm.main
+python -m src.prediction_algos.timesfm.main --random-seed 42
 
 # Enhanced ensemble (multiple configurations, ~2-3 minutes)
-python -m src.prediction_algos.timesfm.enhanced_main
+python -m src.prediction_algos.timesfm.enhanced_main --random-seed 42
+```
+
+### 🎯 Reproducible Results with Random Seeds
+
+```bash
+# Use specific random seed for reproducible sampling-based predictions
+python -m src.prediction_algos.timesfm.main --random-seed 42
+
+# Compare runs with same seed (should be identical)
+python -m src.prediction_algos.timesfm.main --random-seed 123
+python -m src.prediction_algos.timesfm.main --random-seed 123  # Same results
+
+# Different seeds produce different but deterministic results
+python -m src.prediction_algos.timesfm.main --random-seed 456
+
+# Fast mode with reproducible sampling
+python -m src.prediction_algos.timesfm.main --fast --random-seed 42
 ```
 
 ### Advanced Options
 
 ```bash
-# Specify custom data path
-python -m src.prediction_algos.timesfm.main --data-path path/to/tweets.csv
+# Specify custom data path with seed control
+python -m src.prediction_algos.timesfm.main --data-path path/to/tweets.csv --random-seed 42
 
-# Use specific prediction time
-python -m src.prediction_algos.timesfm.main --current-time "2025-06-09 14:49:37"
+# Use specific prediction time with reproducible results
+python -m src.prediction_algos.timesfm.main --current-time "2025-06-09 14:49:37" --random-seed 42
 
-# Custom context length and sampling
-python -m src.prediction_algos.timesfm.main --context-len 128 --num-samples 200
+# Custom context length and sampling with seed
+python -m src.prediction_algos.timesfm.main --context-len 128 --num-samples 200 --random-seed 42
 
-# Fast mode with custom time
-python -m src.prediction_algos.timesfm.main --fast --current-time "2025-06-09 16:00:00"
+# Fast mode with custom time and seed
+python -m src.prediction_algos.timesfm.main --fast --current-time "2025-06-09 16:00:00" --random-seed 42
 
 # Disable plot generation for faster execution
-python -m src.prediction_algos.timesfm.fast_main --ultra-fast --no-plots
+python -m src.prediction_algos.timesfm.fast_main --ultra-fast --no-plots --random-seed 42
 
-# Use different TimesFM model variant
-python -m src.prediction_algos.timesfm.main --model-name timesfm-1.0-200m
+# Use different TimesFM model variant with seed
+python -m src.prediction_algos.timesfm.main --model-name timesfm-1.0-200m --random-seed 42
 ```
 
 ## 🎯 TimesFM Foundation Model Advantages
@@ -341,3 +358,77 @@ This implementation is part of the Polymarket Algorithm project and follows the 
 ## 🤝 Contributing
 
 Contributions are welcome! Please ensure any new features maintain compatibility with the existing TimesFM API and follow the established patterns for speed optimization tiers.
+
+## 🎯 Reproducible Sampling-Based Predictions
+
+### Why Random Seeds Matter for TimesFM
+
+TimesFM foundation models use sampling-based predictions for uncertainty quantification:
+
+- **Stochastic Sampling**: Multiple prediction samples to generate confidence intervals
+- **Mock Model Randomness**: When actual TimesFM unavailable, uses random number generation
+- **Ensemble Sampling**: Multiple model configurations with different random sampling
+
+Without seed control, each run produces different samples leading to varying predictions and confidence intervals.
+
+### How Seed Control Works
+
+```python
+# TimesFM seed control sets:
+1. Global Python random seed
+2. NumPy random seed
+3. Individual model seeds (for ensemble)
+4. Mock model deterministic generation (when TimesFM unavailable)
+```
+
+### Expected Reproducibility
+
+With `--random-seed 42`, TimesFM predictions should produce **identical results** across runs:
+
+```
+=== TIMESFM PREDICTION SUMMARY ===
+Current tweets: 82
+Total predicted: 188.0
+80% Confidence interval: 161.2 - 214.8
+
+PROBABILITIES BY TIME FRAME:
+175–199             :    0.456 ( 45.6%)
+200–224             :    0.298 ( 29.8%)
+150–174             :    0.146 ( 14.6%)
+```
+
+Every run with `--random-seed 42` will produce these exact predictions.
+
+### Mock vs Real TimesFM Behavior
+
+**Mock Mode** (when TimesFM not installed):
+
+- Uses deterministic random number generation
+- Perfectly reproducible with same seed
+- Simulates realistic TimesFM behavior patterns
+
+**Real TimesFM Mode** (when TimesFM installed):
+
+- Controls sampling randomness in actual foundation model
+- Reproducible confidence intervals and predictions
+- Consistent foundation model inference
+
+### Usage Examples
+
+```bash
+# Production runs with fixed seed
+python -m src.prediction_algos.timesfm.main --random-seed 42
+
+# Testing with multiple seeds for uncertainty analysis
+for seed in 42 123 456 789; do
+    python -m src.prediction_algos.timesfm.main --random-seed $seed --output "timesfm_seed_${seed}.csv"
+done
+
+# Compare with other algorithms using same seed
+python -m src.prediction_algos.timesfm.main --random-seed 42 --output timesfm_results.csv
+python -m src.prediction_algos.neural_prophet.main --random-seed 42 --output neural_results.csv
+python -m src.prediction_algos.facebook_prophet.main --random-seed 42 --output facebook_results.csv
+
+# Enhanced ensemble with reproducible multi-model sampling
+python -m src.prediction_algos.timesfm.enhanced_main --random-seed 42 --output enhanced_timesfm.csv
+```

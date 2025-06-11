@@ -30,13 +30,14 @@ from .data_processor import TweetDataProcessor
 class EnhancedNeuralTweetPredictor:
     """Enhanced tweet count predictor with multiple Neural Prophet model configurations."""
     
-    def __init__(self, data_path=None, save_plots=True):
+    def __init__(self, data_path=None, save_plots=True, random_seed=42):
         """
         Initialize the enhanced Neural Prophet predictor.
         
         Args:
             data_path (str): Path to tweet data CSV file
             save_plots (bool): Whether to save prediction plots
+            random_seed (int): Random seed for reproducible results
         """
         self.data_processor = TweetDataProcessor(data_path)
         self.daily_model = None
@@ -45,6 +46,7 @@ class EnhancedNeuralTweetPredictor:
         self.aggressive_model = None
         self.rf_model = None
         self.save_plots = save_plots
+        self.random_seed = random_seed
         self.plots_dir = Path("src/prediction_algos/neural_prophet/plots")
         
         # Create plots directory
@@ -176,7 +178,7 @@ class EnhancedNeuralTweetPredictor:
         y = df['y']
         
         # Train Random Forest
-        self.rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        self.rf_model = RandomForestRegressor(n_estimators=100, random_state=self.random_seed)
         self.rf_model.fit(X, y)
         
         # Calculate model performance

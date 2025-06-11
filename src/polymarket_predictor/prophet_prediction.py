@@ -461,7 +461,8 @@ def predict_with_prophet(
     count_frames: List[Dict[str, Any]],
     current_tweet_count: int,
     num_simulations: int = 10000,
-    current_time: datetime = None
+    current_time: datetime = None,
+    random_seed: int = 42
 ) -> Dict[str, Any]:
     """
     Make predictions using a simplified approach with historical rates
@@ -474,6 +475,7 @@ def predict_with_prophet(
         current_tweet_count: Current tweet count in the period
         num_simulations: Number of Monte Carlo simulations to run
         current_time: Current time for prediction context (if None, uses system time)
+        random_seed: Random seed for reproducible results
         
     Returns:
         dict: Prophet prediction results
@@ -558,14 +560,14 @@ def predict_with_prophet(
             mu = np.log(target_mean) - 0.5 * sigma**2
             
             # Generate samples from lognormal distribution
-            np.random.seed(42)  # For reproducibility
+            np.random.seed(random_seed)
             additional_tweets = np.random.lognormal(mu, sigma, num_simulations)
             
             # Add current count and round to integers
             simulations = np.round(current_tweet_count + additional_tweets).astype(int)
         else:
             # Fallback to normal distribution if parameters are invalid
-            np.random.seed(42)
+            np.random.seed(random_seed)
             additional_tweets = np.maximum(0, np.random.normal(expected_additional, forecast_std, num_simulations))
             simulations = np.round(current_tweet_count + additional_tweets).astype(int)
         

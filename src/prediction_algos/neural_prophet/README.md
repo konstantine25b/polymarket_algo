@@ -1,6 +1,6 @@
 # Neural Prophet Tweet Count Predictor
 
-A **fast Neural Prophet implementation** for predicting Elon Musk's weekly tweet counts using deep learning time series forecasting.
+A **fast Neural Prophet implementation** for predicting Elon Musk's weekly tweet counts using deep learning time series forecasting. **Features reproducible random seed control** for consistent neural network training across runs.
 
 ## 🚀 Quick Start (Speed-Optimized Commands)
 
@@ -8,47 +8,47 @@ A **fast Neural Prophet implementation** for predicting Elon Musk's weekly tweet
 
 ```bash
 # Fastest possible prediction - 15 epochs, no plots
-python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --no-plots
+python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --no-plots --random-seed 42
 
-# Ultra-fast with plots
-python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast
+# Ultra-fast with plots and reproducible results
+python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --random-seed 42
 ```
 
 ### Fast Mode (30 seconds training)
 
 ```bash
 # Fast single Neural Prophet model - 30 epochs
-python -m src.prediction_algos.neural_prophet.main --fast
+python -m src.prediction_algos.neural_prophet.main --fast --random-seed 42
 
 # Or using fast_main interface
-python -m src.prediction_algos.neural_prophet.fast_main --fast
+python -m src.prediction_algos.neural_prophet.fast_main --fast --random-seed 42
 ```
 
 ### Normal Mode (60 seconds training) - **RECOMMENDED**
 
 ```bash
 # Standard Neural Prophet model - 50 epochs (best balance)
-python -m src.prediction_algos.neural_prophet.main
+python -m src.prediction_algos.neural_prophet.main --random-seed 42
 
 # Or using fast_main interface
-python -m src.prediction_algos.neural_prophet.fast_main --normal
+python -m src.prediction_algos.neural_prophet.fast_main --normal --random-seed 42
 ```
 
 ### Enhanced Ensemble Mode (3-4 minutes training)
 
 ```bash
 # Multiple neural networks ensemble (slower but most comprehensive)
-python -m src.prediction_algos.neural_prophet.enhanced_main
+python -m src.prediction_algos.neural_prophet.enhanced_main --random-seed 42
 ```
 
 ## ⚡ Speed Comparison
 
-| Command                  | Training Time    | Epochs | Models               | Accuracy  | Use Case        |
-| ------------------------ | ---------------- | ------ | -------------------- | --------- | --------------- |
-| `fast_main --ultra-fast` | **~5 seconds**   | 15     | 1 neural (minimal)   | Good      | Quick testing   |
-| `main --fast`            | **~30 seconds**  | 30     | 1 neural (optimized) | Very Good | Fast production |
-| `main` (normal)          | **~60 seconds**  | 50     | 1 neural (enhanced)  | Excellent | **Recommended** |
-| `enhanced_main`          | **~3-4 minutes** | 30-50  | 4 neural + 2 support | Maximum   | Comprehensive   |
+| Command                  | Training Time    | Epochs | Models               | Accuracy  | Use Case        | Reproducible |
+| ------------------------ | ---------------- | ------ | -------------------- | --------- | --------------- | ------------ |
+| `fast_main --ultra-fast` | **~5 seconds**   | 15     | 1 neural (minimal)   | Good      | Quick testing   | ✅ with seed |
+| `main --fast`            | **~30 seconds**  | 30     | 1 neural (optimized) | Very Good | Fast production | ✅ with seed |
+| `main` (normal)          | **~60 seconds**  | 50     | 1 neural (enhanced)  | Excellent | **Recommended** | ✅ with seed |
+| `enhanced_main`          | **~3-4 minutes** | 30-50  | 4 neural + 2 support | Maximum   | Comprehensive   | ✅ with seed |
 
 ## 📋 Command Options
 
@@ -56,35 +56,52 @@ python -m src.prediction_algos.neural_prophet.enhanced_main
 
 ```bash
 # Ultra-fast Neural Prophet (15 epochs, ~5 seconds)
-python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast
+python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --random-seed 42
 
 # Fast Neural Prophet (30 epochs, ~30 seconds)
-python -m src.prediction_algos.neural_prophet.main --fast
+python -m src.prediction_algos.neural_prophet.main --fast --random-seed 42
 
 # Normal Neural Prophet (50 epochs, ~60 seconds) - RECOMMENDED
-python -m src.prediction_algos.neural_prophet.main
+python -m src.prediction_algos.neural_prophet.main --random-seed 42
 
 # Enhanced ensemble (multiple models, ~3-4 minutes)
-python -m src.prediction_algos.neural_prophet.enhanced_main
+python -m src.prediction_algos.neural_prophet.enhanced_main --random-seed 42
+```
+
+### 🎯 Reproducible Results with Random Seeds
+
+```bash
+# Use specific random seed for reproducible neural network training
+python -m src.prediction_algos.neural_prophet.main --random-seed 42
+
+# Compare runs with same seed (should be identical)
+python -m src.prediction_algos.neural_prophet.main --random-seed 123
+python -m src.prediction_algos.neural_prophet.main --random-seed 123  # Same results
+
+# Different seeds produce different but deterministic results
+python -m src.prediction_algos.neural_prophet.main --random-seed 456
+
+# Fast mode with reproducible training
+python -m src.prediction_algos.neural_prophet.main --fast --random-seed 42
 ```
 
 ### Advanced Options
 
 ```bash
-# Specify custom data path
-python -m src.prediction_algos.neural_prophet.main --data-path path/to/tweets.csv
+# Specify custom data path with seed control
+python -m src.prediction_algos.neural_prophet.main --data-path path/to/tweets.csv --random-seed 42
 
-# Use specific prediction time
-python -m src.prediction_algos.neural_prophet.main --current-time "2025-06-09 14:49:37"
+# Use specific prediction time with reproducible results
+python -m src.prediction_algos.neural_prophet.main --current-time "2025-06-09 14:49:37" --random-seed 42
 
-# Fast mode with custom time
-python -m src.prediction_algos.neural_prophet.main --fast --current-time "2025-06-09 16:00:00"
+# Fast mode with custom time and seed
+python -m src.prediction_algos.neural_prophet.main --fast --current-time "2025-06-09 16:00:00" --random-seed 42
 
 # Disable plot generation for faster execution
-python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --no-plots
+python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --no-plots --random-seed 42
 
 # Ultra-fast mode with custom options
-python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --current-time "2025-06-09 16:00:00"
+python -m src.prediction_algos.neural_prophet.fast_main --ultra-fast --current-time "2025-06-09 16:00:00" --random-seed 42
 ```
 
 ## 🎯 Neural Prophet Advantages Over Facebook Prophet
@@ -286,3 +303,62 @@ Ultra-Fast Mode (15 epochs, 5 seconds):
 ## 📝 License
 
 This implementation is part of the Polymarket Algorithm project and follows the same licensing terms.
+
+## 🎯 Reproducible Neural Network Training
+
+### Why Random Seeds Matter for Neural Networks
+
+Neural Prophet uses PyTorch Lightning for training, which involves multiple sources of randomness:
+
+- **Weight Initialization**: Random starting weights for neural network layers
+- **Data Shuffling**: Random order of training batches
+- **Dropout**: Random neuron deactivation during training
+- **Optimization**: Stochastic gradient descent with random sampling
+
+Without seed control, each training run produces a different neural network with different predictions.
+
+### How Seed Control Works
+
+```python
+# Neural Prophet seed control sets:
+1. Global Python random seed
+2. NumPy random seed
+3. PyTorch manual seed
+4. PyTorch CUDA seed (if GPU available)
+5. PyTorch Lightning seed_everything
+6. Deterministic PyTorch algorithms
+```
+
+### Expected Reproducibility
+
+With `--random-seed 42`, Neural Prophet training should produce **identical results** across runs:
+
+```
+=== NEURAL PROPHET PREDICTION SUMMARY ===
+Current tweets: 82
+Total predicted: 178.9
+80% Confidence interval: 151.2 - 206.5
+
+PROBABILITIES BY TIME FRAME:
+175–199             :    0.456 ( 45.6%)
+150–174             :    0.298 ( 29.8%)
+200–224             :    0.146 ( 14.6%)
+```
+
+Every run with `--random-seed 42` will produce these exact predictions.
+
+### Usage Examples
+
+```bash
+# Production runs with fixed seed
+python -m src.prediction_algos.neural_prophet.main --random-seed 42
+
+# Testing with multiple seeds
+for seed in 42 123 456 789; do
+    python -m src.prediction_algos.neural_prophet.main --random-seed $seed --output "neural_seed_${seed}.csv"
+done
+
+# Compare with other algorithms using same seed
+python -m src.prediction_algos.neural_prophet.main --random-seed 42 --output neural_results.csv
+python -m src.prediction_algos.facebook_prophet.main --random-seed 42 --output facebook_results.csv
+```

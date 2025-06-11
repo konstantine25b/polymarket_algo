@@ -23,16 +23,18 @@ from .predictor import TimesFMTweetPredictor
 class EnhancedTimesFMTweetPredictor:
     """Enhanced TimesFM predictor with multiple model configurations."""
     
-    def __init__(self, data_path=None, save_plots=True):
+    def __init__(self, data_path=None, save_plots=True, random_seed=42):
         """
         Initialize the enhanced TimesFM predictor.
         
         Args:
             data_path (str): Path to tweet data CSV file
             save_plots (bool): Whether to save prediction plots
+            random_seed (int): Random seed for reproducible results
         """
         self.data_path = data_path
         self.save_plots = save_plots
+        self.random_seed = random_seed
         self.models = {}
         self.predictions = {}
         self.plots_dir = Path("src/prediction_algos/timesfm/plots")
@@ -70,12 +72,18 @@ class EnhancedTimesFMTweetPredictor:
         }
         
         # Initialize models
-        for model_name, config in model_configs.items():
+        for idx, (model_name, config) in enumerate(model_configs.items()):
             print(f"\n--- Preparing {model_name} model ---")
             model = TimesFMTweetPredictor(
                 data_path=self.data_path,
                 save_plots=False  # Disable individual plots
             )
+            
+            # Set a specific seed for this model to ensure reproducibility
+            # but different results across models
+            model_seed = self.random_seed + idx * 100
+            if hasattr(model, 'set_random_seed'):
+                model.set_random_seed(model_seed)
             
             model.prepare_model(
                 context_len=config['context_len'],

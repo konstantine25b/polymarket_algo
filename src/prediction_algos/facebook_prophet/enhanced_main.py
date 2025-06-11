@@ -34,6 +34,13 @@ def main():
         help='Current time for prediction context (format: YYYY-MM-DD HH:MM:SS)'
     )
     
+    parser.add_argument(
+        '--random-seed',
+        type=int,
+        default=42,
+        help='Random seed for reproducible results (default: 42)'
+    )
+    
     args = parser.parse_args()
     
     # Parse current time if provided
@@ -47,7 +54,10 @@ def main():
     
     # Initialize enhanced predictor
     print("Initializing Enhanced Tweet Predictor...")
-    predictor = EnhancedTweetPredictor(data_path=args.data_path)
+    predictor = EnhancedTweetPredictor(
+        data_path=args.data_path,
+        random_seed=args.random_seed
+    )
     
     try:
         # Generate enhanced predictions

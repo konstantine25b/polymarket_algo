@@ -40,10 +40,23 @@ class TweetPredictor:
         self.forecast = None
         self.save_plots = save_plots
         self.plots_dir = Path("src/facebook_prophet/plots")
+        self.random_seed = None
         
         # Create plots directory
         if self.save_plots:
             self.plots_dir.mkdir(parents=True, exist_ok=True)
+    
+    def set_random_seed(self, seed):
+        """
+        Set random seed for reproducible results.
+        
+        Args:
+            seed (int): Random seed value
+        """
+        self.random_seed = seed
+        np.random.seed(seed)
+        # Note: Prophet doesn't have built-in random seed control,
+        # but this helps with any numpy operations we do
     
     def prepare_model(self, changepoint_prior_scale=0.05, seasonality_prior_scale=10.0):
         """

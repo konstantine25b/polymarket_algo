@@ -62,6 +62,13 @@ def parse_arguments():
         help='Number of lag features to use (default: 7)'
     )
     
+    parser.add_argument(
+        '--random-seed',
+        type=int,
+        default=42,
+        help='Random seed for reproducible results (default: 42)'
+    )
+    
     return parser.parse_args()
 
 
@@ -85,6 +92,10 @@ def main():
             data_path=args.data_path,
             save_plots=not args.no_plots
         )
+        
+        # Set random seed if the predictor supports it
+        if hasattr(predictor, 'set_random_seed'):
+            predictor.set_random_seed(args.random_seed)
         
         # Prepare model - fast or normal mode
         if args.fast:

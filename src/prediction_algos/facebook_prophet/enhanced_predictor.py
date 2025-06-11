@@ -18,6 +18,7 @@ from scipy import stats
 from scipy.special import erf
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
+import random
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -30,13 +31,14 @@ from .data_processor import TweetDataProcessor
 class EnhancedTweetPredictor:
     """Enhanced tweet count predictor with multiple Prophet model configurations."""
     
-    def __init__(self, data_path=None, save_plots=True):
+    def __init__(self, data_path=None, save_plots=True, random_seed=42):
         """
         Initialize the enhanced predictor.
         
         Args:
             data_path (str): Path to tweet data CSV file
             save_plots (bool): Whether to save prediction plots
+            random_seed (int): Random seed for reproducible results
         """
         self.data_processor = TweetDataProcessor(data_path)
         self.daily_model = None
@@ -46,7 +48,12 @@ class EnhancedTweetPredictor:
         self.weekly_focused_model = None
         self.rf_model = None
         self.save_plots = save_plots
+        self.random_seed = random_seed
         self.plots_dir = Path("src/facebook_prophet/plots")
+        
+        # Set global random seeds for reproducibility
+        np.random.seed(random_seed)
+        random.seed(random_seed)
         
         # Create plots directory
         if self.save_plots:
@@ -205,7 +212,7 @@ class EnhancedTweetPredictor:
         y = df['y']
         
         # Train Random Forest
-        self.rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        self.rf_model = RandomForestRegressor(n_estimators=100, random_state=self.random_seed)
         self.rf_model.fit(X, y)
         
         # Calculate model performance

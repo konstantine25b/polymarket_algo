@@ -4,9 +4,25 @@ Main CLI interface for the ensemble tweet prediction model.
 
 import argparse
 import sys
+import numpy as np
+import random
+import os
 from pathlib import Path
 from datetime import datetime
 from pytz import timezone
+
+# Set deterministic behavior for PyTorch/Lightning (before importing Neural Prophet)
+try:
+    import torch
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+    # PyTorch Lightning specific settings
+    import pytorch_lightning as pl
+    pl.seed_everything(42, workers=True)
+except ImportError:
+    pass
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -32,6 +48,8 @@ def main():
     parser.add_argument('--ensemble-method', type=str, default='weighted_average',
                         choices=['weighted_average', 'median', 'best_performer'],
                         help='Ensemble combination method')
+    parser.add_argument('--random-seed', type=int, default=42,
+                        help='Random seed for reproducible results (default: 42)')
     
     # Model weight arguments with new defaults
     parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
@@ -48,6 +66,25 @@ def main():
                         help='Weight for linear trend method (default: 0.015)')
     
     args = parser.parse_args()
+    
+    # Set random seeds for reproducible results
+    seed = args.random_seed
+    np.random.seed(seed)
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    
+    # Set PyTorch seeds again with the actual seed from args
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        # PyTorch Lightning specific settings with actual seed
+        import pytorch_lightning as pl
+        pl.seed_everything(seed, workers=True)
+    except ImportError:
+        pass
     
     # Parse current time if provided
     current_time = None
@@ -74,7 +111,8 @@ def main():
             timesfm_weight=args.timesfm_weight,
             basic_prophet_weight=args.basic_prophet_weight,
             moving_average_weight=args.moving_average_weight,
-            linear_trend_weight=args.linear_trend_weight
+            linear_trend_weight=args.linear_trend_weight,
+            random_seed=args.random_seed
         )
         
         # Generate predictions

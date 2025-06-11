@@ -93,7 +93,8 @@ class EnsembleTweetPredictor:
     def __init__(self, data_path=None, save_plots=True, use_fast_models=False, 
                  neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30,
                  basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015,
-                 include_basic_prophet=True, include_moving_average=True, include_linear_trend=True):
+                 include_basic_prophet=True, include_moving_average=True, include_linear_trend=True,
+                 random_seed=42):
         """
         Initialize the ensemble predictor.
         
@@ -110,10 +111,12 @@ class EnsembleTweetPredictor:
             include_basic_prophet (bool): Whether to include basic prophet predictions
             include_moving_average (bool): Whether to include moving average predictions
             include_linear_trend (bool): Whether to include linear trend predictions
+            random_seed (int): Random seed for reproducible results
         """
         self.data_processor = EnsembleTweetDataProcessor(data_path)
         self.save_plots = save_plots
         self.use_fast_models = use_fast_models
+        self.random_seed = random_seed
         self.plots_dir = Path("src/prediction_algos/ensemble/plots")
         
         # Store all weights
@@ -191,6 +194,9 @@ class EnsembleTweetPredictor:
                             data_path=self.data_processor.data_path,
                             save_plots=False  # Disable individual plots
                         )
+                        # Set random seed if supported
+                        if hasattr(self.neural_prophet_predictor, 'set_random_seed'):
+                            self.neural_prophet_predictor.set_random_seed(self.random_seed)
                         self.neural_prophet_predictor.prepare_model()
                     print("✅ (Fast)")
                 else:
@@ -200,6 +206,9 @@ class EnsembleTweetPredictor:
                         data_path=self.data_processor.data_path,
                         save_plots=False
                     )
+                    # Set random seed if supported
+                    if hasattr(self.neural_prophet_predictor, 'set_random_seed'):
+                        self.neural_prophet_predictor.set_random_seed(self.random_seed)
                     # Don't suppress output so we can see epoch progress
                     self.neural_prophet_predictor.prepare_model()
                     print("✅ Neural Prophet ready")
@@ -211,7 +220,8 @@ class EnsembleTweetPredictor:
                     with suppress_stdout_stderr():
                         self.neural_prophet_predictor = EnhancedNeuralTweetPredictor(
                             data_path=self.data_processor.data_path,
-                            save_plots=False
+                            save_plots=False,
+                            random_seed=self.random_seed
                         )
                         self.neural_prophet_predictor.prepare_models()  # Enhanced Neural Prophet uses prepare_models() (plural)
                     print("✅ (Enhanced)")
@@ -228,7 +238,8 @@ class EnsembleTweetPredictor:
                     # Use Enhanced Facebook Prophet by default
                     self.facebook_prophet_predictor = EnhancedFacebookTweetPredictor(
                         data_path=self.data_processor.data_path,
-                        save_plots=False
+                        save_plots=False,
+                        random_seed=self.random_seed
                     )
                     self.facebook_prophet_predictor.prepare_models()  # Enhanced model uses prepare_models()
                 
@@ -243,6 +254,9 @@ class EnsembleTweetPredictor:
                             data_path=self.data_processor.data_path,
                             save_plots=False
                         )
+                        # Set random seed if supported
+                        if hasattr(self.facebook_prophet_predictor, 'set_random_seed'):
+                            self.facebook_prophet_predictor.set_random_seed(self.random_seed)
                         self.facebook_prophet_predictor.prepare_model()
                     print("✅ (Basic)")
                 except Exception as e2:
@@ -260,13 +274,17 @@ class EnsembleTweetPredictor:
                             data_path=self.data_processor.data_path,
                             save_plots=False
                         )
+                        # Set random seed if supported
+                        if hasattr(self.timesfm_predictor, 'set_random_seed'):
+                            self.timesfm_predictor.set_random_seed(self.random_seed)
                         self.timesfm_predictor.prepare_model()
                     else:
                         # Use Enhanced TimesFM by default
                         try:
                             self.timesfm_predictor = EnhancedTimesFMTweetPredictor(
                                 data_path=self.data_processor.data_path,
-                                save_plots=False
+                                save_plots=False,
+                                random_seed=self.random_seed
                             )
                             self.timesfm_predictor.prepare_models()  # Enhanced version uses prepare_models()
                         except ImportError:
@@ -275,6 +293,9 @@ class EnsembleTweetPredictor:
                                 data_path=self.data_processor.data_path,
                                 save_plots=False
                             )
+                            # Set random seed if supported
+                            if hasattr(self.timesfm_predictor, 'set_random_seed'):
+                                self.timesfm_predictor.set_random_seed(self.random_seed)
                             self.timesfm_predictor.prepare_model()
                 
                 print("✅")
@@ -585,7 +606,8 @@ class EnsembleTweetPredictor:
                     count_frames=TWEET_COUNT_FRAMES,
                     current_tweet_count=current_tweet_count,
                     num_simulations=5000,
-                    current_time=current_time
+                    current_time=current_time,
+                    random_seed=self.random_seed
                 )
                 
                 # Convert to standard format

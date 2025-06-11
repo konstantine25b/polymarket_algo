@@ -1,6 +1,6 @@
 # Elon Musk Tweet Count Predictor using Facebook Prophet
 
-This module implements Facebook Prophet time series forecasting to predict Elon Musk's tweet counts for Polymarket prediction time frames.
+This module implements Facebook Prophet time series forecasting to predict Elon Musk's tweet counts for Polymarket prediction time frames. **Features reproducible random seed control** for consistent Random Forest ensemble predictions across runs.
 
 ## Overview
 
@@ -10,6 +10,43 @@ The predictor analyzes historical tweet data and generates predictions for speci
 - Time remaining in the prediction period
 - Historical tweet patterns and seasonality
 - Uncertainty intervals for robust probability estimates
+- **Enhanced version with Random Forest ensemble for improved accuracy**
+
+## 🚀 Quick Start Commands
+
+### Basic Facebook Prophet
+
+```bash
+# Standard Facebook Prophet predictor
+python -m src.prediction_algos.facebook_prophet.main --random-seed 42
+
+# Fast mode with custom parameters
+python -m src.prediction_algos.facebook_prophet.main --fast --random-seed 42
+```
+
+### Enhanced Facebook Prophet (Recommended)
+
+```bash
+# Enhanced multi-model ensemble with Random Forest
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42
+
+# Enhanced with custom parameters
+python -m src.prediction_algos.facebook_prophet.enhanced_main --changepoint-prior 0.08 --seasonality-prior 15.0 --random-seed 42
+```
+
+### 🎯 Reproducible Results with Random Seeds
+
+```bash
+# Use specific random seed for reproducible Random Forest predictions
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42
+
+# Compare runs with same seed (should be identical)
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 123
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 123  # Same results
+
+# Different seeds produce different but deterministic results
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 456
+```
 
 ## 🏗️ **How the Enhanced Predictor Works**
 
@@ -192,39 +229,106 @@ final_uncertainty = base_uncertainty * uncertainty_factor * time_factor * 0.6
 **Current Prediction Results:**
 
 ```
+🚀 Enhanced Facebook Prophet with Random Forest Ensemble
+Random seed: 42 (reproducible results)
+
 === Enhanced Prediction Analysis ===
 Current time: 2025-06-09 16:13:07-04:00
 Week period: 2025-06-06 12:00:00-04:00 to 2025-06-13 12:00:00-04:00
 Tweets posted so far: 81
 Time remaining: 3 days, 19:46:52
 
-=== Model Predictions (Remaining Tweets) ===
-Daily Prophet     :  110.0
-Pattern-based     :  123.1  ← Highest weight (35%)
-Aggressive Prophet:  110.1
-Hourly Prophet    :   53.5
-Conservative      :  108.9
-Weekly Prophet    :   53.8
-Random Forest     :  107.6
-Ensemble Average  :  111.2
+📊 Model Ensemble Weights:
+Daily Prophet: 35%          Hourly Prophet: 5%
+Conservative Prophet: 3%    Aggressive Prophet: 20%
+Weekly Prophet: 1%          Pattern-Based: 35%
+Random Forest: 1%
 
-=== Activity Detection ===
-Current mode: normal_activity
-Activity multiplier: 1.00
+🎯 Activity Mode: normal_activity (1.0x multiplier)
 
-=== Final Predictions ===
-Total predicted: 192.2 tweets
-95% CI: 81.0 - 275.7
+=== ENHANCED PREDICTION SUMMARY ===
+Current tweets: 81
+Enhanced prediction: 102.0 remaining tweets
+Total predicted: 183.0 tweets
+Bias adjustment: +2.5 tweets
+Final adjusted prediction: 185.5 tweets
+80% Confidence interval: 157.8 - 213.2
 
 PROBABILITIES BY TIME FRAME:
-200–224: 25.6% (peak - most likely range)
-225–249: 22.3% (secondary peak)
-175–199: 18.6% (strong possibility)
-250–274: 12.7% (moderate chance)
-150–174:  9.0% (lower chance)
-<150:     4.5% (very unlikely - realistic!)
-275–299:  5.0% (tail probability)
-300+:     2.2% (extreme events)
+175–199             :    0.469 ( 46.9%)
+200–224             :    0.267 ( 26.7%)
+150–174             :    0.148 ( 14.8%)
+```
+
+## 🎯 Reproducible Random Forest Ensemble
+
+### Why Random Seeds Matter for Enhanced Facebook Prophet
+
+The enhanced version uses Random Forest for additional prediction accuracy:
+
+- **Random Forest**: Tree ensemble with random feature selection and bootstrap sampling
+- **Bootstrap Aggregation**: Random data sampling for each tree
+- **Feature Randomness**: Random subset of features at each split
+
+Without seed control, Random Forest produces different trees and predictions on each run.
+
+### How Seed Control Works
+
+```python
+# Enhanced Facebook Prophet seed control sets:
+1. Global Python random seed
+2. NumPy random seed
+3. Random Forest random_state parameter
+4. Individual Prophet model deterministic behavior
+```
+
+### Expected Reproducibility
+
+With `--random-seed 42`, enhanced predictions should produce **identical results** across runs:
+
+```
+🎯 ENHANCED PREDICTION SUMMARY:
+Current tweets: 81
+Enhanced prediction: 102.0 remaining tweets
+Total predicted: 183.0 tweets
+Final adjusted prediction: 185.5 tweets
+80% Confidence interval: 157.8 - 213.2
+```
+
+Every run with `--random-seed 42` will produce these exact predictions.
+
+### Standard vs Enhanced Reproducibility
+
+**Standard Facebook Prophet**:
+
+- Deterministic by design (no randomness)
+- Always produces identical results
+- No need for seed control
+
+**Enhanced Facebook Prophet**:
+
+- Random Forest introduces randomness
+- Requires seed control for reproducibility
+- More accurate but needs `--random-seed` parameter
+
+### Usage Examples
+
+```bash
+# Production runs with fixed seed
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42
+
+# Testing with multiple seeds
+for seed in 42 123 456 789; do
+    python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed $seed --output "enhanced_fb_seed_${seed}.csv"
+done
+
+# Compare enhanced vs standard with same seed
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42 --output enhanced_results.csv
+python -m src.prediction_algos.facebook_prophet.main --random-seed 42 --output standard_results.csv
+
+# Integration with comparison tool
+python -m src.bidding_decision.stats.comparison --algorithm enhanced_facebook_prophet --random-seed 42
+python -m src.bidding_decision.stats.comparison --algorithm facebook_prophet --random-seed 42
 ```
 
 ## 🎯 **Key Technical Innovations**

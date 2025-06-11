@@ -39,10 +39,36 @@ class NeuralTweetPredictor:
         self.model = None
         self.save_plots = save_plots
         self.plots_dir = Path("src/prediction_algos/neural_prophet/plots")
+        self.random_seed = 42  # Default random seed
         
         # Create plots directory
         if self.save_plots:
             self.plots_dir.mkdir(parents=True, exist_ok=True)
+    
+    def set_random_seed(self, seed):
+        """Set random seed for reproducible results."""
+        self.random_seed = seed
+        
+        # Set PyTorch and PyTorch Lightning seeds
+        try:
+            import torch
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
+            
+            # PyTorch Lightning specific settings
+            import pytorch_lightning as pl
+            pl.seed_everything(seed, workers=True)
+            
+            # Also set numpy and random for good measure
+            np.random.seed(seed)
+            import random
+            random.seed(seed)
+            os.environ['PYTHONHASHSEED'] = str(seed)
+        except ImportError:
+            # If PyTorch is not available, just set numpy
+            np.random.seed(seed)
     
     def prepare_model(self, n_forecasts=1, yearly_seasonality=True, weekly_seasonality=True, 
                      daily_seasonality=False, epochs=50, learning_rate=0.15):
@@ -58,6 +84,9 @@ class NeuralTweetPredictor:
             learning_rate (float): Learning rate for training (default: 0.15)
         """
         print("Preparing Neural Prophet model...")
+        
+        # Set random seed for reproducible training
+        self.set_random_seed(self.random_seed)
         
         # Get training data
         train_data = self.data_processor.get_neural_prophet_data()
