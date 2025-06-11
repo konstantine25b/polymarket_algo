@@ -41,9 +41,12 @@ class PositionSeller:
         self.debug = debug
         self.position_tracker = PolymarketPositionTracker()
         
-    def get_all_positions_with_stats(self) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
+    def get_all_positions_with_stats(self, comparison_df: Optional[pd.DataFrame] = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
         """
         Get all current positions with their statistical information from the comparison table.
+        
+        Args:
+            comparison_df: Optional pre-generated comparison DataFrame to avoid duplicate generation
         
         Returns:
             Tuple containing:
@@ -83,13 +86,21 @@ class PositionSeller:
                 print("No positions with quantity >= 0.01 found in your account.")
             return [], pd.DataFrame()
             
-        # Generate comparison table with the specified threshold
-        logger.info(f"Generating comparison table with threshold: {self.threshold}%")
-        df = generate_comparison_table(
-            refresh=True,
-            use_prophet=True,
-            threshold=self.threshold
-        )
+        # Use provided DataFrame or generate comparison table with the specified threshold
+        if comparison_df is not None:
+            logger.info("Using pre-generated comparison table")
+            df = comparison_df
+        else:
+            logger.info(f"Generating comparison table with threshold: {self.threshold}%")
+            df = generate_comparison_table(
+                refresh=True,
+                use_prophet=True,
+                threshold=self.threshold
+            )
+            
+            # Display the comparison table when we generate it (similar to bidder behavior)
+            if not df.empty:
+                self._print_comparison_table(df)
         
         if df.empty:
             logger.info("Failed to generate comparison table.")
@@ -194,17 +205,58 @@ class PositionSeller:
         
         return all_positions, df
     
-    def get_positions_to_sell(self) -> List[Dict[str, Any]]:
+    def _print_comparison_table(self, df: pd.DataFrame) -> None:
+        """
+        Print the comparison table in a formatted way (similar to bidder output).
+        
+        Args:
+            df: DataFrame with comparison data
+        """
+        # Set pandas display options to show all columns
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', 200)
+        pd.set_option('display.float_format', '{:.2f}'.format)
+        pd.set_option('display.precision', 2)
+        
+        # Determine which columns to show in the main display
+        display_cols = [col for col in df.columns if col not in ['Token ID', 'Market ID']]
+        
+        print("\nComparison Table:")
+        print(df[display_cols].to_string(index=False))
+        
+        # Show the threshold being used
+        sell_only_col = [col for col in df.columns if col.startswith('Sell-Only')][0]
+        threshold_value = float(sell_only_col.split('(')[1].split('%')[0])
+        print(f"\nUsing threshold: {threshold_value}%")
+        
+        # Show token IDs in a cleaner format
+        print("\nToken IDs:")
+        data_rows = df[df['Range'] != 'EXPECTED VALUE']
+        for _, row in data_rows.iterrows():
+            if 'Token ID' in row and row['Token ID']:
+                print(f"{row['Range']}: {row['Token ID']}")
+        
+        # Get expected value info
+        ev_row = df[df['Range'] == 'EXPECTED VALUE'].iloc[0]
+        print("\nExpected Values:")
+        print(f"Prediction: {ev_row['Pred (%)']}%")
+        print(f"Market: {ev_row['Mkt (%)']}%")
+        print(f"Difference: {ev_row['Diff (%)']}%")
+    
+    def get_positions_to_sell(self, comparison_df: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:
         """
         Identify positions that should be sold based on comparison table data.
         Positions are recommended for selling when they have:
         1. A positive sell opportunity (Buy-Only = 0.0, indicating they have no buy opportunity), or
         2. A model prediction below the sell_below threshold
         
+        Args:
+            comparison_df: Optional pre-generated comparison DataFrame to avoid duplicate generation
+        
         Returns:
             List of dictionaries with details about positions to sell
         """
-        all_positions, _ = self.get_all_positions_with_stats()
+        all_positions, _ = self.get_all_positions_with_stats(comparison_df)
         
         # Filter for positions that should be sold
         positions_to_sell = [pos for pos in all_positions if pos['should_sell']]
@@ -326,19 +378,20 @@ class PositionSeller:
         if by_low_pred > 0:
             print(f"  - {by_low_pred} positions with prediction below the {self.sell_below}% threshold")
         
-    def execute_sell_orders(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None, dry_run: bool = False) -> List[Dict[str, Any]]:
+    def execute_sell_orders(self, positions_to_sell: Optional[List[Dict[str, Any]]] = None, dry_run: bool = False, comparison_df: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:
         """
-        Execute sell orders for all positions recommended for selling.
+        Execute sell orders for the specified positions.
         
         Args:
-            positions_to_sell: List of positions to sell. If None, will be fetched.
-            dry_run: If True, show what would be done but don't execute actual sells
+            positions_to_sell: Optional list of positions to sell. If None, will be fetched.
+            dry_run: If True, only print what would be sold without executing orders
+            comparison_df: Optional pre-generated comparison DataFrame to avoid duplicate generation
             
         Returns:
-            List of results for executed sell orders
+            List of results from executed sell orders
         """
         if positions_to_sell is None:
-            positions_to_sell = self.get_positions_to_sell()
+            positions_to_sell = self.get_positions_to_sell(comparison_df)
             
         if not positions_to_sell:
             print(f"\nNo positions to sell.")
