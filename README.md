@@ -32,30 +32,88 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 days remain in the market
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
 # Option explanations:
-# --buy-threshold 1.5      : Only bid on opportunities with at least 1.5% edge over market price
-# --sell-threshold 0.5     : Sell positions with at least 0.5% sell opportunity
-# --sell-below 2.0         : Automatically sell positions with predictions below 2%
-# --min-prediction 7.0     : Only bid on opportunities where our model predicts at least 7% probability
-# --weighted-selection     : Use weighted probability selection instead of always choosing the best opportunity
-# --interval 60            : Run the scheduler every 60 minutes
-# --use-csv-getter         : Use XTracker.io CSV method for tweet fetching instead of Apify
-# --get-tweet-count-first  : Check tweet count from Polymarket before fetching to avoid unnecessary fetching
-# --show-positions         : Display all your current positions when running
-# --show-active-positions  : Display only positions for the active market week
-# --dry-run                : Test without placing actual orders (remove this for real trading)
+# --algorithm ensemble         : Use ensemble method combining all prediction algorithms for maximum accuracy
+# --random-seed 42             : Set random seed for reproducible predictions and consistent trading decisions
+# --buy-threshold 1.5          : Only bid on opportunities with at least 1.5% edge over market price
+# --sell-threshold 0.5         : Sell positions with at least 0.5% sell opportunity
+# --sell-below 2.0             : Automatically sell positions with predictions below 2%
+# --min-prediction 7.0         : Only bid on opportunities where our model predicts at least 7% probability
+# --weighted-selection         : Use weighted probability selection instead of always choosing the best opportunity
+# --tweet-interval 110         : Check for new tweets every 110 minutes
+# --buy-interval 60            : Run auto-bidder every 60 minutes
+# --sell-interval 10           : Run auto-seller every 10 minutes
+# --use-csv-getter             : Use XTracker.io CSV method for tweet fetching instead of Apify
+# --get-tweet-count-first      : Check tweet count from Polymarket before fetching to avoid unnecessary fetching
+# --show-positions             : Display all your current positions when running
+# --show-active-positions      : Display only positions for the active market week
+# --dry-run                    : Test without placing actual orders (remove this for real trading)
 
 # Run the automated scheduler with reasonable defaults when 1-2 days remain in the market
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
-# Key difference:
-# --min-prediction 9.0     : Higher threshold (9% vs 7%) as less time remains in the market
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+# Key differences:
+# --algorithm enhanced_facebook_prophet : Use enhanced Facebook Prophet for faster execution than ensemble
+# --min-prediction 9.0                  : Higher threshold (9% vs 7%) as less time remains in the market
 
 # Run the automated scheduler with reasonable defaults when 6-7 days remain in the market
-python -m src.scheduler.scheduler --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
-# Key difference:
-# --min-prediction 15.0    : Much higher threshold (15%) when almost the entire week remains
+python -m src.scheduler.scheduler --algorithm facebook_prophet --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 15.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+# Key differences:
+# --algorithm facebook_prophet : Use standard Facebook Prophet for fast execution when many days remain
+# --min-prediction 15.0        : Much higher threshold (15%) when almost the entire week remains
 ```
+
+## 🤖 Prediction Algorithms
+
+The system now supports multiple advanced prediction algorithms for enhanced trading decisions:
+
+### Available Algorithms
+
+| Algorithm                   | Description               | Speed | Accuracy  | Best Use Case         |
+| --------------------------- | ------------------------- | ----- | --------- | --------------------- |
+| `prophet`                   | Legacy predictor          | ~5s   | Good      | Baseline (default)    |
+| `facebook_prophet`          | Standard Facebook Prophet | ~8s   | Very Good | General forecasting   |
+| `enhanced_facebook_prophet` | Multi-Prophet ensemble    | ~45s  | Superior  | **Recommended**       |
+| `neural_prophet`            | Deep learning predictor   | ~30s  | Excellent | Complex patterns      |
+| `enhanced_neural_prophet`   | Multi-Neural ensemble     | ~3min | Superior  | High accuracy trading |
+| `timesfm`                   | Google foundation model   | ~20s  | Excellent | Zero-shot learning    |
+| `enhanced_timesfm`          | Multi-TimesFM ensemble    | ~2min | Superior  | Advanced trading      |
+| `ensemble`                  | All models combined       | ~3min | Maximum   | Best overall accuracy |
+
+### Algorithm Selection Examples
+
+```bash
+# Use Enhanced Facebook Prophet (recommended for most cases)
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42
+
+# Use Ensemble for maximum accuracy (slower but best results)
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --interval 60
+
+# Use Neural Prophet for complex pattern detection
+python -m src.scheduler.scheduler --algorithm neural_prophet --random-seed 42
+
+# Use TimesFM for fast, accurate predictions
+python -m src.scheduler.scheduler --algorithm timesfm --random-seed 42
+```
+
+### 🔄 Reproducible Trading
+
+All algorithms support reproducible results through random seed control:
+
+```bash
+# Same seed = Same predictions = Same trading decisions
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42
+
+# Different seeds for testing algorithm stability
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 123
+```
+
+This ensures that:
+
+- **Backtesting** produces consistent results
+- **Algorithm comparison** is fair and reproducible
+- **Trading strategies** can be reliably tested and deployed
+- **Debug sessions** can replicate exact trading scenarios
 
 ## Directory Structure
 
@@ -150,10 +208,10 @@ Contains tools for making bidding decisions and executing trades.
 
 ```bash
 # Run the auto-bidder in dry-run mode
-python -m src.bidding_decision.auto_bid.run --threshold 2.0 --min-prediction 10.0 --dry-run
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42 --threshold 2.0 --min-prediction 10.0 --dry-run
 
 # Run the position seller to identify positions to sell
-python -m src.bidding_decision.auto_bid.run_seller --sell-below 5.0 --auto-sell --dry-run
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42 --sell-below 5.0 --auto-sell --dry-run
 ```
 
 #### `/src/scheduler/` - Automated Workflow
@@ -166,8 +224,16 @@ Scheduler for automating the entire workflow from fetching tweets to placing ord
 
 ```bash
 # Run scheduler with optimized settings
-python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --tweet-interval 20 --buy-interval 60 --sell-interval 10 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
 ```
+
+This configuration uses an optimized approach:
+
+- Every 20 minutes: Check tweet counts without forcing fetching
+- Every 60 minutes: Check tweet counts, fetch if needed, then run auto-bidder
+- Every 10 minutes: Check tweet counts, fetch if needed, then run auto-seller
+
+This minimizes unnecessary API calls while ensuring all trading decisions are made with up-to-date data.
 
 #### `/src/terminal_logger/` - Terminal Output Logging
 
@@ -182,10 +248,10 @@ Simple utility for logging terminal output to files when running commands.
 python -m src.terminal_logger.logger "your command here"
 
 # Run the scheduler with logging
-python -m src.terminal_logger.logger "python -m src.scheduler.scheduler --buy-threshold 1.5 --dry-run"
+python -m src.terminal_logger.logger "python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --buy-threshold 1.5 --dry-run"
 
 # Run with custom log filename
-python -m src.terminal_logger.logit --logfile my_custom_log.log python -m src.scheduler.scheduler --dry-run
+python -m src.terminal_logger.logit --logfile my_custom_log.log python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --dry-run
 ```
 
 See the [Terminal Logger README](src/terminal_logger/README.md) for more details.
@@ -239,7 +305,7 @@ This multi-stage approach ensures maximum data reliability and reduces the chanc
 
 ```bash
 # Example command using the enhanced tweet count verification
-python -m src.scheduler.scheduler --get-tweet-count-first --use-csv-getter --interval 60 --dry-run
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --get-tweet-count-first --use-csv-getter --interval 60 --dry-run
 ```
 
 ## Detailed Configuration Options
@@ -270,22 +336,16 @@ Run the scheduler with different intervals for each operation:
 
 ```bash
 # Run tweet count checks every 20 minutes, buying every 60 minutes, and selling every 10 minutes
-python -m src.scheduler.scheduler --tweet-interval 20 --buy-interval 60 --sell-interval 10 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --tweet-interval 20 --buy-interval 60 --sell-interval 10 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
 ```
-
-This configuration uses an optimized approach:
-
-- Every 20 minutes: Check tweet counts without forcing fetching
-- Every 60 minutes: Check tweet counts, fetch if needed, then run auto-bidder
-- Every 10 minutes: Check tweet counts, fetch if needed, then run auto-seller
-
-This minimizes unnecessary API calls while ensuring all trading decisions are made with up-to-date data.
 
 ### Auto-Bidder Options
 
 The Auto-Bidder identifies and places buy orders. Key options include:
 
 ```
+--algorithm ALGO       Choose prediction algorithm (prophet, facebook_prophet, enhanced_facebook_prophet, neural_prophet, enhanced_neural_prophet, timesfm, enhanced_timesfm, ensemble)
+--random-seed INT      Random seed for reproducible predictions (default: 42)
 --threshold FLOAT      Minimum statistical edge required (default: 0.0)
 --min-prediction FLOAT Only consider opportunities with prediction above this value
 --amount FLOAT         Amount to bid in USDC (default: 1.0)
@@ -298,6 +358,8 @@ The Auto-Bidder identifies and places buy orders. Key options include:
 The Position Seller identifies and sells positions. Key options include:
 
 ```
+--algorithm ALGO       Choose prediction algorithm (prophet, facebook_prophet, enhanced_facebook_prophet, neural_prophet, enhanced_neural_prophet, timesfm, enhanced_timesfm, ensemble)
+--random-seed INT      Random seed for reproducible predictions (default: 42)
 --threshold FLOAT      Minimum statistical edge required for selling (default: 0.0)
 --sell-below FLOAT     Sell positions with prediction below this percentage
 --auto-sell            Automatically execute sell orders (otherwise just show recommendations)
@@ -309,8 +371,11 @@ The Position Seller identifies and sells positions. Key options include:
 For running in production as a background service:
 
 ```bash
-# Run as a background service
-nohup python -m src.scheduler.scheduler --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30 > /dev/null 2>&1 &
+# Run as a background service with Enhanced Facebook Prophet
+nohup python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 5.0 --weighted-selection --interval 30 > /dev/null 2>&1 &
+
+# Run as a background service with Ensemble for maximum accuracy
+nohup python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.8 --sell-below 3.0 --min-prediction 8.0 --weighted-selection --interval 60 > /dev/null 2>&1 &
 
 # Find the process ID
 ps aux | grep scheduler

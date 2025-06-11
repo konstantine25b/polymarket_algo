@@ -23,6 +23,8 @@ Options:
     --initial-batch N      Initial batch size for incremental fetching (default: 40)
     --max-batch N          Maximum batch size for incremental fetching (default: 200)
     --no-prophet           Disable Prophet algorithm for predictions (use standard algorithm instead)
+    --algorithm            Prediction algorithm to use (default: prophet)
+    --random-seed          Random seed for reproducible predictions (default: 42)
     --no-bidding           Don't run the auto-bidder
     --no-selling           Don't run the auto-seller
     --no-buy               Run auto-bidder but don't execute buy orders (show opportunities only)
@@ -100,6 +102,11 @@ def setup_argparse():
                         help='Maximum batch size for incremental fetching (default: 200)')
     parser.add_argument('--no-prophet', action='store_true',
                         help='Disable Prophet algorithm for predictions (use standard algorithm instead)')
+    parser.add_argument('--algorithm', type=str, default='prophet',
+                        choices=['prophet', 'facebook_prophet', 'enhanced_facebook_prophet', 'neural_prophet', 'enhanced_neural_prophet', 'timesfm', 'enhanced_timesfm', 'ensemble'],
+                        help='Prediction algorithm to use (default: prophet)')
+    parser.add_argument('--random-seed', type=int, default=42,
+                        help='Random seed for reproducible predictions (default: 42)')
     parser.add_argument('--no-bidding', action='store_true',
                         help="Don't run the auto-bidder")
     parser.add_argument('--no-selling', action='store_true',
@@ -416,7 +423,7 @@ def display_wallet_balance():
     
     return balance_info
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -427,6 +434,8 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         show_stats: Whether to show full statistics table
         weighted_selection: Whether to use weighted selection instead of choosing the best opportunity
         min_prediction: Minimum prediction percentage required to consider an opportunity
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -436,7 +445,9 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         "-m", 
         "src.bidding_decision.auto_bid.run", 
         f"--threshold={threshold}",
-        f"--amount={amount}"
+        f"--amount={amount}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
     ]
     
     # Add dry run mode if requested
@@ -457,6 +468,8 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     if min_prediction > 0:
         cmd.append(f"--min-prediction={min_prediction}")
         logger.info(f"Using minimum prediction threshold of {min_prediction}% for buy opportunities")
+    
+    logger.info(f"Using prediction algorithm: {algorithm} with random seed: {random_seed}")
     
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
@@ -480,129 +493,79 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, sell_below=0.0, dry_run=False, show_stats=True, debug=False, show_positions=True, show_active_positions=True):
-    """Run the auto-seller to sell positions based on statistical opportunities.
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42):
+    """Run the auto-seller to sell positions based on statistical analysis.
     
     Args:
         quiet: Whether to suppress output
-        threshold: Minimum opportunity percentage to sell positions
-        sell_below: Sell positions with prediction below this percentage
+        threshold: Minimum opportunity percentage to place sells
         dry_run: Whether to run in dry run mode (don't place real orders)
         show_stats: Whether to show full statistics table
-        debug: Whether to show detailed debugging information
-        show_positions: Whether to show all positions
-        show_active_positions: Whether to show active market positions
+        sell_below: Automatically sell positions with prediction below this percentage
+        debug: Show detailed debugging information
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
-    
-    # First display all positions if requested
-    if show_positions and show_active_positions:
-        print("\n" + "=" * 50)
-        print("POSITIONS INFORMATION")
-        print("=" * 50)
-        
-        # Run the position display command with the combined flag
-        position_cmd = [
-            sys.executable,
-            "-m",
-            "src.polymarket.my_positions.cli",
-            "--simple-and-active-positions"
-        ]
-        
-        try:
-            subprocess.run(position_cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to display positions: {e}")
-            # Continue with the rest of the function even if this fails
-    else:
-        # First display all positions if requested
-        if show_positions:
-            print("\n" + "=" * 50)
-            print("CURRENT POSITIONS")
-            print("=" * 50)
-            
-            # Run the position display command
-            position_cmd = [
-                sys.executable,
-                "-m",
-                "src.polymarket.my_positions.cli",
-                "--simple-positions"
-            ]
-            
-            try:
-                subprocess.run(position_cmd, check=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to display positions: {e}")
-                # Continue with the rest of the function even if this fails
-        
-        # Now display active market positions separately if requested
-        if show_active_positions:
-            print("\n" + "=" * 50)
-            print("ACTIVE MARKET POSITIONS")
-            print("=" * 50)
-            
-            # Run the position display command with the new active-positions flag
-            active_position_cmd = [
-                sys.executable,
-                "-m",
-                "src.polymarket.my_positions.cli",
-                "--active-positions"
-            ]
-            
-            try:
-                subprocess.run(active_position_cmd, check=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to display active market positions: {e}")
-                # Continue with the rest of the function even if this fails
-    
-    # Skip the explicit comparison table generation since the auto-seller will generate it
-    print("\n" + "=" * 50)
-    print("SELL RECOMMENDATIONS")
-    print("=" * 50)
     
     # Build the command to run
     cmd = [
         sys.executable, 
         "-m", 
-        "src.bidding_decision.auto_bid.run_seller",
-        f"--threshold={threshold}"
+        "src.bidding_decision.auto_bid.run_seller", 
+        f"--threshold={threshold}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
     ]
     
-    # Add the auto-sell flag to execute orders
-    if not dry_run:
-        cmd.append("--auto-sell")
-    else:
+    # Add dry run mode if requested
+    if dry_run:
         cmd.append("--dry-run")
+        logger.info("Running auto-seller in dry run mode (no real orders will be placed)")
+    else:
+        # Add the auto-sell flag to execute orders when not in dry run
+        cmd.append("--auto-sell")
     
-    # Add sell-below threshold if specified
-    if sell_below > 0.0:
-        cmd.append(f"--sell-below={sell_below}")
-    
-    # Only add verbose flag if explicitly requested with debug
-    if debug:
-        cmd.append("--verbose")
-    
-    # Add debug flag if requested
-    if debug:
-        cmd.append("--debug")
-    
-    # Disable stats if requested
+    # Add no-stats flag if requested
     if not show_stats:
         cmd.append("--no-stats")
+        
+    # Add sell below threshold if specified
+    if sell_below > 0:
+        cmd.append(f"--sell-below={sell_below}")
+        logger.info(f"Automatically selling positions with prediction below {sell_below}%")
+        
+    # Add debug flag if requested  
+    if debug:
+        cmd.append("--debug")
+        logger.info("Enabling debug mode for position seller")
     
     # Add flag to focus on active market only
     cmd.append("--active-market-only")
     
-    # Run the command
+    logger.info(f"Using prediction algorithm: {algorithm} with random seed: {random_seed}")
+    
     try:
-        subprocess.run(cmd, check=True)
-        logger.info("Auto-seller completed successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Auto-seller failed with error code {e.returncode}")
-        if not quiet and e.stderr:
-            logger.error(f"Error output: {e.stderr}")
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Auto-seller failed with error: {process.stderr.decode()}")
+            else:
+                # Print the output even in quiet mode since this is the key result
+                logger.info("Auto-seller completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Auto-seller failed")
+            else:
+                logger.info("Auto-seller completed successfully")
+    except Exception as e:
+        logger.error(f"Error running auto-seller: {e}")
         return False
+    
+    return process.returncode == 0
 
 def run_scheduled_jobs(args):
     """Run the configured jobs based on command-line arguments."""
@@ -969,7 +932,9 @@ def run_scheduled_jobs(args):
                         dry_run=effective_dry_run,
                         show_stats=not args.no_stats,
                         weighted_selection=args.weighted_selection,
-                        min_prediction=args.min_prediction
+                        min_prediction=args.min_prediction,
+                        algorithm=args.algorithm,
+                        random_seed=args.random_seed
                     )
         elif prediction_success and not args.no_bidding:
             # Skip balance check if requested
@@ -987,7 +952,9 @@ def run_scheduled_jobs(args):
                 dry_run=effective_dry_run,
                 show_stats=not args.no_stats,
                 weighted_selection=args.weighted_selection,
-                min_prediction=args.min_prediction
+                min_prediction=args.min_prediction,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed
             )
             
         # Run the auto-seller if prediction succeeded and selling not disabled
@@ -1003,12 +970,12 @@ def run_scheduled_jobs(args):
             run_auto_seller(
                 quiet=args.quiet,
                 threshold=args.sell_threshold,
-                sell_below=args.sell_below,
                 dry_run=effective_dry_run,
                 show_stats=not args.no_stats,
+                sell_below=args.sell_below,
                 debug=args.debug_seller,
-                show_positions=args.show_positions,
-                show_active_positions=args.show_active_positions
+                algorithm=args.algorithm,
+                random_seed=args.random_seed
             )
     
     return tweets_success and prediction_success or skip_tweet_fetching

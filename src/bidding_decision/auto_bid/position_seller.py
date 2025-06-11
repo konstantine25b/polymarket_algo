@@ -27,7 +27,7 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42):
         """
         Initialize the PositionSeller.
         
@@ -35,10 +35,14 @@ class PositionSeller:
             threshold: Minimum opportunity percentage (%)
             sell_below: Sell positions with prediction below this percentage (%)
             debug: Whether to show detailed debugging information
+            algorithm: Prediction algorithm to use
+            random_seed: Random seed for reproducible predictions
         """
         self.threshold = threshold
         self.sell_below = sell_below
         self.debug = debug
+        self.algorithm = algorithm
+        self.random_seed = random_seed
         self.position_tracker = PolymarketPositionTracker()
         
     def get_all_positions_with_stats(self, comparison_df: Optional[pd.DataFrame] = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
@@ -95,7 +99,9 @@ class PositionSeller:
             df = generate_comparison_table(
                 refresh=True,
                 use_prophet=True,
-                threshold=self.threshold
+                threshold=self.threshold,
+                algorithm=self.algorithm,
+                random_seed=self.random_seed
             )
             
             # Display the comparison table when we generate it (similar to bidder behavior)
