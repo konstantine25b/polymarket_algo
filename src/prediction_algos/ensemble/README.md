@@ -18,8 +18,8 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 📊 Model Weights:
    Neural Prophet: 17.0%      (Enhanced version)
    Facebook Prophet: 25.0%    (Enhanced version)
-   TimesFM: 35.0%            (Enhanced version)
-   Basic Prophet: 20.0%       (Custom polymarket algorithm)
+   TimesFM: 30.0%            (Enhanced version)
+   Basic Prophet: 25.0%       (Custom polymarket algorithm)
    Moving Average: 1.5%       (7-day window)
    Linear Trend: 1.5%         (14-day trend)
 ```
@@ -38,13 +38,13 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 - **Strengths**: Seasonal decomposition, trend changes, holidays
 - **Version**: Enhanced Facebook Prophet with advanced seasonality
 
-### 3. TimesFM (35% weight)
+### 3. TimesFM (30% weight)
 
 - **Type**: Transformer-based foundation model
 - **Strengths**: Attention mechanisms, large-scale pre-training
 - **Version**: Enhanced TimesFM with ensemble capabilities
 
-### 4. Basic Prophet (20% weight)
+### 4. Basic Prophet (25% weight)
 
 - **Type**: Custom algorithm from polymarket_predictor
 - **Strengths**: Historical rate blending, lognormal distribution modeling
@@ -76,8 +76,8 @@ python -m src.prediction_algos.ensemble.main
 python -m src.prediction_algos.ensemble.main \
     --neural-prophet-weight 0.17 \
     --facebook-prophet-weight 0.25 \
-    --timesfm-weight 0.35 \
-    --basic-prophet-weight 0.20 \
+    --timesfm-weight 0.30 \
+    --basic-prophet-weight 0.25 \
     --moving-average-weight 0.015 \
     --linear-trend-weight 0.015
 ```
@@ -108,8 +108,8 @@ python -m src.prediction_algos.ensemble.main --fast
 
 - `--neural-prophet-weight`: Neural Prophet weight (default: 0.17)
 - `--facebook-prophet-weight`: Facebook Prophet weight (default: 0.25)
-- `--timesfm-weight`: TimesFM weight (default: 0.35)
-- `--basic-prophet-weight`: Basic Prophet weight (default: 0.20)
+- `--timesfm-weight`: TimesFM weight (default: 0.30)
+- `--basic-prophet-weight`: Basic Prophet weight (default: 0.25)
 - `--moving-average-weight`: Moving average weight (default: 0.015)
 - `--linear-trend-weight`: Linear trend weight (default: 0.015)
 
@@ -145,8 +145,8 @@ Weights are automatically normalized to sum to 1.0:
 raw_weights = {
     'neural_prophet': 0.17,
     'facebook_prophet': 0.25,
-    'timesfm': 0.35,
-    'basic_prophet': 0.20,
+    'timesfm': 0.30,
+    'basic_prophet': 0.25,
     'moving_average': 0.015,
     'linear_trend': 0.015
 }
@@ -160,7 +160,7 @@ If any model fails, weights are re-normalized among remaining active models.
 ### Minimal Console Output
 
 ```
-🎯 Ensemble initialized: neural_prophet: 17.0%, facebook_prophet: 25.0%, timesfm: 35.0%, basic_prophet: 20.0%, moving_average: 1.5%, linear_trend: 1.5%
+🎯 Ensemble initialized: neural_prophet: 17.0%, facebook_prophet: 25.0%, timesfm: 30.0%, basic_prophet: 25.0%, moving_average: 1.5%, linear_trend: 1.5%
 
 🔥 Preparing models...
 📊 Neural Prophet: ✅ (Enhanced)
@@ -190,8 +190,8 @@ Total predicted: 139.8
 🤖 MODEL CONTRIBUTIONS:
    neural_prophet: 125.3 tweets (weight: 0.170)
    facebook_prophet: 142.7 tweets (weight: 0.250)
-   timesfm: 138.9 tweets (weight: 0.350)
-   basic_prophet: 144.2 tweets (weight: 0.200)
+   timesfm: 138.9 tweets (weight: 0.300)
+   basic_prophet: 144.2 tweets (weight: 0.250)
    moving_average: 135.2 tweets (weight: 0.015)
    linear_trend: 140.1 tweets (weight: 0.015)
 
@@ -292,8 +292,8 @@ predictor = EnsembleTweetPredictor(
     data_path='data/tweets.csv',
     neural_prophet_weight=0.17,
     facebook_prophet_weight=0.25,
-    timesfm_weight=0.35,
-    basic_prophet_weight=0.20,
+    timesfm_weight=0.30,
+    basic_prophet_weight=0.25,
     moving_average_weight=0.015,
     linear_trend_weight=0.015
 )

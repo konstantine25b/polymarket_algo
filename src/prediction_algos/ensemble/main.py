@@ -38,10 +38,10 @@ def main():
                         help='Weight for Neural Prophet model (default: 0.17)')
     parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
                         help='Weight for Facebook Prophet model (default: 0.25)')
-    parser.add_argument('--timesfm-weight', type=float, default=0.35,
-                        help='Weight for TimesFM model (default: 0.35)')
-    parser.add_argument('--basic-prophet-weight', type=float, default=0.20,
-                        help='Weight for Basic Prophet model (default: 0.20)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model (default: 0.30)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model (default: 0.25)')
     parser.add_argument('--moving-average-weight', type=float, default=0.015,
                         help='Weight for moving average method (default: 0.015)')
     parser.add_argument('--linear-trend-weight', type=float, default=0.015,

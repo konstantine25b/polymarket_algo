@@ -91,8 +91,8 @@ class EnsembleTweetPredictor:
     """Ensemble predictor combining multiple forecasting models with weight control and additional prediction methods."""
     
     def __init__(self, data_path=None, save_plots=True, use_fast_models=False, 
-                 neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.35,
-                 basic_prophet_weight=0.20, moving_average_weight=0.015, linear_trend_weight=0.015,
+                 neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30,
+                 basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015,
                  include_basic_prophet=True, include_moving_average=True, include_linear_trend=True):
         """
         Initialize the ensemble predictor.
