@@ -5,10 +5,37 @@ A suite of tools for automating trading on Polymarket, including:
 1. **Auto-Bidder** - Analyzes statistical market opportunities and places buy orders
 2. **Position Seller** - Identifies which existing positions should be sold based on statistical analysis
 
+## 🤖 Prediction Algorithms
+
+Both the Auto-Bidder and Position Seller now support multiple prediction algorithms for enhanced trading accuracy:
+
+### Available Algorithms
+
+| Algorithm                   | Description               | Speed | Accuracy  | Best Use Case         |
+| --------------------------- | ------------------------- | ----- | --------- | --------------------- |
+| `prophet`                   | Legacy predictor          | ~5s   | Good      | Baseline (default)    |
+| `facebook_prophet`          | Standard Facebook Prophet | ~8s   | Very Good | General forecasting   |
+| `enhanced_facebook_prophet` | Multi-Prophet ensemble    | ~45s  | Superior  | **Recommended**       |
+| `neural_prophet`            | Deep learning predictor   | ~30s  | Excellent | Complex patterns      |
+| `enhanced_neural_prophet`   | Multi-Neural ensemble     | ~3min | Superior  | High accuracy trading |
+| `timesfm`                   | Google foundation model   | ~20s  | Excellent | Zero-shot learning    |
+| `enhanced_timesfm`          | Multi-TimesFM ensemble    | ~2min | Superior  | Advanced trading      |
+| `ensemble`                  | All models combined       | ~3min | Maximum   | Best overall accuracy |
+
+### 🔄 Reproducible Trading
+
+Both tools support reproducible results through random seed control:
+
+- **Same seed** = Same predictions = Same trading decisions
+- **Different seeds** for testing algorithm stability and robustness
+- **Consistent backtesting** and strategy evaluation
+
 ## Features
 
 ### Auto-Bidder
 
+- **Multiple prediction algorithms**: Choose from 8 different algorithms including enhanced variants
+- **Reproducible results**: Random seed control for consistent trading decisions
 - Automatically identifies the best buy opportunities using statistical analysis
 - Places market buy orders for a specified amount (default: 1 USDC)
 - Configurable minimum threshold for opportunities (default: 0.0%)
@@ -20,6 +47,8 @@ A suite of tools for automating trading on Polymarket, including:
 
 ### Position Seller
 
+- **Algorithm consistency**: Uses the same algorithm as your trading strategy
+- **Reproducible analysis**: Same random seed ensures consistent position evaluation
 - Displays all your current positions with complete statistical information
 - Highlights positions that are recommended for selling
 - Identifies positions where Buy-Only value is 0, indicating they should be sold
@@ -36,35 +65,92 @@ A suite of tools for automating trading on Polymarket, including:
 
 ### Auto-Bidder
 
+#### Algorithm Selection Examples
+
+```bash
+# Use Enhanced Facebook Prophet (recommended for most cases)
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42
+
+# Use Ensemble for maximum accuracy (slower but best results)
+python -m src.bidding_decision.auto_bid.run --algorithm ensemble --random-seed 42 --threshold 2.0
+
+# Use Neural Prophet for complex pattern detection
+python -m src.bidding_decision.auto_bid.run --algorithm neural_prophet --random-seed 42 --min-prediction 8.0
+
+# Use TimesFM for fast, accurate predictions
+python -m src.bidding_decision.auto_bid.run --algorithm timesfm --random-seed 42 --weighted-selection
+```
+
 #### Command Line
 
 ```bash
 # Basic usage (uses values from .env file)
 python -m src.bidding_decision.auto_bid.run
 
-# Specify minimum opportunity threshold
-python -m src.bidding_decision.auto_bid.run --threshold 3.0
+# Use Enhanced Facebook Prophet with reproducible results
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42
+
+# Specify minimum opportunity threshold with advanced algorithm
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_neural_prophet --random-seed 42 --threshold 3.0
 
 # Only bid on opportunities with predictions above a minimum percentage
-python -m src.bidding_decision.auto_bid.run --min-prediction 10.0
+python -m src.bidding_decision.auto_bid.run --algorithm facebook_prophet --random-seed 42 --min-prediction 10.0
 
-# Change the bid amount
-python -m src.bidding_decision.auto_bid.run --amount 2.5
+# Change the bid amount with Ensemble algorithm
+python -m src.bidding_decision.auto_bid.run --algorithm ensemble --random-seed 42 --amount 2.5
 
 # Use weighted selection instead of always choosing the best opportunity
-python -m src.bidding_decision.auto_bid.run --weighted-selection
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42 --weighted-selection
 
 # Run in dry run mode (no real orders placed)
-python -m src.bidding_decision.auto_bid.run --dry-run
+python -m src.bidding_decision.auto_bid.run --algorithm timesfm --random-seed 42 --dry-run
 
 # Skip displaying the full stats table
-python -m src.bidding_decision.auto_bid.run --no-stats
+python -m src.bidding_decision.auto_bid.run --algorithm neural_prophet --random-seed 42 --no-stats
 
 # Provide private key directly (not recommended for security reasons)
 python -m src.bidding_decision.auto_bid.run --key YOUR_PRIVATE_KEY
 
 # Combine options for more control
-python -m src.bidding_decision.auto_bid.run --threshold 2.0 --min-prediction 15.0 --weighted-selection --dry-run
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42 --threshold 2.0 --min-prediction 15.0 --weighted-selection --dry-run
+```
+
+#### 🎯 Recommended Trading Configurations
+
+**Conservative Trading (Recommended for beginners):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run \
+  --algorithm facebook_prophet \
+  --random-seed 42 \
+  --threshold 2.5 \
+  --min-prediction 10.0 \
+  --amount 1.0 \
+  --dry-run  # Remove when ready for real trading
+```
+
+**Balanced Trading (Good for most users):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run \
+  --algorithm enhanced_facebook_prophet \
+  --random-seed 42 \
+  --threshold 1.8 \
+  --min-prediction 7.0 \
+  --weighted-selection \
+  --amount 1.5
+```
+
+**Aggressive Trading (For experienced traders):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run \
+  --algorithm ensemble \
+  --random-seed 42 \
+  --threshold 1.2 \
+  --min-prediction 5.0 \
+  --weighted-selection \
+  --amount 2.5
 ```
 
 #### Python API
@@ -72,12 +158,14 @@ python -m src.bidding_decision.auto_bid.run --threshold 2.0 --min-prediction 15.
 ```python
 from src.bidding_decision.auto_bid.bidder import AutoBidder
 
-# Initialize with custom parameters
+# Initialize with custom parameters and algorithm
 bidder = AutoBidder(
     threshold=3.0,  # Minimum 3% edge required
     order_amount=1.0,  # 1 USDC per order
     use_weighted_selection=True,  # Use weighted probability selection instead of highest edge
-    min_prediction=10.0  # Only consider opportunities with predictions of at least 10%
+    min_prediction=10.0,  # Only consider opportunities with predictions of at least 10%
+    algorithm="enhanced_facebook_prophet",  # Use enhanced algorithm
+    random_seed=42  # Reproducible results
 )
 
 # Complete automated process
@@ -99,35 +187,89 @@ if opportunity:
 
 ### Position Seller
 
+#### Algorithm Selection Examples
+
+```bash
+# Use Enhanced Facebook Prophet for position analysis
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42
+
+# Use Ensemble for maximum accuracy in position evaluation
+python -m src.bidding_decision.auto_bid.run_seller --algorithm ensemble --random-seed 42 --threshold 2.0
+
+# Use Neural Prophet with auto-sell for low predictions
+python -m src.bidding_decision.auto_bid.run_seller --algorithm neural_prophet --random-seed 42 --auto-sell --sell-below 3.0
+
+# Use TimesFM with debugging enabled
+python -m src.bidding_decision.auto_bid.run_seller --algorithm timesfm --random-seed 42 --debug
+```
+
 #### Command Line
 
 ```bash
 # Basic usage - shows all positions with recommendations
 python -m src.bidding_decision.auto_bid.run_seller
 
+# Use Enhanced Facebook Prophet with reproducible results
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42
+
 # Display only positions recommended for selling (not all positions)
-python -m src.bidding_decision.auto_bid.run_seller --sell-only
+python -m src.bidding_decision.auto_bid.run_seller --algorithm neural_prophet --random-seed 42 --sell-only
 
 # Automatically sell all recommended positions
-python -m src.bidding_decision.auto_bid.run_seller --auto-sell
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42 --auto-sell
 
 # Do a dry run of auto-sell (shows what would be sold without executing orders)
-python -m src.bidding_decision.auto_bid.run_seller --auto-sell --dry-run
+python -m src.bidding_decision.auto_bid.run_seller --algorithm ensemble --random-seed 42 --auto-sell --dry-run
 
 # Specify minimum opportunity threshold
-python -m src.bidding_decision.auto_bid.run_seller --threshold 3.0
+python -m src.bidding_decision.auto_bid.run_seller --algorithm timesfm --random-seed 42 --threshold 3.0
 
 # Automatically sell positions with prediction below 5%
-python -m src.bidding_decision.auto_bid.run_seller --auto-sell --sell-below 5.0
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_neural_prophet --random-seed 42 --auto-sell --sell-below 5.0
 
 # Skip displaying the full stats table
-python -m src.bidding_decision.auto_bid.run_seller --no-stats
+python -m src.bidding_decision.auto_bid.run_seller --algorithm facebook_prophet --random-seed 42 --no-stats
 
 # Enable verbose logging
-python -m src.bidding_decision.auto_bid.run_seller --verbose
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42 --verbose
 
 # Show detailed debugging information (useful for troubleshooting)
-python -m src.bidding_decision.auto_bid.run_seller --debug
+python -m src.bidding_decision.auto_bid.run_seller --algorithm neural_prophet --random-seed 42 --debug
+```
+
+#### 🎯 Recommended Selling Configurations
+
+**Conservative Selling (Recommended for beginners):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run_seller \
+  --algorithm facebook_prophet \
+  --random-seed 42 \
+  --threshold 2.0 \
+  --sell-below 4.0 \
+  --dry-run  # Remove when ready for real trading
+```
+
+**Balanced Selling (Good for most users):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run_seller \
+  --algorithm enhanced_facebook_prophet \
+  --random-seed 42 \
+  --threshold 1.5 \
+  --sell-below 3.0 \
+  --auto-sell
+```
+
+**Aggressive Selling (For experienced traders):**
+
+```bash
+python -m src.bidding_decision.auto_bid.run_seller \
+  --algorithm ensemble \
+  --random-seed 42 \
+  --threshold 1.0 \
+  --sell-below 2.5 \
+  --auto-sell
 ```
 
 #### Python API
@@ -135,11 +277,13 @@ python -m src.bidding_decision.auto_bid.run_seller --debug
 ```python
 from src.bidding_decision.auto_bid.position_seller import PositionSeller
 
-# Initialize with custom parameters
+# Initialize with custom parameters and algorithm
 seller = PositionSeller(
     threshold=3.0,  # 3% edge required
     sell_below=5.0,  # Sell below 5% prediction
-    debug=False  # Enable/disable debugging output
+    debug=False,  # Enable/disable debugging output
+    algorithm="enhanced_facebook_prophet",  # Use enhanced algorithm
+    random_seed=42  # Reproducible results
 )
 
 # Get all positions with statistical information
@@ -159,6 +303,68 @@ results = seller.execute_sell_orders(positions_to_sell)
 dry_run_results = seller.execute_sell_orders(positions_to_sell, dry_run=True)
 ```
 
+## 📋 Command-Line Options
+
+### Algorithm & Prediction Options
+
+- `--algorithm`: Prediction algorithm to use (default: prophet)
+  - Choices: `prophet`, `facebook_prophet`, `enhanced_facebook_prophet`, `neural_prophet`, `enhanced_neural_prophet`, `timesfm`, `enhanced_timesfm`, `ensemble`
+- `--random-seed`: Random seed for reproducible predictions (default: 42)
+
+### Auto-Bidder Options
+
+- `--threshold`: Minimum opportunity percentage required (default: 0.0)
+- `--amount`: Amount to bid in USDC (default: 1.0)
+- `--key`: Private key for wallet (optional, will use .env if not provided)
+- `--dry-run`: Find opportunities but do not place orders
+- `--min-prediction`: Only bid on opportunities with prediction percentage at or above this value (default: 0.0)
+- `--weighted-selection`: Use weighted probability selection instead of always choosing the best opportunity
+- `--no-stats`: Don't display the full statistics table
+
+### Position Seller Options
+
+- `--threshold`: Minimum opportunity percentage (default: 0.0)
+- `--auto-sell`: Automatically execute sell orders for recommended positions
+- `--dry-run`: Show what would be sold but don't execute actual sell orders
+- `--no-stats`: Don't show the full statistical comparison table
+- `--sell-below`: Automatically sell positions with prediction below this percentage (default: 0.0)
+- `--sell-only`: Display only positions recommended for selling (not all positions)
+- `--verbose`: Enable verbose logging
+- `--debug`: Show detailed debugging information (useful for troubleshooting)
+
+## 🔄 Reproducible Trading Strategy
+
+Using the same algorithm and random seed ensures consistent trading decisions:
+
+```bash
+# Your trading bot will make the same decisions with these settings
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 42 --threshold 1.5 --min-prediction 6.0
+python -m src.bidding_decision.auto_bid.run_seller --algorithm enhanced_facebook_prophet --random-seed 42 --threshold 1.0 --sell-below 3.0 --auto-sell
+
+# Test algorithm stability with different seeds
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 123 --dry-run
+python -m src.bidding_decision.auto_bid.run --algorithm enhanced_facebook_prophet --random-seed 456 --dry-run
+```
+
+## 📊 Algorithm Performance Guidelines
+
+### Speed vs Accuracy Trade-offs
+
+**For frequent trading:**
+
+- Use `facebook_prophet` or `neural_prophet`
+- Fast execution (8-30 seconds), good accuracy
+
+**For standard trading:**
+
+- Use `enhanced_facebook_prophet` (recommended)
+- Balanced speed and accuracy (45 seconds)
+
+**For high-stakes trading:**
+
+- Use `ensemble` or `enhanced_neural_prophet`
+- Maximum accuracy (2-3 minutes), worth the wait
+
 ### Sample Output
 
 #### Auto-Bidder Output
@@ -166,6 +372,8 @@ dry_run_results = seller.execute_sell_orders(positions_to_sell, dry_run=True)
 Running with the `--dry-run` flag will show you the full stats table and the best opportunity without placing an actual order:
 
 ```
+Using prediction algorithm: enhanced_facebook_prophet
+
 Comparison Table:
          Range  Pred (%)  Mkt (%)  Bid (%)  Ask (%)  Spread (%)  Diff (%)  Opp (%)  Adj-Sp (%)  Adj-Full (0.0%)  Buy-Only (0.0%)
        150–174      0.43     0.50     0.30     0.70        0.40     -0.27     0.27        0.00             0.00             0.00

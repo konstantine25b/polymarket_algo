@@ -14,6 +14,8 @@ import datetime
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import re
+import sys
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -22,9 +24,230 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_prediction_data(prophet: bool = True) -> Dict[str, Any]:
+def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dict[str, Any]:
     """
-    Get prediction data from the polymarket_predictor module.
+    Get prediction data from various prediction algorithm modules.
+    
+    Args:
+        algorithm: Algorithm to use ("prophet", "facebook_prophet", "neural_prophet", "timesfm", "ensemble")
+        **kwargs: Additional arguments for the specific algorithm
+        
+    Returns:
+        Dict containing prediction data with frame_probabilities and summary
+    """
+    try:
+        # Import the predictor class based on algorithm
+        if algorithm == "prophet":
+            # Use the original polymarket_predictor
+            return get_prediction_data_legacy(prophet=True)
+        elif algorithm == "facebook_prophet":
+            from src.prediction_algos.facebook_prophet import TweetPredictor
+            predictor = TweetPredictor(save_plots=False)
+        elif algorithm == "enhanced_facebook_prophet":
+            from src.prediction_algos.facebook_prophet import EnhancedTweetPredictor
+            predictor = EnhancedTweetPredictor(
+                save_plots=False,
+                random_seed=kwargs.get('random_seed', 42)
+            )
+        elif algorithm == "neural_prophet":
+            from src.prediction_algos.neural_prophet.predictor import NeuralTweetPredictor
+            predictor = NeuralTweetPredictor(save_plots=False)
+        elif algorithm == "enhanced_neural_prophet":
+            from src.prediction_algos.neural_prophet.enhanced_predictor import EnhancedNeuralTweetPredictor
+            predictor = EnhancedNeuralTweetPredictor(
+                save_plots=False,
+                random_seed=kwargs.get('random_seed', 42)
+            )
+        elif algorithm == "timesfm":
+            from src.prediction_algos.timesfm.predictor import TimesFMTweetPredictor
+            predictor = TimesFMTweetPredictor(save_plots=False)
+        elif algorithm == "enhanced_timesfm":
+            from src.prediction_algos.timesfm import EnhancedTimesFMTweetPredictor
+            predictor = EnhancedTimesFMTweetPredictor(
+                save_plots=False,
+                random_seed=kwargs.get('random_seed', 42)
+            )
+        elif algorithm == "ensemble":
+            from src.prediction_algos.ensemble.predictor import EnsembleTweetPredictor
+            predictor = EnsembleTweetPredictor(
+                save_plots=False,
+                random_seed=kwargs.get('random_seed', 42)
+            )
+        else:
+            raise ValueError(f"Unknown algorithm: {algorithm}")
+        
+        # Set random seed for reproducible results (except enhanced_timesfm which gets it in constructor)
+        if algorithm != "enhanced_timesfm" and hasattr(predictor, 'set_random_seed'):
+            predictor.set_random_seed(kwargs.get('random_seed', 42))
+        
+        # Prepare the model with any provided parameters
+        if algorithm == "facebook_prophet":
+            predictor.prepare_model(
+                changepoint_prior_scale=kwargs.get('changepoint_prior', 0.05),
+                seasonality_prior_scale=kwargs.get('seasonality_prior', 10.0)
+            )
+        elif algorithm == "enhanced_facebook_prophet":
+            # Enhanced Facebook Prophet uses prepare_models (plural) method
+            predictor.prepare_models()
+        elif algorithm == "neural_prophet":
+            predictor.prepare_model(
+                epochs=kwargs.get('epochs', 50),
+                learning_rate=kwargs.get('learning_rate', 0.15)
+            )
+        elif algorithm == "enhanced_neural_prophet":
+            # Enhanced Neural Prophet uses prepare_models (plural) method
+            predictor.prepare_models()
+        elif algorithm == "timesfm":
+            predictor.prepare_model()
+        elif algorithm == "enhanced_timesfm":
+            # Enhanced TimesFM uses prepare_models (plural) method
+            predictor.prepare_models()
+        elif algorithm == "ensemble":
+            # Ensemble uses prepare_models (plural) method instead
+            predictor.prepare_models(fast_mode=kwargs.get('fast_mode', False))
+        
+        # Generate predictions
+        current_time = kwargs.get('current_time', None)
+        if algorithm in ["enhanced_facebook_prophet", "enhanced_neural_prophet"]:
+            # Enhanced models use generate_enhanced_predictions
+            predictions = predictor.generate_enhanced_predictions(current_time=current_time)
+        else:
+            # Standard models use generate_predictions
+            predictions = predictor.generate_predictions(current_time=current_time)
+        
+        # Convert predictions to the expected format
+        prediction_data = {
+            'frame_probabilities': {},
+            'summary': {
+                'expected_value': 0
+            },
+            'algorithm': algorithm,
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        
+        # Extract frame probabilities and calculate expected value
+        total_prob = 0
+        expected_value = 0
+        
+        # Handle different prediction formats
+        if 'predictions_by_frame' in predictions:
+            # Format used by ensemble, facebook_prophet, neural_prophet, timesfm
+            for frame_name, frame_data in predictions['predictions_by_frame'].items():
+                probability = frame_data['probability']
+                min_tweets = frame_data.get('min', 0)
+                max_tweets = frame_data.get('max', float('inf'))
+                
+                # Calculate midpoint for expected value
+                if max_tweets == float('inf'):
+                    midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                else:
+                    midpoint = (min_tweets + max_tweets) / 2
+                
+                prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                total_prob += probability
+                expected_value += probability * midpoint
+                
+        elif 'ensemble_results' in predictions and 'probabilities' in predictions['ensemble_results']:
+            # Format used by enhanced algorithms (enhanced_timesfm, enhanced_neural_prophet, enhanced_facebook_prophet)
+            probabilities_dict = predictions['ensemble_results']['probabilities']
+            for frame_name, probability in probabilities_dict.items():
+                # Try to get midpoint from frame name
+                try:
+                    if "less than" in frame_name.lower():
+                        parts = frame_name.lower().split("less than")
+                        upper = float(parts[1].strip().split()[0])
+                        midpoint = upper / 2
+                    elif "or more" in frame_name.lower():
+                        parts = frame_name.lower().split("or more")
+                        lower = float(parts[0].strip().split()[-1])
+                        midpoint = lower * 1.2
+                    else:
+                        # Standard range like "150–174"
+                        range_clean = frame_name.replace('–', '-').strip()
+                        if '-' in range_clean:
+                            parts = range_clean.split('-')
+                            if len(parts) == 2:
+                                lower = float(parts[0].strip())
+                                upper = float(parts[1].strip())
+                                midpoint = (lower + upper) / 2
+                            else:
+                                midpoint = 150  # Default
+                        else:
+                            midpoint = 150  # Default
+                    
+                    prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                    total_prob += probability
+                    expected_value += probability * midpoint
+                except (ValueError, IndexError):
+                    # Default midpoint if parsing fails
+                    midpoint = 150
+                    prediction_data['frame_probabilities'][frame_name] = probability * 100
+                    total_prob += probability
+                    expected_value += probability * midpoint
+                    
+        elif 'frame_probabilities' in predictions:
+            # Format used by legacy prophet (already in percentage)
+            for frame_name, probability in predictions['frame_probabilities'].items():
+                prediction_data['frame_probabilities'][frame_name] = probability
+                
+                # Try to get midpoint from frame name
+                try:
+                    if "less than" in frame_name.lower():
+                        parts = frame_name.lower().split("less than")
+                        upper = float(parts[1].strip().split()[0])
+                        midpoint = upper / 2
+                    elif "or more" in frame_name.lower():
+                        parts = frame_name.lower().split("or more")
+                        lower = float(parts[0].strip().split()[-1])
+                        midpoint = lower * 1.2
+                    else:
+                        # Standard range like "150–174"
+                        range_clean = frame_name.replace('–', '-').strip()
+                        if '-' in range_clean:
+                            parts = range_clean.split('-')
+                            if len(parts) == 2:
+                                lower = float(parts[0].strip())
+                                upper = float(parts[1].strip())
+                                midpoint = (lower + upper) / 2
+                            else:
+                                midpoint = 150  # Default
+                        else:
+                            midpoint = 150  # Default
+                    
+                    total_prob += probability / 100  # Convert percentage to probability
+                    expected_value += (probability / 100) * midpoint
+                except (ValueError, IndexError):
+                    # Default midpoint if parsing fails
+                    midpoint = 150
+                    total_prob += probability / 100
+                    expected_value += (probability / 100) * midpoint
+        
+        # Use total_predicted if available in the summary
+        if 'total_predicted' in predictions:
+            prediction_data['summary']['expected_value'] = predictions['total_predicted']
+        elif 'ensemble_results' in predictions and 'total_predicted' in predictions['ensemble_results']:
+            # Enhanced algorithms store total_predicted in ensemble_results
+            prediction_data['summary']['expected_value'] = predictions['ensemble_results']['total_predicted']
+        else:
+            prediction_data['summary']['expected_value'] = expected_value
+        
+        logger.info(f"Generated predictions using {algorithm} algorithm")
+        logger.info(f"Total probability: {total_prob:.4f}, Expected value: {prediction_data['summary']['expected_value']:.2f}")
+        
+        return prediction_data
+        
+    except ImportError as e:
+        logger.error(f"Failed to import {algorithm} predictor: {e}")
+        logger.error("Falling back to legacy prophet predictor")
+        return get_prediction_data_legacy(prophet=True)
+    except Exception as e:
+        logger.error(f"Error generating predictions with {algorithm}: {e}")
+        logger.error("Falling back to legacy prophet predictor")
+        return get_prediction_data_legacy(prophet=True)
+
+def get_prediction_data_legacy(prophet: bool = True) -> Dict[str, Any]:
+    """
+    Get prediction data from the legacy polymarket_predictor module.
     
     Args:
         prophet: Whether to use the Prophet algorithm
@@ -68,6 +291,19 @@ def get_prediction_data(prophet: bool = True) -> Dict[str, Any]:
         logger.error(f"Error parsing prediction JSON: {e}")
         logger.error(f"Output: {result.stdout}")
         return {}
+
+# Alias for backward compatibility
+def get_prediction_data(prophet: bool = True) -> Dict[str, Any]:
+    """
+    Get prediction data from the polymarket_predictor module.
+    
+    Args:
+        prophet: Whether to use the Prophet algorithm
+        
+    Returns:
+        Dict containing prediction data
+    """
+    return get_prediction_data_legacy(prophet=prophet)
 
 def get_market_data(refresh: bool = True) -> Dict[str, Any]:
     """
@@ -187,9 +423,11 @@ def generate_comparison_table(
     market_data: Optional[Dict[str, Any]] = None,
     refresh: bool = True,
     use_prophet: bool = True,
+    algorithm: str = "prophet",
     output_path: Optional[str] = None,
     threshold: float = 0.0,
-    silent: bool = False
+    silent: bool = False,
+    **prediction_kwargs
 ) -> pd.DataFrame:
     """
     Generate a comparison table between prediction and market data.
@@ -198,17 +436,24 @@ def generate_comparison_table(
         prediction_data: Prediction data (fetched if None)
         market_data: Market data (fetched if None)
         refresh: Whether to refresh market data
-        use_prophet: Whether to use Prophet for predictions
+        use_prophet: Whether to use Prophet for predictions (legacy compatibility)
+        algorithm: Algorithm to use ("prophet", "facebook_prophet", "neural_prophet", "timesfm", "ensemble")
         output_path: Path to save the comparison table CSV
         threshold: Minimum opportunity percentage to include in results
         silent: Whether to suppress printing of the table to console
+        **prediction_kwargs: Additional arguments for the prediction algorithm
         
     Returns:
         DataFrame with comparison data
     """
     # Fetch data if not provided
     if prediction_data is None:
-        prediction_data = get_prediction_data(prophet=use_prophet)
+        if algorithm == "prophet" and use_prophet:
+            # Legacy compatibility
+            prediction_data = get_prediction_data(prophet=use_prophet)
+        else:
+            # Use new algorithm-based approach
+            prediction_data = get_prediction_data_from_module(algorithm=algorithm, **prediction_kwargs)
     
     if market_data is None:
         market_data = get_market_data(refresh=refresh)
@@ -217,6 +462,10 @@ def generate_comparison_table(
     if not prediction_data or not market_data:
         logger.error("Failed to get valid data for comparison")
         return pd.DataFrame()
+    
+    # Log which algorithm was used
+    used_algorithm = prediction_data.get('algorithm', 'unknown')
+    logger.info(f"Using prediction algorithm: {used_algorithm}")
     
     # Get frame probabilities from prediction
     pred_probs = prediction_data.get('frame_probabilities', {})
@@ -1056,7 +1305,39 @@ def main():
     # Initialize directories
     output_dir, viz_dir = initialize_directories()
     
-    parser = argparse.ArgumentParser(description='Compare prediction and market data')
+    parser = argparse.ArgumentParser(
+        description='Compare prediction and market data',
+        epilog="""
+Examples:
+  # Use Facebook Prophet with custom parameters
+  python -m src.bidding_decision.stats.comparison --algorithm facebook_prophet --changepoint-prior 0.1 --seasonality-prior 15.0
+
+  # Use Enhanced Facebook Prophet (automatic parameter optimization)
+  python -m src.bidding_decision.stats.comparison --algorithm enhanced_facebook_prophet
+
+  # Use Neural Prophet with custom training
+  python -m src.bidding_decision.stats.comparison --algorithm neural_prophet --epochs 100 --learning-rate 0.05
+
+  # Use Enhanced Neural Prophet (multiple models with ensemble)
+  python -m src.bidding_decision.stats.comparison --algorithm enhanced_neural_prophet
+
+  # Use TimesFM algorithm
+  python -m src.bidding_decision.stats.comparison --algorithm timesfm
+
+  # Use Enhanced TimesFM (multiple model variants)
+  python -m src.bidding_decision.stats.comparison --algorithm enhanced_timesfm
+
+  # Use Ensemble method (combines all models)
+  python -m src.bidding_decision.stats.comparison --algorithm ensemble --fast-mode
+
+  # Generate visualization with enhanced charts
+  python -m src.bidding_decision.stats.comparison --algorithm enhanced_neural_prophet --visualize --enhanced-viz
+
+  # Set minimum threshold for opportunities
+  python -m src.bidding_decision.stats.comparison --algorithm enhanced_facebook_prophet --threshold 2.0
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('--output', type=str, help='Path to save the comparison table CSV')
     parser.add_argument('--no-refresh', action='store_true', help='Do not refresh market data')
     parser.add_argument('--no-prophet', action='store_true', help='Do not use Prophet for predictions')
@@ -1068,16 +1349,44 @@ def main():
     parser.add_argument('--show-tokens', action='store_true', help='Show token IDs in console output')
     parser.add_argument('--silent', action='store_true', help='Suppress console output of the comparison table')
     
+    # New algorithm selection arguments
+    parser.add_argument('--algorithm', type=str, default='prophet', 
+                        choices=['prophet', 'facebook_prophet', 'neural_prophet', 'timesfm', 'ensemble', 
+                                'enhanced_facebook_prophet', 'enhanced_neural_prophet', 'enhanced_timesfm'],
+                        help='Prediction algorithm to use (default: prophet)')
+    
+    # Facebook Prophet specific parameters
+    parser.add_argument('--changepoint-prior', type=float, default=0.05,
+                        help='Facebook Prophet changepoint prior scale (default: 0.05)')
+    parser.add_argument('--seasonality-prior', type=float, default=10.0,
+                        help='Facebook Prophet seasonality prior scale (default: 10.0)')
+    
+    # Neural Prophet specific parameters
+    parser.add_argument('--epochs', type=int, default=50,
+                        help='Neural Prophet training epochs (default: 50)')
+    parser.add_argument('--learning-rate', type=float, default=0.15,
+                        help='Neural Prophet learning rate (default: 0.15)')
+    
+    # General parameters
+    parser.add_argument('--current-time', type=str,
+                        help='Current time for prediction context (format: YYYY-MM-DD HH:MM:SS)')
+    parser.add_argument('--fast-mode', action='store_true',
+                        help='Use fast mode for ensemble predictions (default: False)')
+    parser.add_argument('--random-seed', type=int, default=42,
+                        help='Random seed for reproducible results (default: 42)')
+
     args = parser.parse_args()
     
     # Set default output paths if not specified
     if args.output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output = os.path.join(output_dir, f'comparison_{timestamp}.csv')
+        algorithm_suffix = args.algorithm if args.algorithm != 'prophet' else 'prophet'
+        args.output = os.path.join(output_dir, f'comparison_{algorithm_suffix}_{timestamp}.csv')
     
     if args.visualize and args.viz_output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.viz_output = os.path.join(viz_dir, f'comparison_{timestamp}.png')
+        algorithm_suffix = args.algorithm if args.algorithm != 'prophet' else 'prophet'
+        args.viz_output = os.path.join(viz_dir, f'comparison_{algorithm_suffix}_{timestamp}.png')
     
     # Path for simple table visualization
     simple_table_output = None
@@ -1087,17 +1396,59 @@ def main():
             simple_table_output = args.viz_output.replace('.png', '_table.png')
         else:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            simple_table_output = os.path.join(viz_dir, f'table_{timestamp}.png')
+            algorithm_suffix = args.algorithm if args.algorithm != 'prophet' else 'prophet'
+            simple_table_output = os.path.join(viz_dir, f'table_{algorithm_suffix}_{timestamp}.png')
+    
+    # Parse current time if provided
+    current_time = None
+    if args.current_time:
+        try:
+            current_time = datetime.datetime.strptime(args.current_time, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            print(f"Error: Invalid time format. Use YYYY-MM-DD HH:MM:SS")
+            sys.exit(1)
+    
+    # Prepare prediction algorithm kwargs
+    prediction_kwargs = {}
+    if current_time:
+        prediction_kwargs['current_time'] = current_time
+    
+    # Add algorithm-specific parameters
+    if args.algorithm == 'facebook_prophet':
+        prediction_kwargs['changepoint_prior'] = args.changepoint_prior
+        prediction_kwargs['seasonality_prior'] = args.seasonality_prior
+    elif args.algorithm == 'neural_prophet':
+        prediction_kwargs['epochs'] = args.epochs
+        prediction_kwargs['learning_rate'] = args.learning_rate
+    elif args.algorithm == 'ensemble':
+        prediction_kwargs['fast_mode'] = args.fast_mode
+    
+    # Add common parameters
+    prediction_kwargs['random_seed'] = args.random_seed
     
     try:
         # Generate comparison table
         df = generate_comparison_table(
             refresh=not args.no_refresh,
             use_prophet=not args.no_prophet,
+            algorithm=args.algorithm,
             output_path=args.output,
             threshold=args.threshold,
-            silent=args.silent
+            silent=args.silent,
+            **prediction_kwargs
         )
+        
+        # Print algorithm information
+        if not args.silent:
+            print(f"\nUsing prediction algorithm: {args.algorithm}")
+            if args.algorithm == 'facebook_prophet':
+                print(f"  - Changepoint prior: {args.changepoint_prior}")
+                print(f"  - Seasonality prior: {args.seasonality_prior}")
+            elif args.algorithm == 'neural_prophet':
+                print(f"  - Epochs: {args.epochs}")
+                print(f"  - Learning rate: {args.learning_rate}")
+            if current_time:
+                print(f"  - Current time: {current_time}")
         
         # Print the table if not in silent mode
         if not df.empty and not args.silent:

@@ -78,6 +78,11 @@ def main():
                          help='Show detailed debugging information')
     parser.add_argument('--active-market-only', action='store_true',
                          help='Only sell positions for the active market (current time frame)')
+    parser.add_argument('--algorithm', type=str, default='prophet',
+                         choices=['prophet', 'facebook_prophet', 'enhanced_facebook_prophet', 'neural_prophet', 'enhanced_neural_prophet', 'timesfm', 'enhanced_timesfm', 'ensemble'],
+                         help='Prediction algorithm to use (default: prophet)')
+    parser.add_argument('--random-seed', type=int, default=42,
+                         help='Random seed for reproducible predictions (default: 42)')
     
     args = parser.parse_args()
     
@@ -87,8 +92,14 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
-        # Create the position seller with debug flag
-        seller = PositionSeller(threshold=args.threshold, sell_below=args.sell_below, debug=args.debug)
+        # Create the position seller with debug flag and algorithm parameters
+        seller = PositionSeller(
+            threshold=args.threshold, 
+            sell_below=args.sell_below, 
+            debug=args.debug,
+            algorithm=args.algorithm,
+            random_seed=args.random_seed
+        )
         
         # Generate the comparison table once - this will be displayed by PositionSeller methods
         # The table display will happen inside get_all_positions_with_stats if no pre-generated table is passed
