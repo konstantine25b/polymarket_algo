@@ -460,7 +460,8 @@ def predict_with_prophet(
     polymarket_end: datetime,
     count_frames: List[Dict[str, Any]],
     current_tweet_count: int,
-    num_simulations: int = 10000
+    num_simulations: int = 10000,
+    current_time: datetime = None
 ) -> Dict[str, Any]:
     """
     Make predictions using a simplified approach with historical rates
@@ -472,11 +473,20 @@ def predict_with_prophet(
         count_frames: List of count frame dictionaries
         current_tweet_count: Current tweet count in the period
         num_simulations: Number of Monte Carlo simulations to run
+        current_time: Current time for prediction context (if None, uses system time)
         
     Returns:
         dict: Prophet prediction results
     """
-    now = datetime.now(ET_TIMEZONE)
+    # Use provided current_time or fall back to system time
+    if current_time is None:
+        now = datetime.now(ET_TIMEZONE)
+    else:
+        # Ensure current_time is timezone-aware
+        if current_time.tzinfo is None:
+            now = ET_TIMEZONE.localize(current_time)
+        else:
+            now = current_time
     
     try:
         # Calculate time periods

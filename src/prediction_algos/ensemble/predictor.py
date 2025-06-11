@@ -584,7 +584,8 @@ class EnsembleTweetPredictor:
                     polymarket_end=polymarket_end,
                     count_frames=TWEET_COUNT_FRAMES,
                     current_tweet_count=current_tweet_count,
-                    num_simulations=5000
+                    num_simulations=5000,
+                    current_time=current_time
                 )
                 
                 # Convert to standard format
