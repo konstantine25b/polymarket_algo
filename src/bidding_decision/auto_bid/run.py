@@ -79,6 +79,11 @@ def main():
                         help='Use weighted selection from multiple opportunities rather than always choosing the best one')
     parser.add_argument('--min-prediction', type=float, default=0.0,
                         help='Only bid on opportunities with prediction percentage at or above this value (default: 0.0)')
+    parser.add_argument('--algorithm', type=str, default='prophet',
+                        choices=['prophet', 'facebook_prophet', 'enhanced_facebook_prophet', 'neural_prophet', 'enhanced_neural_prophet', 'timesfm', 'enhanced_timesfm', 'ensemble'],
+                        help='Prediction algorithm to use (default: prophet)')
+    parser.add_argument('--random-seed', type=int, default=42,
+                        help='Random seed for reproducible predictions (default: 42)')
     
     args = parser.parse_args()
     
@@ -91,7 +96,9 @@ def main():
         threshold=args.threshold,
         order_amount=args.amount,
         use_weighted_selection=args.weighted_selection,
-        min_prediction=args.min_prediction
+        min_prediction=args.min_prediction,
+        algorithm=args.algorithm,
+        random_seed=args.random_seed
     )
     
     try:
@@ -106,8 +113,10 @@ def main():
             comparison_df = generate_comparison_table(
                 refresh=True,
                 use_prophet=True,
+                algorithm=args.algorithm,
                 threshold=args.threshold,
-                silent=True  # Add this parameter to suppress output
+                silent=True,  # Add this parameter to suppress output
+                random_seed=args.random_seed
             )
             
             if not comparison_df.empty:
@@ -130,6 +139,7 @@ def main():
         print(f"Market Ask Price: {opportunity['ask']}%")
         print(f"Edge: {opportunity['opportunity']}% (after applying {args.threshold}% threshold)")
         print(f"Token ID: {opportunity['token_id']}")
+        print(f"Algorithm: {args.algorithm} (seed: {args.random_seed})")
         
         if total_opps > 1:
             print(f"Selection method: {selection_method} from {total_opps} positive opportunities")

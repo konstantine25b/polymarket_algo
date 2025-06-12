@@ -155,3 +155,26 @@ src/bidding_decision/stats/output/viz/
 !src/bidding_decision/stats/output/.gitkeep
 !src/bidding_decision/stats/output/viz/.gitkeep
 
+# Neural Prophet / PyTorch Lightning Training Artifacts
+lightning_logs/
+*.ckpt
+*.pt
+*.pth
+tensorboard_logs/
+runs/
+
+# TensorBoard event files (additional patterns)
+events.out.tfevents.*
+*.tfevents.*
+
+# Model checkpoints and weights
+checkpoints/
+saved_models/
+model_weights/
+*.model
+*.weights
+
+# Neural Prophet specific cache and temporary files
+neuralprophet_cache/
+.neuralprophet/
+
