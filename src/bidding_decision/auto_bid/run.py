@@ -107,23 +107,26 @@ def main():
             logger.error("Failed to connect to Polymarket. Exiting.")
             sys.exit(1)
         
-        # Generate the comparison table directly for displaying full stats
-        if not args.no_stats:
-            # Pass silent=True to suppress the built-in printing in generate_comparison_table
-            comparison_df = generate_comparison_table(
-                refresh=True,
-                use_prophet=True,
-                algorithm=args.algorithm,
-                threshold=args.threshold,
-                silent=True,  # Add this parameter to suppress output
-                random_seed=args.random_seed
-            )
-            
-            if not comparison_df.empty:
-                print_stats_table(comparison_df)
+        # Generate the comparison table once and reuse it
+        comparison_df = generate_comparison_table(
+            refresh=True,
+            use_prophet=True,
+            algorithm=args.algorithm,
+            threshold=args.threshold,
+            silent=args.no_stats,  # Only suppress output if --no-stats is used
+            random_seed=args.random_seed
+        )
         
-        # Find the best opportunity
-        opportunity = bidder.find_best_opportunity()
+        if comparison_df.empty:
+            logger.info("No comparison data available. Exiting.")
+            sys.exit(0)
+        
+        # Display stats table if requested
+        if not args.no_stats:
+            print_stats_table(comparison_df)
+        
+        # Find the best opportunity using the already-generated comparison table
+        opportunity = bidder.find_best_opportunity(comparison_df=comparison_df)
         
         if not opportunity:
             logger.info("No suitable opportunities found. Exiting.")

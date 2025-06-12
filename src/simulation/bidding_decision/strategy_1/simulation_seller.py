@@ -25,18 +25,24 @@ class SimulationSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, active_market_only: bool = False):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, 
+                 algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
+                 debug: bool = False, active_market_only: bool = False):
         """
         Initialize the SimulationSeller.
         
         Args:
             threshold: Minimum opportunity percentage (%)
             sell_below: Sell positions with prediction below this percentage (%)
+            algorithm: Prediction algorithm to use (default: enhanced_facebook_prophet)
+            random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
             active_market_only: Only analyze positions for the active market
         """
         self.threshold = threshold
         self.sell_below = sell_below
+        self.algorithm = algorithm
+        self.random_seed = random_seed
         self.debug = debug
         self.active_market_only = active_market_only
         self.run_initializer = RunInitializer()
@@ -114,13 +120,14 @@ class SimulationSeller:
             logger.error(f"Error getting market name: {e}")
             return market_id
     
-    def get_all_positions_with_stats(self, run_name: str, update_markets: bool = True) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
+    def get_all_positions_with_stats(self, run_name: str, update_markets: bool = True, comparison_df: pd.DataFrame = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
         """
         Get all current positions with their statistical information from the comparison table.
         
         Args:
             run_name: Name of the simulation run
             update_markets: Whether to update market prices before analysis
+            comparison_df: Optional pre-generated comparison DataFrame
             
         Returns:
             Tuple containing:
@@ -141,29 +148,32 @@ class SimulationSeller:
                 print("No positions with quantity >= 0.01 found in simulation.")
             return [], pd.DataFrame()
             
-        # Generate comparison table with the specified threshold
-        logger.info(f"Generating comparison table with threshold: {self.threshold}%")
-        df = generate_comparison_table(
-            refresh=update_markets,
-            use_prophet=True,
-            threshold=self.threshold,
-            silent=True  # Silent to avoid duplicate output
-        )
+        # Generate comparison table with the specified threshold and algorithm
+        logger.info(f"Generating comparison table with algorithm: {self.algorithm}, threshold: {self.threshold}%, random_seed: {self.random_seed}")
+        if comparison_df is None:
+            comparison_df = generate_comparison_table(
+                refresh=update_markets,
+                use_prophet=True,
+                algorithm=self.algorithm,
+                threshold=self.threshold,
+                silent=True,  # Silent to avoid duplicate output
+                random_seed=self.random_seed
+            )
         
-        if df.empty:
+        if comparison_df.empty:
             logger.info("Failed to generate comparison table.")
-            return [], df
+            return [], comparison_df
             
         # Find the column names for buy-only and sell-only opportunities
-        buy_only_col = [col for col in df.columns if col.startswith('Buy-Only')][0]
-        sell_only_col = [col for col in df.columns if col.startswith('Sell-Only')][0]
+        buy_only_col = [col for col in comparison_df.columns if col.startswith('Buy-Only')][0]
+        sell_only_col = [col for col in comparison_df.columns if col.startswith('Sell-Only')][0]
         
         # Get only rows that are not EXPECTED VALUE
-        data_rows = df[df['Range'] != 'EXPECTED VALUE'].copy()
+        data_rows = comparison_df[comparison_df['Range'] != 'EXPECTED VALUE'].copy()
         
         if data_rows.empty:
             logger.info("No specific range opportunities found in comparison table.")
-            return [], df
+            return [], comparison_df
         
         # Debug: print the comparison table ranges
         comparison_ranges = data_rows['Range'].tolist()
@@ -242,7 +252,7 @@ class SimulationSeller:
             for pos in all_positions:
                 print(f"DEBUG - Position: {pos['range']}, qty: {pos['quantity']:.4f}, should_sell: {pos['should_sell']}")
         
-        return all_positions, df
+        return all_positions, comparison_df
     
     def get_positions_to_sell(self, run_name: str, update_markets: bool = True) -> List[Dict[str, Any]]:
         """
@@ -531,23 +541,34 @@ class SimulationSeller:
                     logger.error("Failed to update market prices")
                     return False
             
-            # Generate and display comparison table (like real auto_bid)
+            # Generate and (optionally) display the comparison table only ONCE
+            comparison_df = None
+
             if show_stats:
-                logger.info(f"Generating comparison table with threshold: {self.threshold}%")
+                logger.info(
+                    f"Generating comparison table with algorithm: {self.algorithm}, "
+                    f"threshold: {self.threshold}%, random_seed: {self.random_seed}"
+                )
                 comparison_df = generate_comparison_table(
                     refresh=False,  # Already updated above
                     use_prophet=True,
+                    algorithm=self.algorithm,
                     threshold=self.threshold,
-                    silent=True  # Suppress built-in output
+                    silent=True,  # Suppress built-in output
+                    random_seed=self.random_seed
                 )
-                
+
                 if not comparison_df.empty:
                     self.print_stats_table(comparison_df)
                 else:
                     logger.warning("Failed to generate comparison table")
             
             # Get all positions with stats
-            all_positions, _ = self.get_all_positions_with_stats(run_name, update_markets=False)
+            all_positions, _ = self.get_all_positions_with_stats(
+                run_name,
+                update_markets=False,
+                comparison_df=comparison_df
+            )
             
             # Apply active market filtering if requested
             if self.active_market_only:

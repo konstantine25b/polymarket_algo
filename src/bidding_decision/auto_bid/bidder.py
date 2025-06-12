@@ -61,9 +61,12 @@ class AutoBidder:
             logger.error(f"Failed to connect to Polymarket: {e}")
             return False
     
-    def find_best_opportunity(self) -> Optional[Dict[str, Any]]:
+    def find_best_opportunity(self, comparison_df: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
         """
         Find the best buy opportunity based on statistical analysis.
+        
+        Args:
+            comparison_df: Pre-generated comparison DataFrame (optional, will generate if not provided)
         
         Returns:
             Dict containing opportunity details or None if no opportunity found
@@ -73,14 +76,18 @@ class AutoBidder:
             return None
             
         try:
-            # Generate comparison table with the specified threshold
-            df = generate_comparison_table(
-                refresh=True,
-                use_prophet=True,
-                threshold=self.threshold,
-                algorithm=self.algorithm,
-                random_seed=self.random_seed
-            )
+            # Use provided DataFrame or generate a new one
+            if comparison_df is not None:
+                df = comparison_df
+            else:
+                # Generate comparison table with the specified threshold
+                df = generate_comparison_table(
+                    refresh=True,
+                    use_prophet=True,
+                    threshold=self.threshold,
+                    algorithm=self.algorithm,
+                    random_seed=self.random_seed
+                )
             
             if df.empty:
                 logger.info("No opportunities found in comparison table.")

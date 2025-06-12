@@ -1,6 +1,13 @@
 # Polymarket Algorithm Simulation Suite
 
-This simulation suite provides comprehensive tools for testing and developing cryptocurrency trading strategies in a controlled environment using real Polymarket data without executing actual trades.
+A comprehensive simulation framework for testing and analyzing Polymarket trading strategies with advanced prediction algorithms.
+
+## 🎯 Quick Start
+
+1. **Activate Environment**: `source venv/bin/activate`
+2. **Create Simulation Run**: `python -m src.simulation.initialization.run_creator`
+3. **Run Strategy**: `python -m src.simulation.bidding_decision.strategy_1 --run <run_name> --algorithm ensemble`
+4. **Monitor Results**: Check `src/simulation/runs/<run_name>/`
 
 ## 📁 Folder Structure
 
@@ -8,6 +15,7 @@ This simulation suite provides comprehensive tools for testing and developing cr
 src/simulation/
 ├── README.md                    # This documentation
 ├── initialization/              # Simulation run creation and management
+│   ├── run_creator.py          # Interactive run creation
 │   ├── run_initializer.py      # Core initialization logic
 │   ├── __main__.py             # CLI interface
 │   └── README.md               # Detailed initialization docs
@@ -24,183 +32,168 @@ src/simulation/
 └── tests/                     # Test suites
 ```
 
-## 🚀 Quick Start Guide
+## 🤖 Algorithm Support
 
-### 1. Create a New Simulation Run
+The simulation system supports all advanced prediction algorithms available in the main trading system:
 
-```bash
-# Create a simulation run with initial balance
-python -m src.simulation.initialization \
-    --create \
-    --market-name "Your Strategy Test" \
-    --balance 1000 \
-    --run-name "your_run_name"
+### Available Algorithms
 
-# Initialize with real Polymarket data
-python -m src.simulation.initialization --init-markets-from-polymarket your_run_name
-```
+- **ensemble** - Multi-model ensemble with weighted predictions (Recommended)
+- **enhanced_facebook_prophet** - Multiple Prophet models (daily, hourly, conservative, aggressive, weekly)
+- **neural_prophet** - Neural network-based Prophet variant
+- **facebook_prophet** - Standard Facebook Prophet
+- **timesfm** - Time Series Foundation Model
+- **basic_prophet** - Simplified Prophet implementation
+- **moving_average** - Simple moving average predictor
+- **linear_trend** - Linear trend analysis
 
-### 2. Run Complete Simulation (Full Command Example)
+### Algorithm Parameters
 
-```bash
-# Complete simulation command with all parameters
-python -m src.scheduler.scheduler \
-    --use-csv-getter \
-    --get-tweet-count-first \
-    --tweet-interval 110 \
-    --buy-interval 60 \
-    --sell-interval 5 \
-    --simulate pirvelad \
-    --sim-balance 144 \
-    --amount 1.0 \
-    --buy-threshold 1.0 \
-    --min-prediction 5.0 \
-    --weighted-selection \
-    --sell-threshold 0.5 \
-    --sell-below 2.0
-```
+- `--algorithm <name>` - Choose prediction algorithm
+- `--random-seed <number>` - Set random seed for reproducible results (recommended: 42)
 
-## 📋 Complete Command Reference
-
-### Scheduler-Based Simulation (Recommended)
-
-The main scheduler provides the most comprehensive simulation environment:
+### Algorithm Usage Examples
 
 ```bash
-python -m src.scheduler.scheduler [SIMULATION_OPTIONS] [ALGORITHM_OPTIONS] [TRADING_OPTIONS]
-```
 
-#### Core Simulation Parameters
-
-- `--simulate RUN_NAME`: Run in simulation mode using specified run
-- `--sim-balance AMOUNT`: Set simulation balance (overrides run balance)
-- `--algorithm ALGORITHM`: Prediction algorithm (`ensemble`, `enhanced_facebook_prophet`, etc.)
-- `--random-seed SEED`: Random seed for reproducible results
-
-#### Data Source Options
-
-- `--use-csv-getter`: Use CSV data source for analysis
-- `--get-tweet-count-first`: Analyze tweet counts before predictions
-- `--predictions-only`: Only generate predictions without trading
-
-#### Timing Intervals
-
-- `--tweet-interval SECONDS`: Interval between tweet analysis (default: 300)
-- `--buy-interval SECONDS`: Interval between buy decisions (default: 300)
-- `--sell-interval SECONDS`: Interval between sell decisions (default: 300)
-
-#### Trading Parameters
-
-- `--amount DOLLARS`: Order amount per trade (default: 10.0)
-- `--buy-threshold PERCENT`: Minimum opportunity for buying (default: 0.0)
-- `--sell-threshold PERCENT`: Minimum opportunity for selling (default: 0.0)
-- `--min-prediction PERCENT`: Minimum prediction confidence (default: 0.0)
-- `--sell-below PERCENT`: Sell positions below this prediction (default: 0.0)
-- `--weighted-selection`: Use probabilistic selection instead of highest opportunity
-
-#### Execution Control
-
-- `--dry-run`: Show decisions without executing trades
-- `--run-once`: Execute one cycle instead of continuous loop
-- `--quiet`: Reduce output verbosity
-- `--no-tweets`: Skip tweet analysis
-
-### Strategy-Based Simulation
-
-For direct strategy testing without scheduler:
-
-```bash
-# Run bidding strategy
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
+# Ensemble algorithm (multi-model approach)
 python -m src.simulation.bidding_decision.strategy_1 \
-    --run RUN_NAME \
-    --threshold 2.0 \
-    --amount 25.0 \
-    --weighted-selection
-
-# Run selling strategy
-python -m src.simulation.bidding_decision.strategy_1 \
-    --sell RUN_NAME \
-    --threshold 2.0 \
-    --auto-sell \
-    --sell-below 25.0
-```
-
-### Simulation Management
-
-```bash
-# Create new simulation run
-python -m src.simulation.initialization \
-    --create \
-    --market-name "Market Category" \
-    --balance 1000 \
-    --run-name "custom_name"
-
-# Initialize with real market data
-python -m src.simulation.initialization --init-markets-from-polymarket RUN_NAME
-
-# Update market prices
-python -m src.simulation.initialization --update-markets-from-polymarket RUN_NAME
-
-# View run information
-python -m src.simulation.initialization --info RUN_NAME
-
-# List all runs
-python -m src.simulation.initialization --list
-```
-
-## 💡 Usage Examples
-
-### Example 1: Basic Strategy Testing
-
-```bash
-# Create and initialize run
-python -m src.simulation.initialization \
-    --create \
-    --market-name "Election Predictions" \
-    --balance 500 \
-    --run-name "election_test"
-
-python -m src.simulation.initialization --init-markets-from-polymarket election_test
-
-# Run simulation with basic parameters
-python -m src.scheduler.scheduler \
-    --simulate election_test \
-    --sim-balance 500 \
-    --algorithm enhanced_facebook_prophet \
-    --buy-threshold 2.0 \
-    --sell-threshold 1.5 \
-    --amount 25.0 \
-    --dry-run \
-    --run-once
-```
-
-### Example 2: Advanced Trading Strategy
-
-```bash
-# Advanced simulation with weighted selection and minimum predictions
-python -m src.scheduler.scheduler \
-    --use-csv-getter \
-    --get-tweet-count-first \
-    --tweet-interval 120 \
-    --buy-interval 60 \
-    --sell-interval 30 \
-    --simulate advanced_test \
-    --sim-balance 1000 \
+    --analyze-opportunities \
     --algorithm ensemble \
     --random-seed 42 \
-    --amount 50.0 \
-    --buy-threshold 3.0 \
-    --min-prediction 10.0 \
-    --weighted-selection \
-    --sell-threshold 2.0 \
-    --sell-below 15.0 \
-    --predictions-only
+    --threshold 2.0
+
+# Enhanced Facebook Prophet with multiple models
+python -m src.simulation.bidding_decision.strategy_1 \
+    --run trading_simulation \
+    --algorithm enhanced_facebook_prophet \
+    --random-seed 42 \
+    --amount 5.0
+
+# Neural Prophet for advanced predictions
+python -m src.simulation.bidding_decision.strategy_1 \
+    --sell position_run \
+    --algorithm neural_prophet \
+    --random-seed 42 \
+    --threshold 1.5
 ```
 
-### Example 3: Your Specific Command
+## 🚀 Usage Guide
+
+### Method 1: Scheduler-Based Simulation (Recommended)
+
+Run complete trading simulation with real market integration:
 
 ```bash
-# Your exact command for comprehensive testing
+python -m src.scheduler.scheduler \
+    --use-csv-getter \
+    --get-tweet-count-first \
+    --tweet-interval 110 \
+    --buy-interval 60 \
+    --sell-interval 5 \
+    --simulate <run_name> \
+    --sim-balance 144 \
+    --amount 1.0 \
+    --buy-threshold 1.0 \
+    --min-prediction 5.0 \
+    --weighted-selection \
+    --sell-threshold 0.5 \
+    --sell-below 2.0 \
+    --algorithm ensemble \
+    --random-seed 42
+```
+
+### Method 2: Strategy-Based Simulation
+
+Run individual strategy components with algorithm support:
+
+#### Bidding Analysis
+
+```bash
+python -m src.simulation.bidding_decision.strategy_1 \
+    --analyze-opportunities \
+    --algorithm ensemble \
+    --random-seed 42 \
+    --threshold 1.5 \
+    --amount 25.0 \
+    --dry-run
+```
+
+#### Position Management
+
+```bash
+python -m src.simulation.bidding_decision.strategy_1 \
+    --run <simulation_name> \
+    --algorithm enhanced_facebook_prophet \
+    --random-seed 42 \
+    --threshold 3.0 \
+    --amount 25.0 \
+    --debug
+```
+
+#### Selling Strategy
+
+```bash
+python -m src.simulation.bidding_decision.strategy_1 \
+    --sell <simulation_name> \
+    --algorithm neural_prophet \
+    --random-seed 42 \
+    --threshold 2.0 \
+    --auto-sell
+```
+
+#### Portfolio Analysis
+
+```bash
+python -m src.simulation.bidding_decision.strategy_1 \
+    --analyze <simulation_name> \
+    --algorithm ensemble \
+    --random-seed 42 \
+    --debug
+```
+
+## 📊 Complete Usage Examples
+
+### Example 1: Quick Algorithm Test
+
+```bash
+# Test ensemble algorithm with dry run
+python -m src.simulation.bidding_decision.strategy_1 \
+    --analyze-opportunities \
+    --algorithm ensemble \
+    --random-seed 42 \
+    --threshold 1.0 \
+    --dry-run \
+    --debug
+```
+
+### Example 2: Full Trading Simulation with Algorithms
+
+```bash
+# Complete trading simulation with enhanced prophet
+python -m src.scheduler.scheduler \
+    --use-csv-getter \
+    --get-tweet-count-first \
+    --tweet-interval 110 \
+    --buy-interval 60 \
+    --sell-interval 5 \
+    --simulate my_trading_run \
+    --sim-balance 100 \
+    --amount 2.0 \
+    --buy-threshold 2.0 \
+    --min-prediction 6.0 \
+    --weighted-selection \
+    --sell-threshold 1.0 \
+    --sell-below 3.0 \
+    --algorithm enhanced_facebook_prophet \
+    --random-seed 42
+```
+
+### Example 3: Advanced Multi-Strategy Simulation
+
+```bash
+# Advanced simulation with ensemble algorithm (Featured Command)
 python -m src.scheduler.scheduler \
     --use-csv-getter \
     --get-tweet-count-first \
@@ -214,137 +207,159 @@ python -m src.scheduler.scheduler \
     --min-prediction 5.0 \
     --weighted-selection \
     --sell-threshold 0.5 \
-    --sell-below 2.0
+    --sell-below 2.0 \
+    --algorithm ensemble \
+    --random-seed 42
 ```
 
-### Example 4: Algorithm Comparison
+**Parameters explained:**
+
+- `--algorithm ensemble`: Uses multi-model ensemble predictions
+- `--random-seed 42`: Ensures reproducible results
+- `--simulate pirvelad`: Uses the "pirvelad" simulation run
+- `--sim-balance 144`: Starting with $144 simulated balance
+- `--amount 1.0`: Bet $1.0 per opportunity
+- `--buy-threshold 1.0`: Buy when prediction exceeds 1.0%
+- `--min-prediction 5.0`: Minimum prediction confidence of 5.0%
+- `--weighted-selection`: Use weighted market selection
+- `--sell-threshold 0.5`: Sell when profit exceeds 0.5%
+- `--sell-below 2.0`: Sell if loss exceeds 2.0%
+
+### Example 4: Neural Prophet Analysis
 
 ```bash
-# Test different algorithms on same data
-ALGORITHMS=("ensemble" "enhanced_facebook_prophet" "neural_prophet" "timesfm")
+# Deep learning approach with neural prophet
+python -m src.simulation.bidding_decision.strategy_1 \
+    --run advanced_simulation \
+    --algorithm neural_prophet \
+    --random-seed 42 \
+    --threshold 2.5 \
+    --amount 5.0 \
+    --debug
+```
 
-for algo in "${ALGORITHMS[@]}"; do
+## 🔧 Command Reference
+
+### Core Commands
+
+- `--analyze-opportunities`: Analyze current market opportunities with algorithms
+- `--run <name>`: Execute bidding strategy for simulation run with algorithms
+- `--sell <name>`: Execute selling strategy for simulation run with algorithms
+- `--analyze <name>`: Analyze simulation run performance with algorithms
+
+### Algorithm Parameters
+
+- `--algorithm <name>`: Prediction algorithm to use
+- `--random-seed <number>`: Random seed for reproducible results
+
+### Trading Parameters
+
+- `--threshold <float>`: Prediction confidence threshold
+- `--amount <float>`: Bet amount per opportunity
+- `--auto-sell`: Enable automatic selling
+- `--dry-run`: Test mode without actual trades
+- `--debug`: Enable detailed logging
+
+### Simulation Parameters (Scheduler)
+
+- `--simulate <run>`: Enable simulation mode
+- `--sim-balance <float>`: Starting simulation balance
+- `--buy-threshold <float>`: Minimum prediction for buying
+- `--min-prediction <float>`: Minimum prediction confidence
+- `--sell-threshold <float>`: Profit threshold for selling
+- `--sell-below <float>`: Loss threshold for selling
+- `--weighted-selection`: Use weighted market selection
+
+## 📈 Performance Monitoring
+
+### Real-time Monitoring
+
+- **Position Tracking**: Monitor active positions in simulation runs
+- **Performance Metrics**: Track ROI, win rate, and profit/loss
+- **Algorithm Performance**: Compare algorithm effectiveness
+- **Risk Management**: Monitor exposure and position sizes
+
+### Files Generated
+
+- `positions.json`: Current position data with algorithm metadata
+- `trading_history.json`: Complete trading history with algorithm details
+- `performance_summary.json`: Performance metrics by algorithm
+- `market_analysis.csv`: Market analysis with algorithm predictions
+
+## 🎛️ Algorithm Configuration
+
+### Ensemble Configuration
+
+The ensemble algorithm combines multiple models:
+
+- Neural Prophet (weight: 0.3)
+- Enhanced Facebook Prophet (weight: 0.25)
+- TimesFM (weight: 0.2)
+- Basic Prophet (weight: 0.15)
+- Moving Average (weight: 0.1)
+
+### Enhanced Facebook Prophet Models
+
+- **Daily Model**: Long-term trend analysis
+- **Hourly Model**: Short-term fluctuation prediction
+- **Conservative Model**: Low-risk predictions
+- **Aggressive Model**: High-confidence opportunities
+- **Weekly Model**: Week-over-week pattern analysis
+
+## 🔍 Troubleshooting
+
+### Algorithm Issues
+
+```bash
+# Test algorithm availability
+python -m src.simulation.bidding_decision.strategy_1 --help
+
+# Verify algorithm functionality
+python -m src.simulation.bidding_decision.strategy_1 \
+    --analyze-opportunities \
+    --algorithm ensemble \
+    --random-seed 42 \
+    --dry-run \
+    --debug
+```
+
+### Common Algorithm Problems
+
+- **Import Errors**: Ensure all dependencies are installed
+- **Memory Issues**: Use smaller datasets for testing
+- **Timeout Issues**: Increase timeout for complex algorithms
+- **Reproducibility**: Always use `--random-seed` for consistent results
+
+## 🛠️ Development
+
+### Testing Algorithm Integration
+
+```bash
+# Test all algorithms
+for algo in ensemble enhanced_facebook_prophet neural_prophet facebook_prophet timesfm basic_prophet moving_average linear_trend; do
     echo "Testing $algo..."
-    python -m src.scheduler.scheduler \
-        --simulate algo_test_$algo \
-        --sim-balance 1000 \
+    python -m src.simulation.bidding_decision.strategy_1 \
+        --analyze-opportunities \
         --algorithm $algo \
         --random-seed 42 \
-        --buy-threshold 2.0 \
-        --amount 20.0 \
-        --run-once \
         --dry-run
 done
 ```
 
-## 📊 Simulation Features
+### Best Practices
 
-### Real Market Integration
+- Use `--random-seed 42` for reproducible results
+- Start with `--dry-run` for testing
+- Monitor algorithm performance with `--debug`
+- Use ensemble algorithm for production simulations
+- Test different algorithms on historical data
 
-- **Live Data**: Fetches real market data from Polymarket
-- **Price Updates**: Automatic market price synchronization
-- **Market Status**: Tracks active/inactive markets
-- **Historical Data**: Maintains complete price history
+### Custom Algorithm Development
 
-### Trading Simulation
-
-- **Position Tracking**: Complete portfolio management
-- **Transaction History**: Detailed audit trail
-- **Profit/Loss Calculation**: Real-time P&L tracking
-- **Balance Management**: Prevents overdrafts and tracks cash flow
-
-### Algorithm Support
-
-- **Multiple Algorithms**: Support for various prediction models
-- **Ensemble Methods**: Weighted combination of multiple models
-- **Reproducible Results**: Random seed control for consistent testing
-- **Performance Metrics**: Detailed algorithm performance tracking
-
-### Strategy Testing
-
-- **Threshold Testing**: Test different opportunity thresholds
-- **Risk Management**: Configurable risk parameters
-- **Selection Methods**: Weighted vs highest opportunity selection
-- **Market Filtering**: Filter by prediction confidence and market activity
-
-## 🔧 Configuration Options
-
-### Prediction Algorithms
-
-- `ensemble`: Weighted combination of multiple models
-- `enhanced_facebook_prophet`: Advanced Prophet with multiple timeframes
-- `neural_prophet`: Neural network-based Prophet
-- `timesfm`: Time Series Foundation Model
-- `basic_prophet`: Standard Facebook Prophet
-- `moving_average`: Moving average predictor
-- `linear_trend`: Linear trend analysis
-
-### Trading Strategies
-
-- **Opportunity-based**: Trade based on prediction vs market price difference
-- **Threshold-based**: Only trade when opportunity exceeds threshold
-- **Weighted Selection**: Probabilistic selection from multiple opportunities
-- **Risk-managed**: Stop-loss and minimum prediction filtering
-
-### Data Sources
-
-- **Real-time Polymarket**: Live market data
-- **CSV Data**: Historical data analysis
-- **Tweet Integration**: Social sentiment analysis
-- **Combined Sources**: Multi-source data fusion
-
-## 📈 Monitoring and Analysis
-
-### Run Information
-
-```bash
-# Get detailed run statistics
-python -m src.simulation.initialization --info RUN_NAME
-```
-
-### Performance Tracking
-
-- **Portfolio Value**: Real-time portfolio valuation
-- **Win Rate**: Success rate of predictions
-- **Profit/Loss**: Financial performance tracking
-- **Transaction Costs**: Trading fee simulation
-- **Risk Metrics**: Drawdown and volatility analysis
-
-### Strategy Comparison
-
-```bash
-# Compare multiple strategies
-python -m src.simulation.bidding_decision.strategy_1 --analyze-opportunities \
-    --threshold 2.0 --weighted-selection --min-prediction 5.0
-```
-
-## 🛠️ Development and Testing
-
-### Debug Mode
-
-```bash
-# Enable detailed debugging
-python -m src.scheduler.scheduler \
-    --simulate debug_test \
-    --algorithm ensemble \
-    --dry-run \
-    --run-once \
-    --debug \
-    --verbose
-```
-
-### Performance Testing
-
-```bash
-# Test performance with different parameters
-python -m src.scheduler.scheduler \
-    --simulate performance_test \
-    --sim-balance 10000 \
-    --amount 100.0 \
-    --buy-threshold 1.0 \
-    --run-once \
-    --predictions-only
-```
+1. Add algorithm to `src/bidding_decision/stats/comparison.py`
+2. Update algorithm choices in `__main__.py`
+3. Test with simulation framework
+4. Document in this README
 
 ## 📝 Best Practices
 

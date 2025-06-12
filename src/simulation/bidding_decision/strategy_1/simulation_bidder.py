@@ -65,6 +65,7 @@ class SimulationBidder:
     
     def __init__(self, threshold: float = 0.0, order_amount: float = 10.0, 
                  use_weighted_selection: bool = False, min_prediction: float = 0.0, 
+                 algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
                  debug: bool = False):
         """
         Initialize the SimulationBidder.
@@ -74,12 +75,16 @@ class SimulationBidder:
             order_amount: Amount to bid in USD
             use_weighted_selection: If True, use weighted probability to select from multiple positive opportunities
             min_prediction: Minimum prediction percentage required to consider an opportunity (%)
+            algorithm: Prediction algorithm to use (default: enhanced_facebook_prophet)
+            random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
         """
         self.threshold = threshold
         self.order_amount = order_amount
         self.use_weighted_selection = use_weighted_selection
         self.min_prediction = min_prediction
+        self.algorithm = algorithm
+        self.random_seed = random_seed
         self.debug = debug
         self.run_initializer = RunInitializer()
         
@@ -96,15 +101,17 @@ class SimulationBidder:
             Dict containing opportunity details or None if no opportunity found
         """
         try:
-            # Generate comparison table with the specified threshold
+            # Generate comparison table with the specified threshold and algorithm
             if self.debug:
-                print(f"Generating comparison table with threshold: {self.threshold}%")
+                print(f"Generating comparison table with algorithm: {self.algorithm}, threshold: {self.threshold}%, random_seed: {self.random_seed}")
                 
             df = generate_comparison_table(
                 refresh=update_markets,
                 use_prophet=True,
+                algorithm=self.algorithm,
                 threshold=self.threshold,
-                silent=not show_stats  # Show table unless explicitly disabled
+                silent=not show_stats,  # Show table unless explicitly disabled
+                random_seed=self.random_seed
             )
             
             # Show the stats table if requested and not already shown
@@ -180,6 +187,8 @@ class SimulationBidder:
                 'difference': best_row['Diff (%)'],
                 'threshold': self.threshold,
                 'min_prediction': self.min_prediction,
+                'algorithm': self.algorithm,
+                'random_seed': self.random_seed,
                 'selection_method': 'weighted' if self.use_weighted_selection else 'best',
                 'total_opportunities': len(positive_opps)
             }
@@ -360,8 +369,10 @@ class SimulationBidder:
             df = generate_comparison_table(
                 refresh=update_markets,
                 use_prophet=True,
+                algorithm=self.algorithm,
                 threshold=self.threshold,
-                silent=not show_stats
+                silent=not show_stats,
+                random_seed=self.random_seed
             )
             
             # Show the stats table if requested and not already shown

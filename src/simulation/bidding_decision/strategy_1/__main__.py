@@ -5,8 +5,9 @@ Command-line interface for the simulation bidding strategy.
 
 Usage examples:
     python -m src.simulation.bidding_decision.strategy_1 --run test_run --threshold 3.0 --amount 25.0
-    python -m src.simulation.bidding_decision.strategy_1 --sell test_run --threshold 2.0 --auto-sell
-    python -m src.simulation.bidding_decision.strategy_1 --analyze test_run --debug
+    python -m src.simulation.bidding_decision.strategy_1 --run test_run --algorithm ensemble --random-seed 42
+    python -m src.simulation.bidding_decision.strategy_1 --sell test_run --threshold 2.0 --auto-sell --algorithm enhanced_facebook_prophet
+    python -m src.simulation.bidding_decision.strategy_1 --analyze test_run --debug --algorithm neural_prophet
 """
 
 import argparse
@@ -47,6 +48,22 @@ def main():
         '--analyze-opportunities',
         action='store_true',
         help='Analyze current market opportunities without any simulation run'
+    )
+    
+    # Algorithm parameters
+    parser.add_argument(
+        '--algorithm', 
+        type=str, 
+        default='enhanced_facebook_prophet',
+        help='Prediction algorithm to use: prophet, facebook_prophet, enhanced_facebook_prophet, '
+             'neural_prophet, enhanced_neural_prophet, timesfm, enhanced_timesfm, ensemble '
+             '(default: enhanced_facebook_prophet)'
+    )
+    parser.add_argument(
+        '--random-seed', 
+        type=int, 
+        default=42,
+        help='Random seed for reproducible results (default: 42)'
     )
     
     # Bidding/opportunity parameters
@@ -154,6 +171,8 @@ def main():
                 order_amount=args.amount,
                 use_weighted_selection=args.weighted_selection,
                 min_prediction=args.min_prediction,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed,
                 debug=args.debug
             )
             
@@ -172,6 +191,7 @@ def main():
             show_stats = not args.no_stats
             
             print(f"🎯 Executing bidding strategy on simulation run: {args.run}")
+            print(f"Using prediction algorithm: {args.algorithm} with random seed: {args.random_seed}")
             if args.dry_run:
                 print("🔍 DRY RUN MODE - No actual trades will be executed")
             
@@ -192,6 +212,8 @@ def main():
             seller = SimulationSeller(
                 threshold=args.threshold,
                 sell_below=args.sell_below,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only
             )
@@ -241,12 +263,16 @@ def main():
                 order_amount=args.amount,
                 use_weighted_selection=args.weighted_selection,
                 min_prediction=args.min_prediction,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed,
                 debug=args.debug
             )
             
             seller = SimulationSeller(
                 threshold=args.threshold,
                 sell_below=args.sell_below,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only
             )
@@ -275,6 +301,8 @@ def main():
                 order_amount=args.amount,
                 use_weighted_selection=args.weighted_selection,
                 min_prediction=args.min_prediction,
+                algorithm=args.algorithm,
+                random_seed=args.random_seed,
                 debug=args.debug
             )
             

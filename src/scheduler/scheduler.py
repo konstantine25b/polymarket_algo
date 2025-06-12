@@ -486,7 +486,8 @@ def initialize_simulation_run(run_name, balance, strategy="strategy_1"):
         return False
 
 def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount=1.0, dry_run=False, 
-                         show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False):
+                         show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False,
+                         algorithm="enhanced_facebook_prophet", random_seed=42):
     """Run the simulation bidder for the specified strategy.
     
     Args:
@@ -499,6 +500,8 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
         weighted_selection: Whether to use weighted selection
         min_prediction: Minimum prediction percentage required
         quiet: Whether to suppress output
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
     
     Returns:
         bool: Whether the bidding was successful
@@ -509,7 +512,9 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
         sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
         "--run", run_name,
         f"--threshold={threshold}",
-        f"--amount={amount}"
+        f"--amount={amount}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
     ]
     
     if dry_run:
@@ -546,7 +551,7 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
     return process.returncode == 0
 
 def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
-                         show_stats=True, debug=False, quiet=False):
+                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42):
     """Run the simulation seller for the specified strategy.
     
     Args:
@@ -558,6 +563,8 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
         show_stats: Whether to show full statistics table
         debug: Whether to show detailed debugging information
         quiet: Whether to suppress output
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
     
     Returns:
         bool: Whether the selling was successful
@@ -567,7 +574,9 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
     cmd = [
         sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
         "--sell", run_name,
-        f"--threshold={threshold}"
+        f"--threshold={threshold}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
     ]
     
     if not dry_run:
@@ -1103,14 +1112,17 @@ def run_scheduled_jobs(args):
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and (tweets_success or skip_tweet_fetching or getattr(args, '_component_run', False)):
-        # For component-specific runs, ensure we run prediction
+        # For component-specific runs, skip the extra prediction since bidder/seller will run their own
+        # with the correct algorithm parameters
         if getattr(args, '_component_run', False):
-            logger.info("Running prediction for component-specific run")
-            
-        prediction_success = run_prediction(
-            quiet=True,  # Always run prediction quietly since we'll show bidder output instead
-            use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
-        )
+            logger.info("Skipping generic prediction for component-specific run (bidder/seller will run their own)")
+            prediction_success = True  # Skip the generic prediction since bidder/seller will run their own with correct algorithm
+        else:
+            # Normal prediction run for regular scheduling
+            prediction_success = run_prediction(
+                quiet=True,  # Always run prediction quietly since we'll show bidder output instead
+                use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
+            )
         
         # Handle simulation mode
         if args.simulate:
@@ -1140,7 +1152,9 @@ def run_scheduled_jobs(args):
                     show_stats=not args.no_stats,
                     weighted_selection=args.weighted_selection,
                     min_prediction=args.min_prediction,
-                    quiet=args.quiet
+                    quiet=args.quiet,
+                    algorithm=args.algorithm,
+                    random_seed=args.random_seed
                 )
                 
             # Run simulation seller if selling not disabled
@@ -1160,7 +1174,9 @@ def run_scheduled_jobs(args):
                     dry_run=effective_dry_run,
                     show_stats=not args.no_stats,
                     debug=args.debug_seller,
-                    quiet=args.quiet
+                    quiet=args.quiet,
+                    algorithm=args.algorithm,
+                    random_seed=args.random_seed
                 )
         else:
             # Normal mode - real bidding and selling
