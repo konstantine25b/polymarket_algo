@@ -249,9 +249,14 @@ class EnhancedNeuralTweetPredictor:
         # 1. Daily Neural Prophet
         try:
             daily_data = self.data_processor.get_neural_prophet_data()
-            daily_future = self.daily_model.make_future_dataframe(daily_data, periods=days_remaining)
+            forecast_periods = max(1, int(np.ceil(days_remaining)))
+            daily_future = self.daily_model.make_future_dataframe(daily_data, periods=forecast_periods)
             daily_forecast = self.daily_model.predict(daily_future)
-            daily_remaining = daily_forecast.tail(days_remaining)['yhat1'].sum()
+            if days_remaining < 1:
+                # Scale the first day's forecast for fractional days
+                daily_remaining = daily_forecast.tail(1)['yhat1'].iloc[0] * days_remaining
+            else:
+                daily_remaining = daily_forecast.tail(forecast_periods)['yhat1'].sum()
             predictions['neural_daily'] = max(0, daily_remaining)
         except Exception as e:
             print(f"Daily Neural Prophet error: {e}")
@@ -260,9 +265,10 @@ class EnhancedNeuralTweetPredictor:
         # 2. Hourly Neural Prophet (aggregate to daily equivalent)
         try:
             hourly_data = self.prepare_hourly_data()
-            hourly_future = self.hourly_model.make_future_dataframe(hourly_data, periods=hours_remaining)
+            hours_forecast_periods = max(1, int(np.ceil(hours_remaining)))
+            hourly_future = self.hourly_model.make_future_dataframe(hourly_data, periods=hours_forecast_periods)
             hourly_forecast = self.hourly_model.predict(hourly_future)
-            hourly_remaining = hourly_forecast.tail(hours_remaining)['yhat1'].sum()
+            hourly_remaining = hourly_forecast.tail(hours_forecast_periods)['yhat1'].sum()
             predictions['neural_hourly'] = max(0, hourly_remaining)
         except Exception as e:
             print(f"Hourly Neural Prophet error: {e}")
@@ -270,9 +276,13 @@ class EnhancedNeuralTweetPredictor:
         
         # 3. Conservative Neural Prophet
         try:
-            conservative_future = self.conservative_model.make_future_dataframe(daily_data, periods=days_remaining)
+            conservative_future = self.conservative_model.make_future_dataframe(daily_data, periods=forecast_periods)
             conservative_forecast = self.conservative_model.predict(conservative_future)
-            conservative_remaining = conservative_forecast.tail(days_remaining)['yhat1'].sum()
+            if days_remaining < 1:
+                # Scale the first day's forecast for fractional days
+                conservative_remaining = conservative_forecast.tail(1)['yhat1'].iloc[0] * days_remaining
+            else:
+                conservative_remaining = conservative_forecast.tail(forecast_periods)['yhat1'].sum()
             predictions['conservative_neural'] = max(0, conservative_remaining)
         except Exception as e:
             print(f"Conservative Neural Prophet error: {e}")
@@ -280,9 +290,13 @@ class EnhancedNeuralTweetPredictor:
         
         # 4. Aggressive Neural Prophet
         try:
-            aggressive_future = self.aggressive_model.make_future_dataframe(daily_data, periods=days_remaining)
+            aggressive_future = self.aggressive_model.make_future_dataframe(daily_data, periods=forecast_periods)
             aggressive_forecast = self.aggressive_model.predict(aggressive_future)
-            aggressive_remaining = aggressive_forecast.tail(days_remaining)['yhat1'].sum()
+            if days_remaining < 1:
+                # Scale the first day's forecast for fractional days  
+                aggressive_remaining = aggressive_forecast.tail(1)['yhat1'].iloc[0] * days_remaining
+            else:
+                aggressive_remaining = aggressive_forecast.tail(forecast_periods)['yhat1'].sum()
             predictions['aggressive_neural'] = max(0, aggressive_remaining)
         except Exception as e:
             print(f"Aggressive Neural Prophet error: {e}")
@@ -304,9 +318,10 @@ class EnhancedNeuralTweetPredictor:
         if self.rf_model:
             try:
                 # Create future features for RF prediction
+                rf_periods = max(1, int(np.ceil(days_remaining)))
                 future_dates = pd.date_range(
                     start=datetime.now(ET_TIMEZONE), 
-                    periods=days_remaining, 
+                    periods=rf_periods, 
                     freq='D'
                 )
                 
@@ -327,7 +342,12 @@ class EnhancedNeuralTweetPredictor:
                     pred = self.rf_model.predict(X_pred)[0]
                     rf_predictions.append(max(0, pred))
                 
-                predictions['random_forest'] = sum(rf_predictions)
+                # Scale prediction for fractional days
+                total_rf_prediction = sum(rf_predictions)
+                if days_remaining < 1:
+                    total_rf_prediction *= days_remaining
+                    
+                predictions['random_forest'] = total_rf_prediction
             except Exception as e:
                 print(f"Random Forest prediction error: {e}")
                 predictions['random_forest'] = 0

@@ -215,7 +215,19 @@ class TimesFMTweetPredictor:
         print(f"Time remaining: {time_remaining}")
         
         # Calculate days remaining
-        days_remaining = max(1, int(np.ceil(time_remaining.total_seconds() / (24 * 3600))))
+        total_hours_remaining = time_remaining.total_seconds() / 3600
+        
+        # If less than 1 hour remaining, use fractional day calculation
+        if total_hours_remaining < 1:
+            # Use fractional day for very short time periods
+            days_remaining_exact = time_remaining.total_seconds() / (24 * 3600)
+            days_remaining = max(0.01, days_remaining_exact)  # Minimum 0.01 days (14.4 minutes)
+            print(f"Time remaining: {total_hours_remaining:.2f} hours ({days_remaining:.3f} days)")
+        else:
+            # Use the original calculation for longer periods
+            days_remaining = max(1, int(np.ceil(time_remaining.total_seconds() / (24 * 3600))))
+            print(f"Time remaining: {total_hours_remaining:.2f} hours")
+        
         print(f"Days to forecast: {days_remaining}")
         
         # Prepare input data for TimesFM
@@ -240,15 +252,27 @@ class TimesFMTweetPredictor:
                 num_samples=self.num_samples
             )
         
-        # Take only the days we need
-        if forecasts.shape[1] >= days_remaining:
-            relevant_forecasts = forecasts[:, :days_remaining]
+        # Take only the days we need and handle fractional days
+        if days_remaining < 1:
+            # For fractional days, take the first day's forecast and scale it
+            if forecasts.shape[1] >= 1:
+                single_day_forecasts = forecasts[:, 0:1]  # Take first day
+                # Scale by the fraction of day remaining
+                relevant_forecasts = single_day_forecasts * days_remaining
+            else:
+                # Fallback if no forecast available
+                relevant_forecasts = np.zeros((self.num_samples, 1))
         else:
-            # Extend if needed
-            remaining_days = days_remaining - forecasts.shape[1]
-            last_day_forecasts = forecasts[:, -1:]
-            extension = np.repeat(last_day_forecasts, remaining_days, axis=1)
-            relevant_forecasts = np.concatenate([forecasts, extension], axis=1)
+            # Handle full days as before
+            days_remaining_int = int(np.ceil(days_remaining))
+            if forecasts.shape[1] >= days_remaining_int:
+                relevant_forecasts = forecasts[:, :days_remaining_int]
+            else:
+                # Extend if needed
+                remaining_days = days_remaining_int - forecasts.shape[1]
+                last_day_forecasts = forecasts[:, -1:]
+                extension = np.repeat(last_day_forecasts, remaining_days, axis=1)
+                relevant_forecasts = np.concatenate([forecasts, extension], axis=1)
         
         # Calculate statistics
         remaining_tweets = np.mean(np.sum(relevant_forecasts, axis=1))

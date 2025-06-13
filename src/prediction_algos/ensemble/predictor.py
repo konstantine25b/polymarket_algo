@@ -833,7 +833,7 @@ class EnsembleTweetPredictor:
     
     def calculate_ensemble_probabilities(self, ensemble_result):
         """
-        Calculate probabilities for each tweet count range using ensemble prediction.
+        Calculate probabilities for each tweet count range using weighted combination of individual model probabilities.
         
         Args:
             ensemble_result (dict): Results from predict_remaining_tweets
@@ -841,10 +841,9 @@ class EnsembleTweetPredictor:
         Returns:
             dict: Probabilities for each range defined in TWEET_COUNT_FRAMES
         """
-        # Check if we have individual model probabilities to combine
+        # Extract probabilities from individual models
         model_probabilities = {}
         
-        # Extract probabilities from individual models
         for model_name, result in ensemble_result.get('individual_predictions', {}).items():
             model_weight = self.normalized_weights.get(model_name, 0.0)
             if model_weight > 0:
@@ -864,93 +863,31 @@ class EnsembleTweetPredictor:
                 if probs:
                     model_probabilities[model_name] = probs
         
-        # If we have model probabilities, use weighted combination
-        if model_probabilities:
-            ensemble_probabilities = {}
+        # Initialize ensemble probabilities to 0 for all frames
+        ensemble_probabilities = {}
+        for frame in TWEET_COUNT_FRAMES:
+            ensemble_probabilities[frame['name']] = 0.0
+        
+        # Weight and combine model probabilities
+        total_weight = 0.0
+        for model_name, probs in model_probabilities.items():
+            model_weight = self.normalized_weights.get(model_name, 0.0)
+            total_weight += model_weight
             
-            # Initialize all frame probabilities to 0
-            for frame in TWEET_COUNT_FRAMES:
-                ensemble_probabilities[frame['name']] = 0.0
-            
-            # Weight and combine model probabilities
-            total_weight = 0.0
-            for model_name, probs in model_probabilities.items():
-                model_weight = self.normalized_weights.get(model_name, 0.0)
-                total_weight += model_weight
-                
-                for frame_name, prob in probs.items():
-                    if frame_name in ensemble_probabilities:
-                        ensemble_probabilities[frame_name] += prob * model_weight
-            
-            # Normalize if we have weights
-            if total_weight > 0:
-                for frame_name in ensemble_probabilities:
-                    ensemble_probabilities[frame_name] /= total_weight
-            
-            # If we have some frames covered by model probabilities, 
-            # use normal distribution for remaining weight
-            remaining_weight = 1.0 - sum(self.normalized_weights.get(model, 0.0) 
-                                       for model in model_probabilities.keys())
-            
-            if remaining_weight > 0:
-                # Calculate normal distribution probabilities for remaining weight
-                total_predicted = ensemble_result['total_predicted']
-                ci_lower = ensemble_result['confidence_interval']['lower']
-                ci_upper = ensemble_result['confidence_interval']['upper']
-                
-                # Estimate standard deviation from confidence interval
-                std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
-                if std_estimate < 1.0:
-                    std_estimate = max(1.0, total_predicted * 0.1)
-                
-                normal_probabilities = {}
-                for frame in TWEET_COUNT_FRAMES:
-                    frame_name = frame['name']
-                    min_tweets = frame['min']
-                    max_tweets = frame['max']
-                    
-                    if max_tweets == float('inf'):
-                        prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                    else:
-                        prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                        prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
-                        prob = prob_upper - prob_lower
-                    
-                    normal_probabilities[frame_name] = max(0, min(1, prob))
-                
-                # Normalize normal probabilities
-                total_normal_prob = sum(normal_probabilities.values())
-                if total_normal_prob > 0:
-                    normal_probabilities = {k: v / total_normal_prob for k, v in normal_probabilities.items()}
-                
-                # Add remaining weight contribution
-                for frame_name in ensemble_probabilities:
-                    ensemble_probabilities[frame_name] += normal_probabilities.get(frame_name, 0.0) * remaining_weight
-            
+            for frame_name, prob in probs.items():
+                if frame_name in ensemble_probabilities:
+                    ensemble_probabilities[frame_name] += prob * model_weight
+        
+        # Normalize by total weight if we have any model probabilities
+        if total_weight > 0:
+            for frame_name in ensemble_probabilities:
+                ensemble_probabilities[frame_name] /= total_weight
         else:
-            # Fallback: use normal distribution for all probabilities
-            total_predicted = ensemble_result['total_predicted']
-            ci_lower = ensemble_result['confidence_interval']['lower']
-            ci_upper = ensemble_result['confidence_interval']['upper']
-            
-            std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
-            if std_estimate < 1.0:
-                std_estimate = max(1.0, total_predicted * 0.1)
-            
-            ensemble_probabilities = {}
-            for frame in TWEET_COUNT_FRAMES:
-                frame_name = frame['name']
-                min_tweets = frame['min']
-                max_tweets = frame['max']
-                
-                if max_tweets == float('inf'):
-                    prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                else:
-                    prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                    prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
-                    prob = prob_upper - prob_lower
-                
-                ensemble_probabilities[frame_name] = max(0, min(1, prob))
+            # If no model probabilities available, fall back to equal distribution
+            # This should rarely happen in practice
+            num_frames = len(TWEET_COUNT_FRAMES)
+            for frame_name in ensemble_probabilities:
+                ensemble_probabilities[frame_name] = 1.0 / num_frames
         
         # Final normalization to ensure probabilities sum to 1
         total_prob = sum(ensemble_probabilities.values())

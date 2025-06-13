@@ -467,17 +467,8 @@ class EnhancedTweetPredictor:
         t_weight = 0.30
         t_df = 4  # Lower df for heavier tails
         
-        # Bias correction: shift prediction to match market peak at 175-199
-        prediction_bias = 0
-        if current_tweets > 70:  # Late in week
-            temp_prob_150 = 1 - stats.norm.cdf(150 - 0.5, loc=total_predicted, scale=combined_std)
-            if temp_prob_150 > 0.08:  # If >8% chance of <150, bias upward more aggressively
-                prediction_bias = 4 + (temp_prob_150 - 0.08) * 25  # More aggressive bias
-            
-            # Additional bias to shift peak and reduce <150 probability
-            prediction_bias += 1  # Shift higher overall
-        
-        adjusted_prediction = total_predicted + prediction_bias
+        # No bias correction - use raw model predictions
+        adjusted_prediction = total_predicted
         
         probabilities = {}
         for frame in TWEET_COUNT_FRAMES:
