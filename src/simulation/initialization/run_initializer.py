@@ -82,6 +82,7 @@ class RunInitializer:
             "win_loss_percentage": 0.0,  # Win/loss percentage based on current market prices
             "total_balance_if_all_positions_sold": initial_balance,  # Total balance if all positions sold at current bid prices
             "shares": [],  # List of {"market_id": str, "market_name": str, "num_shares": int}
+            "positions": [],  # List of current positions with detailed info
             "transactions": [],  # List of all transactions
             "total_balances": [  # Time series of total balances
                 {
@@ -95,7 +96,6 @@ class RunInitializer:
                     "total_balance_if_all_positions_sold": initial_balance
                 }
             ],
-            "positions": [],  # List of current positions with detailed info
             "markets": []  # List of all markets: {"market_id": str, "market_name": str, "description": str, "category": str}
         }
         
