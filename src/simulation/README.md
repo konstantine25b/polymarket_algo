@@ -56,7 +56,7 @@ The simulation system supports all advanced prediction algorithms available in t
 
 ```bash
 
-python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
+python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
 # Ensemble algorithm (multi-model approach)
 python -m src.simulation.bidding_decision.strategy_1 \
     --analyze-opportunities \
