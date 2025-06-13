@@ -20,7 +20,12 @@ src/simulation/
 │   ├── __main__.py             # CLI interface
 │   └── README.md               # Detailed initialization docs
 ├── bidding_decision/           # Trading strategy implementations
-│   └── strategy_1/             # Primary simulation strategy
+│   ├── strategy_1/             # Primary simulation strategy
+│   │   ├── simulation_bidder.py # Bidding logic
+│   │   ├── simulation_seller.py # Position selling logic
+│   │   ├── __main__.py         # CLI interface
+│   │   └── README.md           # Strategy documentation
+│   └── strategy_2/             # Secondary simulation strategy
 │       ├── simulation_bidder.py # Bidding logic
 │       ├── simulation_seller.py # Position selling logic
 │       ├── __main__.py         # CLI interface
@@ -55,28 +60,18 @@ The simulation system supports all advanced prediction algorithms available in t
 ### Algorithm Usage Examples
 
 ```bash
+# Complete Scheduler-Based Simulation with Strategy 1
+python -m src.scheduler.scheduler --strategy strategy_1 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0
 
-python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 
-# Ensemble algorithm (multi-model approach)
+# Complete Scheduler-Based Simulation with Strategy 2
+python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0
+
+# Ensemble algorithm (multi-model approach) - Direct Strategy Usage
 python -m src.simulation.bidding_decision.strategy_1 \
     --analyze-opportunities \
     --algorithm ensemble \
     --random-seed 42 \
     --threshold 2.0
-
-# Enhanced Facebook Prophet with multiple models
-python -m src.simulation.bidding_decision.strategy_1 \
-    --run trading_simulation \
-    --algorithm enhanced_facebook_prophet \
-    --random-seed 42 \
-    --amount 5.0
-
-# Neural Prophet for advanced predictions
-python -m src.simulation.bidding_decision.strategy_1 \
-    --sell position_run \
-    --algorithm neural_prophet \
-    --random-seed 42 \
-    --threshold 1.5
 ```
 
 ## 🚀 Usage Guide

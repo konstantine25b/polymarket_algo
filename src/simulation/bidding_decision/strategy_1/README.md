@@ -34,6 +34,20 @@ src/simulation/bidding_decision/strategy_1/
 
 ## Quick Start
 
+### Method 1: Complete Scheduler-Based Simulation (Recommended)
+
+Run the full trading simulation with scheduler integration:
+
+```bash
+# Complete trading simulation with strategy_1
+python -m src.scheduler.scheduler --strategy strategy_1 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0
+
+# With dry-run for testing
+python -m src.scheduler.scheduler --strategy strategy_1 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 --dry-run --run-once
+```
+
+### Method 2: Direct Strategy Usage
+
 ### 1. Create a Simulation Run
 
 First, create a simulation run and initialize it with real market data:
