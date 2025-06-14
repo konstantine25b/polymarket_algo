@@ -1713,12 +1713,20 @@ class PolymarketPositionTracker:
         active_end_month = active_end_date.split('-')[1]
         active_end_day = active_end_date.split('-')[2]
         
+        # Get the month name from the month number
+        months = {
+            '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+            '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+            '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+        }
+        month_name = months.get(active_start_month, 'Unknown')
+        
         # Create patterns to match for active market
         patterns = [
-            f"May {active_start_day}–{active_end_day}",
-            f"May {int(active_start_day)}–{int(active_end_day)}",
-            f"May {active_start_day}-{active_end_day}",
-            f"May {int(active_start_day)}-{int(active_end_day)}",
+            f"{month_name} {active_start_day}–{active_end_day}",
+            f"{month_name} {int(active_start_day)}–{int(active_end_day)}",
+            f"{month_name} {active_start_day}-{active_end_day}",
+            f"{month_name} {int(active_start_day)}-{int(active_end_day)}",
             f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
         ]
         

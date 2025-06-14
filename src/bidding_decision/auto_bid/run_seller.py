@@ -85,6 +85,10 @@ def main():
                          help='Random seed for reproducible predictions (default: 42)')
     parser.add_argument('--show-eachalgo-distribution', action='store_true',
                          help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
+    parser.add_argument('--show-positions', action='store_true',
+                         help='Show all current positions before analysis')
+    parser.add_argument('--show-active-positions', action='store_true',
+                         help='Show positions for active market before analysis')
     
     args = parser.parse_args()
     
@@ -94,6 +98,42 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
+        # Display positions if requested (before model training to avoid interruption)
+        if args.show_positions or args.show_active_positions:
+            from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+            
+            print("\n" + "=" * 80)
+            print("📊 CURRENT POSITIONS")
+            print("=" * 80)
+            
+            tracker = PolymarketPositionTracker()
+            
+            if args.show_positions:
+                print("All current positions:")
+                positions = tracker.get_simple_positions()
+                if positions:
+                    for market_id, outcomes in positions.items():
+                        market_name = tracker.get_market_name(market_id)
+                        print(f"\n🎯 {market_name}")
+                        for outcome, quantity in outcomes.items():
+                            print(f"   {outcome}: {quantity:.6f} shares")
+                else:
+                    print("No positions found.")
+            
+            if args.show_active_positions:
+                print("\nActive market positions:")
+                active_positions = tracker.get_active_market_positions()
+                if active_positions:
+                    for market_id, outcomes in active_positions.items():
+                        market_name = tracker.get_market_name(market_id)
+                        print(f"\n🎯 {market_name}")
+                        for outcome, quantity in outcomes.items():
+                            print(f"   {outcome}: {quantity:.6f} shares")
+                else:
+                    print("No active market positions found.")
+            
+            print("=" * 80 + "\n")
+        
         # Create the position seller with debug flag and algorithm parameters
         seller = PositionSeller(
             threshold=args.threshold, 

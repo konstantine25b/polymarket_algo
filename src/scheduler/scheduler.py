@@ -739,7 +739,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False):
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, show_positions=False, show_active_positions=False):
     """Run the auto-seller to sell positions based on statistical analysis.
     
     Args:
@@ -752,6 +752,8 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
         show_eachalgo_distribution: Whether to show individual algorithm distributions
+        show_positions: Whether to show all current positions
+        show_active_positions: Whether to show active market positions
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
@@ -791,6 +793,15 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
     if show_eachalgo_distribution:
         cmd.append("--show-eachalgo-distribution")
         logger.info("Showing individual algorithm probability distributions")
+    
+    # Add position display flags if requested
+    if show_positions:
+        cmd.append("--show-positions")
+        logger.info("Will display all current positions")
+    
+    if show_active_positions:
+        cmd.append("--show-active-positions")
+        logger.info("Will display active market positions")
     
     # Add flag to focus on active market only
     cmd.append("--active-market-only")
@@ -1292,7 +1303,9 @@ def run_scheduled_jobs(args):
                     debug=args.debug_seller,
                     algorithm=args.algorithm,
                     random_seed=args.random_seed,
-                    show_eachalgo_distribution=args.show_eachalgo_distribution
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    show_positions=args.show_positions,
+                    show_active_positions=args.show_active_positions
                 )
     
     return tweets_success and prediction_success or skip_tweet_fetching

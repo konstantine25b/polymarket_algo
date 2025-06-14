@@ -12,6 +12,15 @@ from datetime import datetime
 from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
 from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
 
+def get_month_name(month_num):
+    """Convert month number to month name."""
+    months = {
+        '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+        '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+        '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+    }
+    return months.get(month_num, 'Unknown')
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Track and analyze Polymarket positions with profit/loss calculations')
@@ -100,7 +109,10 @@ def main():
         active_end_month = active_end_date.split('-')[1]
         active_end_day = active_end_date.split('-')[2]
         
-        print(f"\nACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)}):")
+        # Get the month name from the month number
+        month_name = get_month_name(active_start_month)
+        
+        print(f"\nACTIVE MARKET POSITIONS ({month_name} {int(active_start_day)}–{int(active_end_day)}):")
         active_positions = tracker.get_active_market_positions()
         
         if active_positions:
@@ -136,8 +148,11 @@ def main():
         active_end_month = active_end_date.split('-')[1]
         active_end_day = active_end_date.split('-')[2]
         
+        # Get the month name from the month number
+        month_name = get_month_name(active_start_month)
+        
         print("\n" + "=" * 50)
-        print(f"ACTIVE MARKET POSITIONS (May {int(active_start_day)}–{int(active_end_day)})")
+        print(f"ACTIVE MARKET POSITIONS ({month_name} {int(active_start_day)}–{int(active_end_day)})")
         print("=" * 50)
         
         active_positions = tracker.get_active_market_positions()
