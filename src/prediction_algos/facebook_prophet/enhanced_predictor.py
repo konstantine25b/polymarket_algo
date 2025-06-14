@@ -284,10 +284,15 @@ class EnhancedTweetPredictor:
         daily_future = self.daily_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         daily_forecast = self.daily_model.predict(daily_future)
         daily_pred = daily_forecast.iloc[-1]['yhat'] * remaining_days
-        daily_lower = daily_forecast.iloc[-1]['yhat_lower'] * remaining_days
-        daily_upper = daily_forecast.iloc[-1]['yhat_upper'] * remaining_days
+        
+        # Fix confidence interval scaling - use square root scaling for uncertainty
+        daily_uncertainty = (daily_forecast.iloc[-1]['yhat_upper'] - daily_forecast.iloc[-1]['yhat_lower']) / 2
+        scaled_daily_uncertainty = daily_uncertainty * np.sqrt(remaining_days)
+        daily_lower = max(0, daily_pred - scaled_daily_uncertainty)
+        daily_upper = daily_pred + scaled_daily_uncertainty
+        
         predictions['prophet_daily'] = max(0, daily_pred)
-        predictions['prophet_daily_ci'] = (max(0, daily_lower), daily_upper)
+        predictions['prophet_daily_ci'] = (daily_lower, daily_upper)
         
         # 2. Hourly Prophet prediction
         hourly_future = self.hourly_model.make_future_dataframe(periods=int(np.ceil(remaining_hours)), freq='H')
@@ -314,10 +319,16 @@ class EnhancedTweetPredictor:
             (hourly_forecast['ds'] <= remaining_end_naive)
         ]
         hourly_pred = hourly_remaining['yhat'].sum()
-        hourly_lower = hourly_remaining['yhat_lower'].sum()
-        hourly_upper = hourly_remaining['yhat_upper'].sum()
+        
+        # Fix hourly confidence interval - use proper uncertainty aggregation
+        hourly_uncertainties = (hourly_remaining['yhat_upper'] - hourly_remaining['yhat_lower']) / 2
+        # For independent hourly predictions, uncertainty scales with sqrt of number of hours
+        total_hourly_uncertainty = np.sqrt(np.sum(hourly_uncertainties**2))
+        hourly_lower = max(0, hourly_pred - total_hourly_uncertainty)
+        hourly_upper = hourly_pred + total_hourly_uncertainty
+        
         predictions['prophet_hourly'] = max(0, hourly_pred)
-        predictions['prophet_hourly_ci'] = (max(0, hourly_lower), hourly_upper)
+        predictions['prophet_hourly_ci'] = (hourly_lower, hourly_upper)
         
         # 3. Pattern-based prediction using recent data
         recent_patterns = self.analyze_recent_patterns(days_back=14)
@@ -355,28 +366,43 @@ class EnhancedTweetPredictor:
         conservative_future = self.conservative_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         conservative_forecast = self.conservative_model.predict(conservative_future)
         conservative_pred = conservative_forecast.iloc[-1]['yhat'] * remaining_days
-        conservative_lower = conservative_forecast.iloc[-1]['yhat_lower'] * remaining_days
-        conservative_upper = conservative_forecast.iloc[-1]['yhat_upper'] * remaining_days
+        
+        # Fix conservative confidence interval scaling
+        conservative_uncertainty = (conservative_forecast.iloc[-1]['yhat_upper'] - conservative_forecast.iloc[-1]['yhat_lower']) / 2
+        scaled_conservative_uncertainty = conservative_uncertainty * np.sqrt(remaining_days)
+        conservative_lower = max(0, conservative_pred - scaled_conservative_uncertainty)
+        conservative_upper = conservative_pred + scaled_conservative_uncertainty
+        
         predictions['conservative_prophet'] = max(0, conservative_pred)
-        predictions['conservative_prophet_ci'] = (max(0, conservative_lower), conservative_upper)
+        predictions['conservative_prophet_ci'] = (conservative_lower, conservative_upper)
         
         # 6. Aggressive Prophet prediction
         aggressive_future = self.aggressive_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         aggressive_forecast = self.aggressive_model.predict(aggressive_future)
         aggressive_pred = aggressive_forecast.iloc[-1]['yhat'] * remaining_days
-        aggressive_lower = aggressive_forecast.iloc[-1]['yhat_lower'] * remaining_days
-        aggressive_upper = aggressive_forecast.iloc[-1]['yhat_upper'] * remaining_days
+        
+        # Fix aggressive confidence interval scaling
+        aggressive_uncertainty = (aggressive_forecast.iloc[-1]['yhat_upper'] - aggressive_forecast.iloc[-1]['yhat_lower']) / 2
+        scaled_aggressive_uncertainty = aggressive_uncertainty * np.sqrt(remaining_days)
+        aggressive_lower = max(0, aggressive_pred - scaled_aggressive_uncertainty)
+        aggressive_upper = aggressive_pred + scaled_aggressive_uncertainty
+        
         predictions['aggressive_prophet'] = max(0, aggressive_pred)
-        predictions['aggressive_prophet_ci'] = (max(0, aggressive_lower), aggressive_upper)
+        predictions['aggressive_prophet_ci'] = (aggressive_lower, aggressive_upper)
         
         # 7. Weekly-focused Prophet prediction
         weekly_future = self.weekly_focused_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         weekly_forecast = self.weekly_focused_model.predict(weekly_future)
         weekly_pred = weekly_forecast.iloc[-1]['yhat'] * remaining_days
-        weekly_lower = weekly_forecast.iloc[-1]['yhat_lower'] * remaining_days
-        weekly_upper = weekly_forecast.iloc[-1]['yhat_upper'] * remaining_days
+        
+        # Fix weekly confidence interval scaling
+        weekly_uncertainty = (weekly_forecast.iloc[-1]['yhat_upper'] - weekly_forecast.iloc[-1]['yhat_lower']) / 2
+        scaled_weekly_uncertainty = weekly_uncertainty * np.sqrt(remaining_days)
+        weekly_lower = max(0, weekly_pred - scaled_weekly_uncertainty)
+        weekly_upper = weekly_pred + scaled_weekly_uncertainty
+        
         predictions['weekly_prophet'] = max(0, weekly_pred)
-        predictions['weekly_prophet_ci'] = (max(0, weekly_lower), weekly_upper)
+        predictions['weekly_prophet_ci'] = (weekly_lower, weekly_upper)
         
         # 8. Ensemble prediction (adaptive weighted average based on activity)
         adaptive_weights, activity_info = self.calculate_adaptive_weights(week_data['current_time'])
@@ -415,60 +441,13 @@ class EnhancedTweetPredictor:
         return predictions
     
     def calculate_enhanced_probabilities(self, current_tweets, remaining_predictions):
-        """Calculate probabilities using improved mixture distribution modeling."""
+        """Calculate probabilities using simplified normal distribution."""
         total_predicted = current_tweets + remaining_predictions['ensemble']
         
-        # Get all Prophet predictions for better uncertainty estimation
-        prophet_predictions = [
-            current_tweets + remaining_predictions['prophet_daily'],
-            current_tweets + remaining_predictions['prophet_hourly'],
-            current_tweets + remaining_predictions['conservative_prophet'],
-            current_tweets + remaining_predictions['aggressive_prophet'],
-            current_tweets + remaining_predictions['weekly_prophet']
-        ]
-        
-        # Calculate statistics from Prophet ensemble
-        prophet_mean = np.mean(prophet_predictions)
-        prophet_std = np.std(prophet_predictions)
-        
-        # Use actual Prophet model uncertainty plus ensemble variance
-        lower_bound, upper_bound = remaining_predictions['confidence_interval']
-        total_lower = current_tweets + lower_bound
-        total_upper = current_tweets + upper_bound
-        
-        # Adaptive uncertainty based on activity mode and time
-        activity_mode = remaining_predictions.get('activity_mode', 'normal_activity')
-        time_remaining_hours = (remaining_predictions.get('time_remaining', timedelta(hours=72))).total_seconds() / 3600
-        
-        # Base uncertainty from models
-        model_uncertainty = prophet_std
-        ci_uncertainty = (total_upper - total_lower) / 4
-        
-        # Activity-based uncertainty adjustment
-        if activity_mode == "high_activity":
-            uncertainty_factor = 1.4  # More unpredictable
-        elif activity_mode == "low_activity":
-            uncertainty_factor = 0.7  # More predictable
-        elif activity_mode == "increasing_activity":
-            uncertainty_factor = 1.2  # Moderately unpredictable
-        else:
-            uncertainty_factor = 1.0
-        
-        # Time-based scaling
-        time_factor = max(0.6, min(1.8, time_remaining_hours / 72))
-        
-        # Combined uncertainty with smart calibration
-        base_uncertainty = max(model_uncertainty, ci_uncertainty, 4.0)
-        combined_std = base_uncertainty * uncertainty_factor * time_factor * 0.6  # Tighter overall
-        
-        # Use mixture of distributions for better tail modeling
-        # 70% normal distribution + 30% heavier-tailed t-distribution (more tail probability)
-        normal_weight = 0.70
-        t_weight = 0.30
-        t_df = 4  # Lower df for heavier tails
-        
-        # No bias correction - use raw model predictions
-        adjusted_prediction = total_predicted
+        # Use a reasonable standard deviation for tweet count predictions
+        # Based on typical tweet count variability (around 15-20% of the prediction)
+        # Enhanced version uses slightly more uncertainty due to ensemble complexity
+        std_dev = max(12, total_predicted * 0.18)  # Minimum 12 tweets std dev, or 18% of prediction
         
         probabilities = {}
         for frame in TWEET_COUNT_FRAMES:
@@ -476,22 +455,15 @@ class EnhancedTweetPredictor:
             min_tweets = frame['min']
             max_tweets = frame['max']
             
+            # Calculate probability using normal distribution
             if max_tweets == float('inf'):
-                # For "500 or more" category, use complementary probability
-                prob_normal = 1 - stats.norm.cdf(min_tweets - 0.5, loc=adjusted_prediction, scale=combined_std)
-                prob_t = 1 - stats.t.cdf(min_tweets - 0.5, t_df, loc=adjusted_prediction, scale=combined_std)
-                prob = normal_weight * prob_normal + t_weight * prob_t
+                # For "X or more" categories
+                prob = 1 - stats.norm.cdf(min_tweets - 0.5, loc=total_predicted, scale=std_dev)
             else:
-                # Normal range calculation
-                prob_lower_normal = stats.norm.cdf(min_tweets - 0.5, loc=adjusted_prediction, scale=combined_std)
-                prob_upper_normal = stats.norm.cdf(max_tweets + 0.5, loc=adjusted_prediction, scale=combined_std)
-                prob_normal = prob_upper_normal - prob_lower_normal
-                
-                prob_lower_t = stats.t.cdf(min_tweets - 0.5, t_df, loc=adjusted_prediction, scale=combined_std)
-                prob_upper_t = stats.t.cdf(max_tweets + 0.5, t_df, loc=adjusted_prediction, scale=combined_std)
-                prob_t = prob_upper_t - prob_lower_t
-                
-                prob = normal_weight * prob_normal + t_weight * prob_t
+                # For range categories
+                prob_lower = stats.norm.cdf(min_tweets - 0.5, loc=total_predicted, scale=std_dev)
+                prob_upper = stats.norm.cdf(max_tweets + 0.5, loc=total_predicted, scale=std_dev)
+                prob = prob_upper - prob_lower
             
             probabilities[frame_name] = {
                 'probability': max(0, min(1, prob)),
