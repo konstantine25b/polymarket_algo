@@ -64,7 +64,7 @@ The simulation system supports all advanced prediction algorithms available in t
 python -m src.scheduler.scheduler --strategy strategy_1 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad092231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 --show-eachalgo-distribution
 
 # Complete Scheduler-Based Simulation with Strategy 2
-python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad09231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0
+python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate kkikik --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 --show-eachalgo-distribution
 
 # Ensemble algorithm (multi-model approach) - Direct Strategy Usage
 python -m src.simulation.bidding_decision.strategy_1 \
