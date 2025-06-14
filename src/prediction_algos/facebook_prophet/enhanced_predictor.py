@@ -447,7 +447,7 @@ class EnhancedTweetPredictor:
         # Use a reasonable standard deviation for tweet count predictions
         # Based on typical tweet count variability (around 15-20% of the prediction)
         # Enhanced version uses slightly more uncertainty due to ensemble complexity
-        std_dev = max(12, total_predicted * 0.18)  # Minimum 12 tweets std dev, or 18% of prediction
+        std_dev = max(10, total_predicted * 0.12)  # Minimum 10 tweets std dev, or 12% of prediction
         
         probabilities = {}
         for frame in TWEET_COUNT_FRAMES:
@@ -661,4 +661,102 @@ class EnhancedTweetPredictor:
             base_weights['pattern_based'] = 0.40
             base_weights['aggressive_prophet'] = 0.22
         
-        return base_weights, activity 
+        return base_weights, activity
+    
+    def calculate_individual_algorithm_probabilities(self, current_tweets, remaining_predictions):
+        """Calculate probabilities for each individual algorithm."""
+        individual_probabilities = {}
+        
+        # List of algorithms to analyze
+        algorithms = [
+            ('prophet_daily', 'Daily Prophet'),
+            ('prophet_hourly', 'Hourly Prophet'), 
+            ('conservative_prophet', 'Conservative Prophet'),
+            ('aggressive_prophet', 'Aggressive Prophet'),
+            ('weekly_prophet', 'Weekly Prophet'),
+            ('pattern_based', 'Pattern-based'),
+            ('random_forest', 'Random Forest')
+        ]
+        
+        for algo_key, algo_name in algorithms:
+            if algo_key in remaining_predictions:
+                total_predicted = current_tweets + remaining_predictions[algo_key]
+                
+                # Use same standard deviation calculation as ensemble but slightly reduced for individual models
+                std_dev = max(8, total_predicted * 0.10)  # 10% for individual models
+                
+                probabilities = {}
+                for frame in TWEET_COUNT_FRAMES:
+                    frame_name = frame['name']
+                    min_tweets = frame['min']
+                    max_tweets = frame['max']
+                    
+                    # Calculate probability using normal distribution
+                    if max_tweets == float('inf'):
+                        prob = 1 - stats.norm.cdf(min_tweets - 0.5, loc=total_predicted, scale=std_dev)
+                    else:
+                        prob_lower = stats.norm.cdf(min_tweets - 0.5, loc=total_predicted, scale=std_dev)
+                        prob_upper = stats.norm.cdf(max_tweets + 0.5, loc=total_predicted, scale=std_dev)
+                        prob = prob_upper - prob_lower
+                    
+                    probabilities[frame_name] = max(0, min(1, prob))
+                
+                # Normalize probabilities
+                total_prob = sum(probabilities.values())
+                if total_prob > 0:
+                    for frame_name in probabilities:
+                        probabilities[frame_name] /= total_prob
+                
+                individual_probabilities[algo_name] = {
+                    'total_predicted': total_predicted,
+                    'probabilities': probabilities
+                }
+        
+        return individual_probabilities
+    
+    def print_individual_algorithm_distributions(self, predictions_summary):
+        """Print probability distributions for each individual algorithm."""
+        current_tweets = predictions_summary['current_tweets']
+        remaining_predictions = predictions_summary['predictions_breakdown']
+        
+        # Calculate individual probabilities
+        individual_probs = self.calculate_individual_algorithm_probabilities(current_tweets, remaining_predictions)
+        
+        print("\n" + "="*100)
+        print("INDIVIDUAL ALGORITHM PROBABILITY DISTRIBUTIONS")
+        print("="*100)
+        
+        # Get top 6 most likely frames for display
+        ensemble_probs = predictions_summary['predictions_by_frame']
+        top_frames = sorted(ensemble_probs.items(), key=lambda x: x[1]['probability'], reverse=True)[:6]
+        top_frame_names = [frame[0] for frame in top_frames]
+        
+        # Print header
+        print(f"{'Algorithm':<20s} {'Total':<6s}", end="")
+        for frame_name in top_frame_names:
+            print(f" {frame_name:<12s}", end="")
+        print()
+        print("-" * 100)
+        
+        # Print each algorithm's distribution
+        for algo_name, data in individual_probs.items():
+            total_pred = data['total_predicted']
+            probs = data['probabilities']
+            
+            print(f"{algo_name:<20s} {total_pred:<6.1f}", end="")
+            for frame_name in top_frame_names:
+                prob = probs.get(frame_name, 0)
+                print(f" {prob*100:<12.1f}", end="")
+            print()
+        
+        # Print ensemble for comparison
+        ensemble_total = predictions_summary['total_predicted']
+        print(f"{'Ensemble (Final)':<20s} {ensemble_total:<6.1f}", end="")
+        for frame_name in top_frame_names:
+            prob = ensemble_probs[frame_name]['probability']
+            print(f" {prob*100:<12.1f}", end="")
+        print()
+        
+        print("-" * 100)
+        print("Values show: Total predicted tweets, then probability percentages for top categories")
+        print("="*100) 

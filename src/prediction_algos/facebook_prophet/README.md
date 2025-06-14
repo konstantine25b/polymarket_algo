@@ -30,6 +30,9 @@ python -m src.prediction_algos.facebook_prophet.main --fast --random-seed 42
 # Enhanced multi-model ensemble with Random Forest
 python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42
 
+# Enhanced with individual algorithm distributions shown
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42 --show-eachalgo-distribution
+
 # Enhanced with custom parameters
 python -m src.prediction_algos.facebook_prophet.enhanced_main --changepoint-prior 0.08 --seasonality-prior 15.0 --random-seed 42
 ```
@@ -453,6 +456,9 @@ python -m src.prediction_algos.facebook_prophet.main --current-time "2025-06-08 
 # Basic enhanced prediction
 python -m src.prediction_algos.facebook_prophet.enhanced_main
 
+# Show individual algorithm probability distributions
+python -m src.prediction_algos.facebook_prophet.enhanced_main --show-eachalgo-distribution
+
 # Custom current time
 python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-09 14:49:37"
 
@@ -461,7 +467,46 @@ python -m src.prediction_algos.facebook_prophet.enhanced_main --data-path /path/
 
 # Example with specific time for testing
 python -m src.prediction_algos.facebook_prophet.enhanced_main --current-time "2025-06-10 10:00:00"
+
+# Combined options with algorithm analysis
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42 --show-eachalgo-distribution --current-time "2025-06-10 12:00:00"
 ```
+
+#### Individual Algorithm Analysis
+
+The `--show-eachalgo-distribution` option displays probability distributions for each algorithm in the ensemble:
+
+```bash
+# Show how each algorithm contributes to the final prediction
+python -m src.prediction_algos.facebook_prophet.enhanced_main --show-eachalgo-distribution
+```
+
+**Example Output:**
+
+```
+INDIVIDUAL ALGORITHM PROBABILITY DISTRIBUTIONS
+================================================================================
+Algorithm            Total  115–129      130–144      100–114      145–159      less than 100 160–174
+------------------------------------------------------------------------------------
+Daily Prophet        134.9  45.2         28.1         18.4         6.8          1.2           0.3
+Hourly Prophet       96.7   38.9         26.2         22.4         8.9          3.1           0.5
+Conservative Prophet 134.0  44.8         28.3         18.7         6.7          1.2           0.3
+Aggressive Prophet   134.0  44.8         28.3         18.7         6.7          1.2           0.3
+Weekly Prophet       74.3   28.1         24.8         26.2         13.2         6.8           0.9
+Pattern-based        195.1  25.8         29.4         19.2         12.8         8.2           4.6
+Random Forest        161.0  35.2         30.1         20.4         9.8          3.8           0.7
+Ensemble (Final)     123.2  38.7         26.0         22.4         6.8          5.4           0.7
+------------------------------------------------------------------------------------
+Values show: Total predicted tweets, then probability percentages for top categories
+================================================================================
+```
+
+**Benefits:**
+
+- **Algorithm Comparison**: See which models are more conservative vs aggressive
+- **Debugging**: Understand why the ensemble made specific predictions
+- **Model Analysis**: Identify which algorithms contribute most to final probabilities
+- **Validation**: Verify that ensemble weighting is working correctly
 
 ### Programmatic Usage
 

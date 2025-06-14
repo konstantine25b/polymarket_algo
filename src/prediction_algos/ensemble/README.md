@@ -71,6 +71,16 @@ An ensemble forecasting model that combines multiple prediction algorithms to ge
 python -m src.prediction_algos.ensemble.main
 ```
 
+### Show Individual Algorithm Distributions
+
+```bash
+# Show probability distribution for each algorithm in the ensemble
+python -m src.prediction_algos.ensemble.main --show-eachalgo-distribution
+
+# Combined with other options
+python -m src.prediction_algos.ensemble.main --random-seed 42 --show-eachalgo-distribution --fast
+```
+
 ### 🎯 Reproducible Results with Random Seeds
 
 ```bash
@@ -120,6 +130,7 @@ python -m src.prediction_algos.ensemble.main --fast --random-seed 42
 - `--no-plots`: Disable plot generation
 - `--ensemble-method`: Combination method (weighted_average, median, best_performer)
 - `--random-seed`: Random seed for reproducible results (default: 42)
+- `--show-eachalgo-distribution`: Show probability distribution for each individual algorithm
 
 ### Model Weights (0.0 to exclude model)
 

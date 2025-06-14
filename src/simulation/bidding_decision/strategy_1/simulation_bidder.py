@@ -66,7 +66,7 @@ class SimulationBidder:
     def __init__(self, threshold: float = 0.0, order_amount: float = 10.0, 
                  use_weighted_selection: bool = False, min_prediction: float = 0.0, 
                  algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
-                 debug: bool = False):
+                 debug: bool = False, show_eachalgo_distribution: bool = False):
         """
         Initialize the SimulationBidder.
         
@@ -78,6 +78,7 @@ class SimulationBidder:
             algorithm: Prediction algorithm to use (default: enhanced_facebook_prophet)
             random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
+            show_eachalgo_distribution: Whether to show individual algorithm distributions
         """
         self.threshold = threshold
         self.order_amount = order_amount
@@ -86,6 +87,7 @@ class SimulationBidder:
         self.algorithm = algorithm
         self.random_seed = random_seed
         self.debug = debug
+        self.show_eachalgo_distribution = show_eachalgo_distribution
         self.run_initializer = RunInitializer()
         
     def find_best_opportunity(self, update_markets: bool = True, show_stats: bool = True) -> Optional[Dict[str, Any]]:
@@ -111,7 +113,8 @@ class SimulationBidder:
                 algorithm=self.algorithm,
                 threshold=self.threshold,
                 silent=not show_stats,  # Show table unless explicitly disabled
-                random_seed=self.random_seed
+                random_seed=self.random_seed,
+                show_eachalgo_distribution=self.show_eachalgo_distribution
             )
             
             # Show the stats table if requested and not already shown
@@ -372,7 +375,8 @@ class SimulationBidder:
                 algorithm=self.algorithm,
                 threshold=self.threshold,
                 silent=not show_stats,
-                random_seed=self.random_seed
+                random_seed=self.random_seed,
+                show_eachalgo_distribution=self.show_eachalgo_distribution
             )
             
             # Show the stats table if requested and not already shown

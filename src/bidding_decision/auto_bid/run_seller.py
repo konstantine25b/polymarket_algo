@@ -83,6 +83,8 @@ def main():
                          help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                          help='Random seed for reproducible predictions (default: 42)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                         help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
     
     args = parser.parse_args()
     
@@ -98,7 +100,8 @@ def main():
             sell_below=args.sell_below, 
             debug=args.debug,
             algorithm=args.algorithm,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
+            show_eachalgo_distribution=args.show_eachalgo_distribution
         )
         
         # Generate the comparison table once - this will be displayed by PositionSeller methods

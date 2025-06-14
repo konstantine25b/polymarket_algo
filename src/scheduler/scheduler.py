@@ -53,6 +53,7 @@ Options:
     --simulate RUN_NAME    Run in simulation mode using the specified simulation run
     --strategy STRATEGY    Strategy to use for simulation (default: strategy_1)
     --sim-balance FLOAT    Initial balance for new simulation runs (default: 1000.0)
+    --show-eachalgo-distribution Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)
 """
 
 import argparse
@@ -162,6 +163,8 @@ def setup_argparse():
                         help='Strategy to use for simulation (default: strategy_1)')
     parser.add_argument('--sim-balance', type=float, default=1000.0,
                         help='Initial balance for new simulation runs (default: 1000.0)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                        help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -487,7 +490,7 @@ def initialize_simulation_run(run_name, balance, strategy="strategy_1"):
 
 def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount=1.0, dry_run=False, 
                          show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False,
-                         algorithm="enhanced_facebook_prophet", random_seed=42):
+                         algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False):
     """Run the simulation bidder for the specified strategy.
     
     Args:
@@ -502,6 +505,7 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
         quiet: Whether to suppress output
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
     
     Returns:
         bool: Whether the bidding was successful
@@ -529,6 +533,10 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
     if min_prediction > 0:
         cmd.append(f"--min-prediction={min_prediction}")
     
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
+    
     try:
         if quiet and not dry_run:  # Always show output in dry run mode
             process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -551,20 +559,21 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
     return process.returncode == 0
 
 def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
-                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42):
+                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False):
     """Run the simulation seller for the specified strategy.
     
     Args:
         run_name: Name of the simulation run
         strategy: Strategy to use (default: strategy_1)
-        threshold: Minimum opportunity percentage to sell positions
-        sell_below: Sell positions with prediction below this percentage
+        threshold: Minimum opportunity percentage to place sells
+        sell_below: Automatically sell positions with prediction below this percentage
         dry_run: Whether to run in dry run mode
         show_stats: Whether to show full statistics table
-        debug: Whether to show detailed debugging information
+        debug: Show detailed debugging information
         quiet: Whether to suppress output
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
     
     Returns:
         bool: Whether the selling was successful
@@ -579,31 +588,42 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
         f"--random-seed={random_seed}"
     ]
     
-    if not dry_run:
-        cmd.append("--auto-sell")
-    else:
+    if dry_run:
         cmd.append("--dry-run")
-    
-    if sell_below > 0.0:
-        cmd.append(f"--sell-below={sell_below}")
-    
-    if debug:
-        cmd.append("--debug")
-        cmd.append("--verbose")
-    
+        
     if not show_stats:
         cmd.append("--no-stats")
+        
+    if sell_below > 0:
+        cmd.append(f"--sell-below={sell_below}")
+        
+    if debug:
+        cmd.append("--debug")
     
-    # Focus on active market only
-    cmd.append("--active-market-only")
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
     
     try:
-        process = subprocess.run(cmd, check=True)
-        logger.info("Simulation seller completed successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Simulation seller failed with error code {e.returncode}")
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Simulation seller failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Simulation seller completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Simulation seller failed")
+            else:
+                logger.info("Simulation seller completed successfully")
+    except Exception as e:
+        logger.error(f"Error running simulation seller: {e}")
         return False
+    
+    return process.returncode == 0
 
 def display_simulation_info(run_name):
     """Display information about the simulation run.
@@ -643,7 +663,7 @@ def display_wallet_balance():
     
     return balance_info
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -656,6 +676,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         min_prediction: Minimum prediction percentage required to consider an opportunity
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -689,6 +710,11 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         cmd.append(f"--min-prediction={min_prediction}")
         logger.info(f"Using minimum prediction threshold of {min_prediction}% for buy opportunities")
     
+    # Add show individual algorithm distributions if requested
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
+    
     logger.info(f"Using prediction algorithm: {algorithm} with random seed: {random_seed}")
     
     try:
@@ -713,7 +739,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42):
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False):
     """Run the auto-seller to sell positions based on statistical analysis.
     
     Args:
@@ -725,6 +751,7 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         debug: Show detailed debugging information
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
@@ -759,6 +786,11 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
     if debug:
         cmd.append("--debug")
         logger.info("Enabling debug mode for position seller")
+    
+    # Add show individual algorithm distributions if requested
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
     
     # Add flag to focus on active market only
     cmd.append("--active-market-only")
@@ -834,7 +866,7 @@ def run_scheduled_jobs(args):
                     print(f"📊 Both local database and Polymarket site show {db_count} tweets")
                     print("🔄 Skipping tweet fetching as counts already match")
                     print("=" * 60 + "\n")
-                    skip_tweet_fetching = True
+                    skip_tweet_fetching = True  # Actually skip tweet fetching when counts match
                 else:
                     diff = abs(db_count - polymarket_count)
                     logger.info(f"Tweet counts don't match: DB={db_count}, Polymarket={polymarket_count}, Difference={diff}")
@@ -1154,7 +1186,8 @@ def run_scheduled_jobs(args):
                     min_prediction=args.min_prediction,
                     quiet=args.quiet,
                     algorithm=args.algorithm,
-                    random_seed=args.random_seed
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution
                 )
                 
             # Run simulation seller if selling not disabled
@@ -1176,7 +1209,8 @@ def run_scheduled_jobs(args):
                     debug=args.debug_seller,
                     quiet=args.quiet,
                     algorithm=args.algorithm,
-                    random_seed=args.random_seed
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution
                 )
         else:
             # Normal mode - real bidding and selling
@@ -1213,7 +1247,8 @@ def run_scheduled_jobs(args):
                             weighted_selection=args.weighted_selection,
                             min_prediction=args.min_prediction,
                             algorithm=args.algorithm,
-                            random_seed=args.random_seed
+                            random_seed=args.random_seed,
+                            show_eachalgo_distribution=args.show_eachalgo_distribution
                         )
             elif prediction_success and not args.no_bidding:
                 # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
@@ -1234,7 +1269,8 @@ def run_scheduled_jobs(args):
                         weighted_selection=args.weighted_selection,
                         min_prediction=args.min_prediction,
                         algorithm=args.algorithm,
-                        random_seed=args.random_seed
+                        random_seed=args.random_seed,
+                        show_eachalgo_distribution=args.show_eachalgo_distribution
                     )
             
             # Run the auto-seller if prediction succeeded and selling not disabled
@@ -1255,7 +1291,8 @@ def run_scheduled_jobs(args):
                     sell_below=args.sell_below,
                     debug=args.debug_seller,
                     algorithm=args.algorithm,
-                    random_seed=args.random_seed
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution
                 )
     
     return tweets_success and prediction_success or skip_tweet_fetching

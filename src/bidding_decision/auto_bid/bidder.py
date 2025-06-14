@@ -25,7 +25,7 @@ class AutoBidder:
     Automated bidder that uses statistical opportunities to place market buy orders.
     """
     
-    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0, algorithm: str = "prophet", random_seed: int = 42):
+    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False):
         """
         Initialize the AutoBidder.
         
@@ -37,6 +37,7 @@ class AutoBidder:
             min_prediction: Minimum prediction percentage required to consider an opportunity (%)
             algorithm: Prediction algorithm to use
             random_seed: Random seed for reproducible predictions
+            show_eachalgo_distribution: Whether to show individual algorithm distributions
         """
         self.threshold = threshold
         self.order_amount = order_amount
@@ -44,6 +45,7 @@ class AutoBidder:
         self.min_prediction = min_prediction
         self.algorithm = algorithm
         self.random_seed = random_seed
+        self.show_eachalgo_distribution = show_eachalgo_distribution
         self.client = None
         
     def connect(self, private_key: Optional[str] = None):
@@ -86,7 +88,8 @@ class AutoBidder:
                     use_prophet=True,
                     threshold=self.threshold,
                     algorithm=self.algorithm,
-                    random_seed=self.random_seed
+                    random_seed=self.random_seed,
+                    show_eachalgo_distribution=self.show_eachalgo_distribution
                 )
             
             if df.empty:

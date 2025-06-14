@@ -84,6 +84,8 @@ def main():
                         help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                         help='Random seed for reproducible predictions (default: 42)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                        help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
     
     args = parser.parse_args()
     
@@ -98,7 +100,8 @@ def main():
         use_weighted_selection=args.weighted_selection,
         min_prediction=args.min_prediction,
         algorithm=args.algorithm,
-        random_seed=args.random_seed
+        random_seed=args.random_seed,
+        show_eachalgo_distribution=args.show_eachalgo_distribution
     )
     
     try:
@@ -114,7 +117,8 @@ def main():
             algorithm=args.algorithm,
             threshold=args.threshold,
             silent=args.no_stats,  # Only suppress output if --no-stats is used
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
+            show_eachalgo_distribution=args.show_eachalgo_distribution
         )
         
         if comparison_df.empty:

@@ -27,7 +27,7 @@ class SimulationSeller:
     
     def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, 
                  algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
-                 debug: bool = False, active_market_only: bool = False):
+                 debug: bool = False, active_market_only: bool = False, show_eachalgo_distribution: bool = False):
         """
         Initialize the SimulationSeller.
         
@@ -38,6 +38,7 @@ class SimulationSeller:
             random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
             active_market_only: Only analyze positions for the active market
+            show_eachalgo_distribution: Whether to show individual algorithm distributions
         """
         self.threshold = threshold
         self.sell_below = sell_below
@@ -45,6 +46,7 @@ class SimulationSeller:
         self.random_seed = random_seed
         self.debug = debug
         self.active_market_only = active_market_only
+        self.show_eachalgo_distribution = show_eachalgo_distribution
         self.run_initializer = RunInitializer()
         
     def get_simulation_positions(self, run_name: str) -> Dict[str, Any]:
@@ -157,7 +159,8 @@ class SimulationSeller:
                 algorithm=self.algorithm,
                 threshold=self.threshold,
                 silent=True,  # Silent to avoid duplicate output
-                random_seed=self.random_seed
+                random_seed=self.random_seed,
+                show_eachalgo_distribution=self.show_eachalgo_distribution
             )
         
         if comparison_df.empty:
@@ -555,7 +558,8 @@ class SimulationSeller:
                     algorithm=self.algorithm,
                     threshold=self.threshold,
                     silent=True,  # Suppress built-in output
-                    random_seed=self.random_seed
+                    random_seed=self.random_seed,
+                    show_eachalgo_distribution=self.show_eachalgo_distribution
                 )
 
                 if not comparison_df.empty:

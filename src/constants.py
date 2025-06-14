@@ -26,9 +26,9 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
 MARKET_ID = "0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00"
-MARKET_HASH = "will-elon-musk-tweet-over-100-times-june-13-june-19"
-EVENT_HASH = "elon-musk-of-tweets-june-13-june-19"
-FULL_EVENT_HASH = "elon-musk-of-tweets-june-13-june-19"
+MARKET_HASH = "will-elon-musk-tweet-over-100-times-june-13-june-20"
+EVENT_HASH = "elon-musk-of-tweets-june-13-june-20"
+FULL_EVENT_HASH = "elon-musk-of-tweets-june-13-june-20"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
@@ -39,7 +39,7 @@ DEFAULT_DATA_PATH = os.path.join(
 
 # Polymarket event timeframe (Eastern Time)
 POLYMARKET_START_TIME = "2025-06-13 12:00:00"
-POLYMARKET_END_TIME = "2025-06-19 12:00:00"
+POLYMARKET_END_TIME = "2025-06-20 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket

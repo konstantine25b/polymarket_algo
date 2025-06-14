@@ -27,7 +27,7 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False):
         """
         Initialize the PositionSeller.
         
@@ -37,12 +37,14 @@ class PositionSeller:
             debug: Whether to show detailed debugging information
             algorithm: Prediction algorithm to use
             random_seed: Random seed for reproducible predictions
+            show_eachalgo_distribution: Whether to show individual algorithm distributions
         """
         self.threshold = threshold
         self.sell_below = sell_below
         self.debug = debug
         self.algorithm = algorithm
         self.random_seed = random_seed
+        self.show_eachalgo_distribution = show_eachalgo_distribution
         self.position_tracker = PolymarketPositionTracker()
         
     def get_all_positions_with_stats(self, comparison_df: Optional[pd.DataFrame] = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
@@ -101,7 +103,8 @@ class PositionSeller:
                 use_prophet=True,
                 threshold=self.threshold,
                 algorithm=self.algorithm,
-                random_seed=self.random_seed
+                random_seed=self.random_seed,
+                show_eachalgo_distribution=self.show_eachalgo_distribution
             )
             
             # Display the comparison table when we generate it (similar to bidder behavior)

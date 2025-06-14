@@ -41,6 +41,12 @@ def main():
         help='Random seed for reproducible results (default: 42)'
     )
     
+    parser.add_argument(
+        '--show-eachalgo-distribution',
+        action='store_true',
+        help='Show probability distribution for each individual algorithm in the ensemble'
+    )
+    
     args = parser.parse_args()
     
     # Parse current time if provided
@@ -63,6 +69,10 @@ def main():
         # Generate enhanced predictions
         print("Generating enhanced predictions...")
         predictions = predictor.generate_enhanced_predictions(current_time=current_time)
+        
+        # Show individual algorithm distributions if requested
+        if args.show_eachalgo_distribution:
+            predictor.print_individual_algorithm_distributions(predictions)
         
         # Print enhanced summary
         predictor.print_enhanced_summary(predictions)

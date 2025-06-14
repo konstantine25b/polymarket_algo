@@ -115,6 +115,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
             # Standard models use generate_predictions
             predictions = predictor.generate_predictions(current_time=current_time)
         
+        # Handle show_eachalgo_distribution for ensemble algorithm
+        if algorithm == "ensemble" and kwargs.get('show_eachalgo_distribution', False):
+            # Calculate and display individual algorithm distributions
+            individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
+            predictor.print_individual_algorithm_distributions(predictions)
+        
         # Convert predictions to the expected format
         prediction_data = {
             'frame_probabilities': {},

@@ -51,6 +51,10 @@ def main():
     parser.add_argument('--random-seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
     
+    parser.add_argument('--show-eachalgo-distribution',
+                        action='store_true',
+                        help='Show probability distribution for each individual algorithm in the ensemble')
+    
     # Model weight arguments with new defaults
     parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
                         help='Weight for Neural Prophet model (default: 0.17)')
@@ -117,6 +121,10 @@ def main():
         
         # Generate predictions
         prediction_summary = predictor.generate_predictions(current_time)
+        
+        # Show individual algorithm distributions if requested
+        if args.show_eachalgo_distribution:
+            predictor.print_individual_algorithm_distributions(prediction_summary)
         
         # Print results
         predictor.print_prediction_summary(prediction_summary)
