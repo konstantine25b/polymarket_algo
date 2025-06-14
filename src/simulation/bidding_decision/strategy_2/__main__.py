@@ -205,6 +205,11 @@ def main():
         action='store_true',
         help='Reduce output to essential information only'
     )
+    parser.add_argument(
+        '--show-eachalgo-distribution',
+        action='store_true',
+        help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)'
+    )
     
     args = parser.parse_args()
     
@@ -244,7 +249,8 @@ def main():
                 min_prediction=args.min_prediction,
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
-                debug=args.debug
+                debug=args.debug,
+                show_eachalgo_distribution=args.show_eachalgo_distribution
             )
             
             if args.analyze_opportunities:
@@ -308,7 +314,8 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                active_market_only=args.active_market_only
+                active_market_only=args.active_market_only,
+                show_eachalgo_distribution=args.show_eachalgo_distribution
             )
             
             if args.update_only:
@@ -358,7 +365,8 @@ def main():
                 min_prediction=args.min_prediction,
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
-                debug=args.debug
+                debug=args.debug,
+                show_eachalgo_distribution=args.show_eachalgo_distribution
             )
             
             seller = SimulationSeller(
@@ -367,7 +375,8 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                active_market_only=args.active_market_only
+                active_market_only=args.active_market_only,
+                show_eachalgo_distribution=args.show_eachalgo_distribution
             )
             
             # Show opportunities analysis
