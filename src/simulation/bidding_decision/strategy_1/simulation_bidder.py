@@ -90,7 +90,7 @@ class SimulationBidder:
         self.show_eachalgo_distribution = show_eachalgo_distribution
         self.run_initializer = RunInitializer()
         
-    def find_best_opportunity(self, update_markets: bool = True, show_stats: bool = True) -> Optional[Dict[str, Any]]:
+    def find_best_opportunity(self, update_markets: bool = True, show_stats: bool = True) -> tuple[Optional[Dict[str, Any]], Optional[pd.DataFrame]]:
         """
         Find the best buy opportunity based on statistical analysis.
         Uses the same logic as the real AutoBidder.
@@ -100,7 +100,7 @@ class SimulationBidder:
             show_stats: Whether to display the full comparison table
             
         Returns:
-            Dict containing opportunity details or None if no opportunity found
+            Tuple of (opportunity dict, comparison dataframe) or (None, None) if no opportunity found
         """
         try:
             # Generate comparison table with the specified threshold and algorithm
@@ -123,7 +123,7 @@ class SimulationBidder:
             
             if df.empty:
                 logger.info("No opportunities found in comparison table.")
-                return None
+                return None, None
                 
             # Find the column name for buy-only opportunities
             buy_only_col = [col for col in df.columns if col.startswith('Buy-Only')][0]
@@ -133,51 +133,51 @@ class SimulationBidder:
             
             if data_rows.empty:
                 logger.info("No specific range opportunities found.")
-                return None
+                return None, None
             
-            # Filter for positive buy opportunities above the threshold
+            # Filter to positive opportunities only
             positive_opps = data_rows[data_rows[buy_only_col] > 0].copy()
             
-            # Check if there are any meaningful buy opportunities above the threshold
-            if positive_opps.empty or positive_opps[buy_only_col].max() <= 0:
-                logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
-                return None
-                
             # Apply minimum prediction filter if set
             if self.min_prediction > 0:
-                prev_count = len(positive_opps)
                 positive_opps = positive_opps[positive_opps['Pred (%)'] >= self.min_prediction].copy()
-                filtered_count = prev_count - len(positive_opps)
-                
-                if filtered_count > 0:
-                    logger.info(f"Filtered out {filtered_count} opportunities below minimum prediction threshold of {self.min_prediction}%")
-                
-                if positive_opps.empty:
-                    logger.info(f"No opportunities meet the minimum prediction threshold of {self.min_prediction}%")
-                    return None
-                
-            best_row = None
             
-            # Use weighted selection if enabled and there are multiple positive opportunities
+            if positive_opps.empty:
+                logger.info(f"No opportunities found above threshold {self.threshold}% and min prediction {self.min_prediction}%")
+                return None, None
+            
+            # Sort by buy-only opportunity descending
+            positive_opps = positive_opps.sort_values(by=buy_only_col, ascending=False)
+            
+            if self.debug:
+                print(f"DEBUG - Found {len(positive_opps)} positive opportunities")
+                for i, (_, row) in enumerate(positive_opps.head(3).iterrows()):
+                    print(f"  {i+1}. {row['Range']}: {row[buy_only_col]:.1f}% edge")
+            
+            # Select opportunity based on strategy
+            selected_probability = None
             if self.use_weighted_selection and len(positive_opps) > 1:
-                # Calculate weights based on opportunity values
+                # Weighted random selection based on opportunity values
                 weights = positive_opps[buy_only_col].values
-                # Normalize weights to probabilities
-                probs = weights / weights.sum()
+                weights = np.maximum(weights, 0.1)  # Ensure minimum weight
                 
-                # Select a row using weighted probabilities
-                selected_idx = np.random.choice(positive_opps.index, p=probs)
-                best_row = positive_opps.loc[selected_idx]
+                # Set random seed for reproducible results
+                np.random.seed(self.random_seed)
                 
-                logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
-                logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
-                           f"(probability: {probs[positive_opps.index.get_loc(selected_idx)]:.2f})")
+                # Weighted random choice
+                probabilities = weights / weights.sum()
+                choice_idx = np.random.choice(len(positive_opps), p=probabilities)
+                best_row = positive_opps.iloc[choice_idx]
+                selected_probability = probabilities[choice_idx]
+                
+                if self.debug:
+                    print(f"DEBUG - Weighted selection chose index {choice_idx}: {best_row['Range']} (probability: {selected_probability:.2f})")
             else:
-                # Find the row with the highest buy-only opportunity (original behavior)
-                best_idx = positive_opps[buy_only_col].idxmax()
-                best_row = positive_opps.loc[best_idx]
+                # Take the best opportunity (highest buy-only value)
+                best_row = positive_opps.iloc[0]
                 
-                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
+                if self.debug:
+                    print(f"DEBUG - Best opportunity selected: {best_row['Range']}")
             
             # Extract information about the opportunity
             opportunity = {
@@ -193,7 +193,8 @@ class SimulationBidder:
                 'algorithm': self.algorithm,
                 'random_seed': self.random_seed,
                 'selection_method': 'weighted' if self.use_weighted_selection else 'best',
-                'total_opportunities': len(positive_opps)
+                'total_opportunities': len(positive_opps),
+                'probability': selected_probability
             }
             
             if self.debug:
@@ -201,14 +202,14 @@ class SimulationBidder:
                 for key, value in opportunity.items():
                     print(f"  {key}: {value}")
             
-            return opportunity
+            return opportunity, df
             
         except Exception as e:
             logger.error(f"Error finding opportunities: {e}")
             if self.debug:
                 import traceback
                 traceback.print_exc()
-            return None
+            return None, None
     
     def place_simulated_order(self, run_name: str, opportunity: Dict[str, Any], dry_run: bool = False) -> bool:
         """
@@ -330,14 +331,33 @@ class SimulationBidder:
             
             # Step 2: Find the best opportunity
             logger.info("Analyzing market opportunities...")
-            opportunity = self.find_best_opportunity(update_markets=False, show_stats=show_stats)  # Already updated above
+            opportunity, comparison_df = self.find_best_opportunity(update_markets=False, show_stats=show_stats)  # Already updated above
             
             if not opportunity:
                 logger.info("❌ No suitable opportunities found for bidding")
                 return False
             
+            # Step 2.5: Store comparison table for bidding operation
+            try:
+                if not comparison_df.empty:
+                    self.run_initializer.add_comparison_table(
+                        run_name=run_name,
+                        comparison_df=comparison_df,
+                        threshold=self.threshold,
+                        operation_type="bidding",
+                        algorithm=self.algorithm,
+                        found_opportunity=opportunity
+                    )
+                    if self.debug:
+                        print(f"DEBUG - Comparison table stored for bidding operation")
+            except Exception as e:
+                logger.warning(f"Failed to store comparison table: {e}")
+            
             # Step 3: Place the simulated order
-            logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge")
+            if opportunity.get('probability') is not None:
+                logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge (probability: {opportunity['probability']:.3f})")
+            else:
+                logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge")
             success = self.place_simulated_order(run_name, opportunity, dry_run=dry_run)
             
             if success and not dry_run:

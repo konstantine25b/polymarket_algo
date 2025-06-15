@@ -165,7 +165,7 @@ class SimulationSeller:
             )
         
         if comparison_df.empty:
-            logger.info("Failed to generate comparison table.")
+            logger.info("No specific range opportunities found in comparison table.")
             return [], comparison_df
             
         # Find the column names for buy-only and sell-only opportunities
@@ -565,6 +565,20 @@ class SimulationSeller:
 
                 if not comparison_df.empty:
                     self.print_stats_table(comparison_df)
+                    
+                    # Store the comparison table in simulation data
+                    try:
+                        self.run_initializer.add_comparison_table(
+                            run_name=run_name,
+                            comparison_df=comparison_df,
+                            threshold=self.threshold,
+                            operation_type="selling",
+                            algorithm=self.algorithm
+                        )
+                        if self.debug:
+                            print(f"DEBUG - Comparison table stored for selling operation")
+                    except Exception as e:
+                        logger.warning(f"Failed to store comparison table: {e}")
                 else:
                     logger.warning("Failed to generate comparison table")
             

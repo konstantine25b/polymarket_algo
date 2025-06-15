@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+import pandas as pd
 
 # Import Polymarket price fetching
 try:
@@ -96,7 +97,8 @@ class RunInitializer:
                     "total_balance_if_all_positions_sold": initial_balance
                 }
             ],
-            "markets": []  # List of all markets: {"market_id": str, "market_name": str, "description": str, "category": str}
+            "markets": [],  # List of all markets: {"market_id": str, "market_name": str, "description": str, "category": str}
+            "comparison_tables": []  # List of comparison tables with timestamps and metadata
         }
         
         # Save to JSON file
@@ -1424,5 +1426,86 @@ class RunInitializer:
         print(f"   💰 New total balance: ${run_data['total_balance']:,.2f}")
         print(f"   📈 Total market value: ${total_current_value:,.2f}")
         print(f"   📁 Run: {run_name}")
+        
+        return True
+    
+    def add_comparison_table(
+        self,
+        run_name: str,
+        comparison_df,
+        threshold: float,
+        operation_type: str,
+        algorithm: str = "unknown",
+        found_opportunity: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Add a comparison table to the simulation run data.
+        
+        Args:
+            run_name: Name of the simulation run
+            comparison_df: DataFrame containing the comparison table
+            threshold: Threshold used for the comparison
+            operation_type: Type of operation ("bidding" or "selling")
+            algorithm: Algorithm used for predictions
+            found_opportunity: Optional dict with details of the found opportunity
+            
+        Returns:
+            bool: True if comparison table was added successfully
+        """
+        json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
+        
+        if not json_file_path.exists():
+            print(f"❌ Run '{run_name}' not found!")
+            return False
+        
+        # Load existing data
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            run_data = json.load(f)
+        
+        # Ensure comparison_tables field exists (for backward compatibility)
+        if "comparison_tables" not in run_data:
+            run_data["comparison_tables"] = []
+        
+        # Convert DataFrame to JSON-serializable format
+        comparison_data = []
+        for _, row in comparison_df.iterrows():
+            row_dict = {}
+            for col, value in row.items():
+                # Handle NaN values and convert to JSON-serializable types
+                if pd.isna(value):
+                    row_dict[col] = None
+                elif isinstance(value, (int, float)):
+                    row_dict[col] = float(value) if not pd.isna(value) else None
+                else:
+                    row_dict[col] = str(value)
+            comparison_data.append(row_dict)
+        
+        # Create comparison table entry
+        timestamp = datetime.now().isoformat()
+        comparison_entry = {
+            "timestamp": timestamp,
+            "threshold": threshold,
+            "operation_type": operation_type,
+            "algorithm": algorithm,
+            "data": comparison_data
+        }
+        
+        # Add opportunity details if provided
+        if found_opportunity:
+            comparison_entry["found_opportunity"] = {
+                "range": found_opportunity.get("range"),
+                "prediction": found_opportunity.get("prediction"),
+                "opportunity_edge": found_opportunity.get("opportunity"),
+                "selection_method": found_opportunity.get("selection_method"),
+                "total_opportunities": found_opportunity.get("total_opportunities"),
+                "probability": found_opportunity.get("probability")  # Will be None for non-weighted selection
+            }
+        
+        # Add to comparison tables list
+        run_data["comparison_tables"].append(comparison_entry)
+        
+        # Save updated data
+        with open(json_file_path, 'w', encoding='utf-8') as f:
+            json.dump(run_data, f, indent=2, ensure_ascii=False)
         
         return True 
