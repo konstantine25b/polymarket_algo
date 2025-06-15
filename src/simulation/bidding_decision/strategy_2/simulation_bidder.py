@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, Dict, Any
 import numpy as np
 from pathlib import Path
+import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.simulation.initialization.run_initializer import RunInitializer
@@ -158,18 +159,24 @@ class SimulationBidder:
                 
             best_row = None
             selected_probability = None
+            selection_method_used = 'best'  # Default
             
-            # Use weighted selection if enabled and there are multiple positive opportunities
-            if self.use_weighted_selection and len(positive_opps) > 1:
+            # Use weighted selection if enabled
+            if self.use_weighted_selection:
+                # Use separate random generator for weighted choice to avoid interference from prediction algorithms
+                # Create a new random generator instance with current time as seed for true randomness
+                selection_rng = np.random.RandomState(int(time.time() * 1000000) % 2**32)
+                
                 # Calculate weights based on opportunity values
                 weights = positive_opps[buy_only_col].values
                 # Normalize weights to probabilities
                 probs = weights / weights.sum()
                 
                 # Select a row using weighted probabilities
-                selected_idx = np.random.choice(positive_opps.index, p=probs)
+                selected_idx = selection_rng.choice(positive_opps.index, p=probs)
                 best_row = positive_opps.loc[selected_idx]
                 selected_probability = probs[positive_opps.index.get_loc(selected_idx)]
+                selection_method_used = 'weighted'
                 
                 logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
                 logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
@@ -178,6 +185,7 @@ class SimulationBidder:
                 # Find the row with the highest buy-only opportunity (original behavior)
                 best_idx = positive_opps[buy_only_col].idxmax()
                 best_row = positive_opps.loc[best_idx]
+                selection_method_used = 'best'
                 
                 logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
             
@@ -194,7 +202,7 @@ class SimulationBidder:
                 'min_prediction': self.min_prediction,
                 'algorithm': self.algorithm,
                 'random_seed': self.random_seed,
-                'selection_method': 'weighted' if self.use_weighted_selection else 'best',
+                'selection_method': selection_method_used,
                 'total_opportunities': len(positive_opps),
                 'probability': selected_probability
             }
@@ -250,13 +258,23 @@ class SimulationBidder:
             logger.info(f"Order amount: ${self.order_amount} USD at {opportunity['ask']}% (~${ask_price:.4f} per share)")
             logger.info(f"Shares to buy: {shares_to_buy:.2f}")
             
+            # Prepare opportunity details for transaction history
+            opportunity_details = {
+                'prediction': opportunity.get('prediction'),
+                'opportunity_edge': opportunity.get('opportunity'),
+                'selection_method': opportunity.get('selection_method'),
+                'total_opportunities': opportunity.get('total_opportunities'),
+                'probability': opportunity.get('probability')
+            }
+            
             # Execute the simulated order using RunInitializer
             # Note: The add_position method automatically uses the market's current ask price
             success = self.run_initializer.add_position(
                 run_name=run_name,
                 market_id=token_id,
                 num_shares=shares_to_buy,
-                allow_negative_balance=False  # Don't allow negative balance by default
+                allow_negative_balance=False,  # Don't allow negative balance by default
+                opportunity_details=opportunity_details
             )
             
             if success:

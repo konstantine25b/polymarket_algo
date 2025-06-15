@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, Dict, Any
 import numpy as np
 from pathlib import Path
+import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.simulation.initialization.run_initializer import RunInitializer
@@ -156,25 +157,29 @@ class SimulationBidder:
             
             # Select opportunity based on strategy
             selected_probability = None
-            if self.use_weighted_selection and len(positive_opps) > 1:
+            selection_method_used = 'best'  # Default
+            
+            if self.use_weighted_selection:
                 # Weighted random selection based on opportunity values
                 weights = positive_opps[buy_only_col].values
                 weights = np.maximum(weights, 0.1)  # Ensure minimum weight
                 
-                # Set random seed for reproducible results
-                np.random.seed(self.random_seed)
+                # Use separate random generator for weighted choice to avoid interference from prediction algorithms
+                # Create a new random generator instance with current time as seed for true randomness
+                selection_rng = np.random.RandomState(int(time.time() * 1000000) % 2**32)
                 
-                # Weighted random choice
                 probabilities = weights / weights.sum()
-                choice_idx = np.random.choice(len(positive_opps), p=probabilities)
+                choice_idx = selection_rng.choice(len(positive_opps), p=probabilities)
                 best_row = positive_opps.iloc[choice_idx]
                 selected_probability = probabilities[choice_idx]
+                selection_method_used = 'weighted'
                 
                 if self.debug:
                     print(f"DEBUG - Weighted selection chose index {choice_idx}: {best_row['Range']} (probability: {selected_probability:.2f})")
             else:
                 # Take the best opportunity (highest buy-only value)
                 best_row = positive_opps.iloc[0]
+                selection_method_used = 'best'
                 
                 if self.debug:
                     print(f"DEBUG - Best opportunity selected: {best_row['Range']}")
@@ -192,7 +197,7 @@ class SimulationBidder:
                 'min_prediction': self.min_prediction,
                 'algorithm': self.algorithm,
                 'random_seed': self.random_seed,
-                'selection_method': 'weighted' if self.use_weighted_selection else 'best',
+                'selection_method': selection_method_used,
                 'total_opportunities': len(positive_opps),
                 'probability': selected_probability
             }
@@ -248,13 +253,23 @@ class SimulationBidder:
             logger.info(f"Order amount: ${self.order_amount} USD at {opportunity['ask']}% (~${ask_price:.4f} per share)")
             logger.info(f"Shares to buy: {shares_to_buy:.2f}")
             
+            # Prepare opportunity details for transaction history
+            opportunity_details = {
+                'prediction': opportunity.get('prediction'),
+                'opportunity_edge': opportunity.get('opportunity'),
+                'selection_method': opportunity.get('selection_method'),
+                'total_opportunities': opportunity.get('total_opportunities'),
+                'probability': opportunity.get('probability')
+            }
+            
             # Execute the simulated order using RunInitializer
             # Note: The add_position method automatically uses the market's current ask price
             success = self.run_initializer.add_position(
                 run_name=run_name,
                 market_id=token_id,
                 num_shares=shares_to_buy,
-                allow_negative_balance=False  # Don't allow negative balance by default
+                allow_negative_balance=False,  # Don't allow negative balance by default
+                opportunity_details=opportunity_details
             )
             
             if success:

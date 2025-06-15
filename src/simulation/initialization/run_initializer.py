@@ -218,7 +218,8 @@ class RunInitializer:
         run_name: str,
         market_id: str,
         num_shares: float,
-        allow_negative_balance: bool = False
+        allow_negative_balance: bool = False,
+        opportunity_details: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Add a new position to an existing run or update existing position.
@@ -230,6 +231,7 @@ class RunInitializer:
             market_id: Unique identifier for the market (must exist)
             num_shares: Number of shares purchased (can be fractional, must be positive)
             allow_negative_balance: Whether to allow transactions that result in negative balance
+            opportunity_details: Optional dict with opportunity analysis details (prediction, opportunity_edge, etc.)
             
         Returns:
             bool: True if position was added successfully
@@ -292,7 +294,8 @@ class RunInitializer:
             "type": "BUY",
             "num_shares": num_shares,
             "price_per_share": purchase_price,
-            "total_amount": total_cost
+            "total_amount": total_cost,
+            "opportunity_details": opportunity_details
         }
         
         if existing_position_idx is not None:
@@ -410,7 +413,8 @@ class RunInitializer:
             "market_name": market_name,
             "num_shares": num_shares,
             "price_per_share": purchase_price,
-            "total_amount": total_cost
+            "total_amount": total_cost,
+            "opportunity_details": opportunity_details
         }
         run_data["transactions"].append(transaction)
         

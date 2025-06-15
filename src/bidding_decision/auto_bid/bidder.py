@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, Dict, Any
 import random
 import numpy as np
+import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.polymarket.bidding import PolymarketClient
@@ -128,25 +129,34 @@ class AutoBidder:
                     return None
                 
             best_row = None
+            selected_probability = None
+            selection_method_used = None
             
             # Use weighted selection if enabled and there are multiple positive opportunities
             if self.use_weighted_selection and len(positive_opps) > 1:
+                # Use separate random generator for weighted choice to avoid interference from prediction algorithms
+                # Create a new random generator instance with current time as seed for true randomness
+                selection_rng = np.random.RandomState(int(time.time() * 1000000) % 2**32)
+                
                 # Calculate weights based on opportunity values
                 weights = positive_opps[buy_only_col].values
                 # Normalize weights to probabilities
                 probs = weights / weights.sum()
                 
-                # Select a row using weighted probabilities
-                selected_idx = np.random.choice(positive_opps.index, p=probs)
+                # Select a row using weighted probabilities with separate random generator
+                selected_idx = selection_rng.choice(positive_opps.index, p=probs)
                 best_row = positive_opps.loc[selected_idx]
+                selected_probability = probs[positive_opps.index.get_loc(selected_idx)]
+                selection_method_used = 'weighted'
                 
                 logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
                 logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
-                           f"(probability: {probs[positive_opps.index.get_loc(selected_idx)]:.2f})")
+                           f"(probability: {selected_probability:.2f})")
             else:
                 # Find the row with the highest buy-only opportunity (original behavior)
                 best_idx = positive_opps[buy_only_col].idxmax()
                 best_row = positive_opps.loc[best_idx]
+                selection_method_used = 'best'
                 
                 logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
             
@@ -161,9 +171,13 @@ class AutoBidder:
                 'difference': best_row['Diff (%)'],
                 'threshold': self.threshold,  # Add threshold for reference
                 'min_prediction': self.min_prediction,  # Add min_prediction for reference
-                'selection_method': 'weighted' if self.use_weighted_selection else 'best',
+                'selection_method': selection_method_used,
                 'total_opportunities': len(positive_opps)
             }
+            
+            # Add probability if weighted selection was used
+            if selected_probability is not None:
+                opportunity['probability'] = selected_probability
             
             return opportunity
             
