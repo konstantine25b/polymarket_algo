@@ -32,7 +32,7 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 days remain in the market
-python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run --show-eachalgo-distribution
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --show-eachalgo-distribution --dry-run 
 # Option explanations:
 # --algorithm ensemble         : Use ensemble method combining all prediction algorithms for maximum accuracy
 # --random-seed 42             : Set random seed for reproducible predictions and consistent trading decisions
