@@ -54,6 +54,14 @@ Options:
     --strategy STRATEGY    Strategy to use for simulation (default: strategy_1)
     --sim-balance FLOAT    Initial balance for new simulation runs (default: 1000.0)
     --show-eachalgo-distribution Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)
+    --loss-threshold-1     First loss threshold percentage (default: -40.0)
+    --loss-sell-1        Percentage of position to sell at first loss threshold (default: 50.0)
+    --loss-threshold-2     Second loss threshold percentage (default: -60.0)
+    --loss-sell-2        Percentage of position to sell at second loss threshold (default: 100.0)
+    --gain-threshold-1    First gain threshold percentage (default: 40.0)
+    --gain-sell-1       Percentage of position to sell at first gain threshold (default: 40.0)
+    --gain-threshold-2    Second gain threshold percentage (default: 80.0)
+    --gain-sell-2       Percentage of position to sell at second gain threshold (default: 40.0)
 """
 
 import argparse
@@ -165,6 +173,22 @@ def setup_argparse():
                         help='Initial balance for new simulation runs (default: 1000.0)')
     parser.add_argument('--show-eachalgo-distribution', action='store_true',
                         help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
+    parser.add_argument('--loss-threshold-1', type=float, default=-40.0,
+                        help='First loss threshold percentage (default: -40.0)')
+    parser.add_argument('--loss-sell-1', type=float, default=50.0,
+                        help='Percentage of position to sell at first loss threshold (default: 50.0)')
+    parser.add_argument('--loss-threshold-2', type=float, default=-60.0,
+                        help='Second loss threshold percentage (default: -60.0)')
+    parser.add_argument('--loss-sell-2', type=float, default=100.0,
+                        help='Percentage of position to sell at second loss threshold (default: 100.0)')
+    parser.add_argument('--gain-threshold-1', type=float, default=40.0,
+                        help='First gain threshold percentage (default: 40.0)')
+    parser.add_argument('--gain-sell-1', type=float, default=40.0,
+                        help='Percentage of position to sell at first gain threshold (default: 40.0)')
+    parser.add_argument('--gain-threshold-2', type=float, default=80.0,
+                        help='Second gain threshold percentage (default: 80.0)')
+    parser.add_argument('--gain-sell-2', type=float, default=40.0,
+                        help='Percentage of position to sell at second gain threshold (default: 40.0)')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -490,7 +514,9 @@ def initialize_simulation_run(run_name, balance, strategy="strategy_1"):
 
 def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount=1.0, dry_run=False, 
                          show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False,
-                         algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False):
+                         algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False,
+                         loss_threshold_1=-40.0, loss_sell_1=50.0, loss_threshold_2=-60.0, loss_sell_2=100.0,
+                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0):
     """Run the simulation bidder for the specified strategy.
     
     Args:
@@ -506,6 +532,14 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
         show_eachalgo_distribution: Whether to show individual algorithm distributions
+        loss_threshold_1: First loss threshold percentage (for strategy_2)
+        loss_sell_1: Percentage to sell at first loss threshold (for strategy_2)
+        loss_threshold_2: Second loss threshold percentage (for strategy_2)
+        loss_sell_2: Percentage to sell at second loss threshold (for strategy_2)
+        gain_threshold_1: First gain threshold percentage (for strategy_2)
+        gain_sell_1: Percentage to sell at first gain threshold (for strategy_2)
+        gain_threshold_2: Second gain threshold percentage (for strategy_2)
+        gain_sell_2: Percentage to sell at second gain threshold (for strategy_2)
     
     Returns:
         bool: Whether the bidding was successful
@@ -520,6 +554,20 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add stop loss parameters for strategy_2
+    if strategy == "strategy_2":
+        cmd.extend([
+            f"--loss-threshold-1={loss_threshold_1}",
+            f"--loss-sell-1={loss_sell_1}",
+            f"--loss-threshold-2={loss_threshold_2}",
+            f"--loss-sell-2={loss_sell_2}",
+            f"--gain-threshold-1={gain_threshold_1}",
+            f"--gain-sell-1={gain_sell_1}",
+            f"--gain-threshold-2={gain_threshold_2}",
+            f"--gain-sell-2={gain_sell_2}"
+        ])
+        logger.info(f"Added stop loss parameters: loss thresholds {loss_threshold_1}%/{loss_threshold_2}%, gain thresholds {gain_threshold_1}%/{gain_threshold_2}%")
     
     if dry_run:
         cmd.append("--dry-run")
@@ -559,7 +607,9 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
     return process.returncode == 0
 
 def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
-                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False):
+                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False,
+                         loss_threshold_1=-40.0, loss_sell_1=50.0, loss_threshold_2=-60.0, loss_sell_2=100.0,
+                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0):
     """Run the simulation seller for the specified strategy.
     
     Args:
@@ -574,6 +624,14 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
         show_eachalgo_distribution: Whether to show individual algorithm distributions
+        loss_threshold_1: First loss threshold percentage (for strategy_2)
+        loss_sell_1: Percentage to sell at first loss threshold (for strategy_2)
+        loss_threshold_2: Second loss threshold percentage (for strategy_2)
+        loss_sell_2: Percentage to sell at second loss threshold (for strategy_2)
+        gain_threshold_1: First gain threshold percentage (for strategy_2)
+        gain_sell_1: Percentage to sell at first gain threshold (for strategy_2)
+        gain_threshold_2: Second gain threshold percentage (for strategy_2)
+        gain_sell_2: Percentage to sell at second gain threshold (for strategy_2)
     
     Returns:
         bool: Whether the selling was successful
@@ -587,6 +645,20 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add stop loss parameters for strategy_2
+    if strategy == "strategy_2":
+        cmd.extend([
+            f"--loss-threshold-1={loss_threshold_1}",
+            f"--loss-sell-1={loss_sell_1}",
+            f"--loss-threshold-2={loss_threshold_2}",
+            f"--loss-sell-2={loss_sell_2}",
+            f"--gain-threshold-1={gain_threshold_1}",
+            f"--gain-sell-1={gain_sell_1}",
+            f"--gain-threshold-2={gain_threshold_2}",
+            f"--gain-sell-2={gain_sell_2}"
+        ])
+        logger.info(f"Added stop loss parameters: loss thresholds {loss_threshold_1}%/{loss_threshold_2}%, gain thresholds {gain_threshold_1}%/{gain_threshold_2}%")
     
     if dry_run:
         cmd.append("--dry-run")
@@ -1198,7 +1270,15 @@ def run_scheduled_jobs(args):
                     quiet=args.quiet,
                     algorithm=args.algorithm,
                     random_seed=args.random_seed,
-                    show_eachalgo_distribution=args.show_eachalgo_distribution
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    loss_threshold_1=args.loss_threshold_1,
+                    loss_sell_1=args.loss_sell_1,
+                    loss_threshold_2=args.loss_threshold_2,
+                    loss_sell_2=args.loss_sell_2,
+                    gain_threshold_1=args.gain_threshold_1,
+                    gain_sell_1=args.gain_sell_1,
+                    gain_threshold_2=args.gain_threshold_2,
+                    gain_sell_2=args.gain_sell_2
                 )
                 
             # Run simulation seller if selling not disabled
@@ -1221,7 +1301,15 @@ def run_scheduled_jobs(args):
                     quiet=args.quiet,
                     algorithm=args.algorithm,
                     random_seed=args.random_seed,
-                    show_eachalgo_distribution=args.show_eachalgo_distribution
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    loss_threshold_1=args.loss_threshold_1,
+                    loss_sell_1=args.loss_sell_1,
+                    loss_threshold_2=args.loss_threshold_2,
+                    loss_sell_2=args.loss_sell_2,
+                    gain_threshold_1=args.gain_threshold_1,
+                    gain_sell_1=args.gain_sell_1,
+                    gain_threshold_2=args.gain_threshold_2,
+                    gain_sell_2=args.gain_sell_2
                 )
         else:
             # Normal mode - real bidding and selling

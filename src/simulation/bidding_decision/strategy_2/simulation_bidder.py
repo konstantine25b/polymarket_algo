@@ -12,6 +12,7 @@ import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.simulation.initialization.run_initializer import RunInitializer
+from src.simulation.bidding_decision.strategy_2.stop_loss_manager import StopLossManager
 
 # Configure logging
 logging.basicConfig(
@@ -62,12 +63,22 @@ class SimulationBidder:
     """
     Automated bidder that uses statistical opportunities to place simulated buy orders.
     Replicates the exact logic of the real AutoBidder but operates on simulation JSON files.
+    Includes automatic stop loss checking after placing orders.
     """
     
     def __init__(self, threshold: float = 0.0, order_amount: float = 10.0, 
                  use_weighted_selection: bool = False, min_prediction: float = 0.0, 
                  algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
-                 debug: bool = False, show_eachalgo_distribution: bool = False):
+                 debug: bool = False, show_eachalgo_distribution: bool = False,
+                 enable_stop_loss: bool = True,
+                 loss_threshold_1: float = -40.0,
+                 loss_sell_percentage_1: float = 50.0,
+                 loss_threshold_2: float = -60.0,
+                 loss_sell_percentage_2: float = 100.0,
+                 gain_threshold_1: float = 40.0,
+                 gain_sell_percentage_1: float = 40.0,
+                 gain_threshold_2: float = 80.0,
+                 gain_sell_percentage_2: float = 40.0):
         """
         Initialize the SimulationBidder.
         
@@ -80,6 +91,15 @@ class SimulationBidder:
             random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
             show_eachalgo_distribution: Show probability distribution for each individual algorithm
+            enable_stop_loss: Whether to automatically check and execute stop loss orders after bidding
+            loss_threshold_1: First loss threshold percentage (default: -40%)
+            loss_sell_percentage_1: Percentage to sell at first loss threshold (default: 50%)
+            loss_threshold_2: Second loss threshold percentage (default: -60%)
+            loss_sell_percentage_2: Percentage to sell at second loss threshold (default: 100%)
+            gain_threshold_1: First gain threshold percentage (default: 40%)
+            gain_sell_percentage_1: Percentage to sell at first gain threshold (default: 40%)
+            gain_threshold_2: Second gain threshold percentage (default: 80%)
+            gain_sell_percentage_2: Percentage to sell at second gain threshold (default: 40%)
         """
         self.threshold = threshold
         self.order_amount = order_amount
@@ -90,6 +110,26 @@ class SimulationBidder:
         self.debug = debug
         self.show_eachalgo_distribution = show_eachalgo_distribution
         self.run_initializer = RunInitializer()
+        
+        # Stop loss configuration
+        self.enable_stop_loss = enable_stop_loss
+        if self.enable_stop_loss:
+            self.stop_loss_manager = StopLossManager(
+                loss_threshold_1=loss_threshold_1,
+                loss_sell_percentage_1=loss_sell_percentage_1,
+                loss_threshold_2=loss_threshold_2,
+                loss_sell_percentage_2=loss_sell_percentage_2,
+                gain_threshold_1=gain_threshold_1,
+                gain_sell_percentage_1=gain_sell_percentage_1,
+                gain_threshold_2=gain_threshold_2,
+                gain_sell_percentage_2=gain_sell_percentage_2,
+                debug=debug
+            )
+        else:
+            self.stop_loss_manager = None
+            
+        if self.debug and self.enable_stop_loss:
+            print("🛑 Stop loss functionality enabled in SimulationBidder")
         
     def find_best_opportunity(self, update_markets: bool = True, show_stats: bool = True) -> tuple[Optional[Dict[str, Any]], Optional[pd.DataFrame]]:
         """
@@ -379,8 +419,52 @@ class SimulationBidder:
             
             if success and not dry_run:
                 logger.info("🎉 Simulation bidding completed successfully!")
+                
+                # Step 4: Automatically check and execute stop loss orders after successful bidding
+                if self.enable_stop_loss and self.stop_loss_manager:
+                    logger.info("🛑 Checking for stop loss triggers after bidding...")
+                    try:
+                        # Update market prices to get fresh position values for stop loss check
+                        self.update_simulation_markets(run_name)
+                        
+                        # Execute stop loss check
+                        stop_loss_executed = self.stop_loss_manager.execute_stop_loss_orders(
+                            run_name=run_name,
+                            dry_run=False  # Execute actual stop loss orders after real bidding
+                        )
+                        
+                        if stop_loss_executed:
+                            logger.info(f"🛑 Stop loss orders executed: {len(stop_loss_executed)}")
+                            for executed_order in stop_loss_executed:
+                                print(f"  ✅ {executed_order.get('action', 'Stop loss')} executed for {executed_order.get('market_name', 'unknown market')}")
+                        else:
+                            logger.info("🛑 No stop loss triggers found")
+                            
+                    except Exception as e:
+                        logger.warning(f"Stop loss check failed: {e}")
+                        if self.debug:
+                            import traceback
+                            traceback.print_exc()
+                
             elif success and dry_run:
                 logger.info("🔍 Dry run completed - no actual changes made")
+                
+                # For dry run, also show what stop loss would do
+                if self.enable_stop_loss and self.stop_loss_manager:
+                    logger.info("🛑 Checking what stop loss would do (dry run)...")
+                    try:
+                        stop_loss_executed = self.stop_loss_manager.execute_stop_loss_orders(
+                            run_name=run_name,
+                            dry_run=True  # Dry run for stop loss as well
+                        )
+                        
+                        if stop_loss_executed:
+                            logger.info(f"🔍 Stop loss would execute: {len(stop_loss_executed)} orders")
+                        else:
+                            logger.info("🔍 No stop loss triggers would be found")
+                            
+                    except Exception as e:
+                        logger.warning(f"Stop loss dry run check failed: {e}")
                 
             return success
             

@@ -570,7 +570,8 @@ class RunInitializer:
             existing_position["transaction_history"].append(sell_transaction)
             
             remaining_shares = current_shares - num_shares
-            remaining_total_invested = total_invested - cost_basis_sold
+            # FIXED: Keep total_invested as cumulative amount invested, don't reduce it
+            remaining_total_invested = total_invested  # Don't reduce total_invested when selling
             
             # Calculate current values for remaining position
             current_market_value = remaining_shares * market["current_price"]

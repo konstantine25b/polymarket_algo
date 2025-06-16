@@ -8,6 +8,7 @@ Usage examples:
     python -m src.simulation.bidding_decision.strategy_1 --run test_run --algorithm ensemble --random-seed 42
     python -m src.simulation.bidding_decision.strategy_1 --sell test_run --threshold 2.0 --auto-sell --algorithm enhanced_facebook_prophet
     python -m src.simulation.bidding_decision.strategy_1 --analyze test_run --debug --algorithm neural_prophet
+    python -m src.simulation.bidding_decision.strategy_1 --stop-loss test_run --dry-run
 """
 
 import argparse
@@ -15,6 +16,7 @@ import sys
 import logging
 from .simulation_bidder import SimulationBidder
 from .simulation_seller import SimulationSeller
+from .stop_loss_manager import StopLossManager
 
 # Configure logging
 logging.basicConfig(
@@ -48,6 +50,11 @@ def main():
         action='store_true',
         help='Analyze current market opportunities without any simulation run'
     )
+    parser.add_argument(
+        '--stop-loss', 
+        metavar='RUN_NAME',
+        help='Execute stop loss orders for positions that have triggered thresholds'
+    )
     
     # Algorithm parameters
     parser.add_argument(
@@ -63,6 +70,64 @@ def main():
         type=int, 
         default=42,
         help='Random seed for reproducible results (default: 42)'
+    )
+    
+    # Stop Loss parameters
+    parser.add_argument(
+        '--loss-threshold-1', 
+        type=float, 
+        default=-40.0,
+        metavar='PERCENT',
+        help='First loss threshold percentage (default: -40.0%%)'
+    )
+    parser.add_argument(
+        '--loss-sell-1', 
+        type=float, 
+        default=50.0,
+        metavar='PERCENT',
+        help='Percentage to sell at first loss threshold (default: 50.0%%)'
+    )
+    parser.add_argument(
+        '--loss-threshold-2', 
+        type=float, 
+        default=-60.0,
+        metavar='PERCENT',
+        help='Second loss threshold percentage (default: -60.0%%)'
+    )
+    parser.add_argument(
+        '--loss-sell-2', 
+        type=float, 
+        default=100.0,
+        metavar='PERCENT',
+        help='Percentage to sell at second loss threshold (default: 100.0%%)'
+    )
+    parser.add_argument(
+        '--gain-threshold-1', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='First gain threshold percentage (default: 40.0%%)'
+    )
+    parser.add_argument(
+        '--gain-sell-1', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='Percentage to sell at first gain threshold (default: 40.0%%)'
+    )
+    parser.add_argument(
+        '--gain-threshold-2', 
+        type=float, 
+        default=80.0,
+        metavar='PERCENT',
+        help='Second gain threshold percentage (default: 80.0%%)'
+    )
+    parser.add_argument(
+        '--gain-sell-2', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='Percentage to sell at second gain threshold (default: 40.0%%)'
     )
     
     # Scheduler-compatible parameters (newly added)
@@ -240,7 +305,41 @@ def main():
     
     try:
         # Handle different action types
-        if args.run or args.analyze_opportunities:
+        if args.stop_loss:
+            # Execute stop loss functionality
+            stop_loss_manager = StopLossManager(
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2,
+                debug=args.debug
+            )
+            
+            print(f"🛑 Executing stop loss analysis on simulation run: {args.stop_loss}")
+            if args.dry_run:
+                print("🔍 DRY RUN MODE - No actual trades will be executed")
+            
+            print(f"Stop Loss Thresholds:")
+            print(f"  Loss: {args.loss_threshold_1}% -> sell {args.loss_sell_1}%")
+            print(f"  Loss: {args.loss_threshold_2}% -> sell {args.loss_sell_2}%")
+            print(f"  Gain: {args.gain_threshold_1}% -> sell {args.gain_sell_1}%")
+            print(f"  Gain: {args.gain_threshold_2}% -> sell {args.gain_sell_2}%")
+            
+            executed_orders = stop_loss_manager.execute_stop_loss_orders(
+                run_name=args.stop_loss,
+                dry_run=args.dry_run
+            )
+            
+            # Show stop loss history
+            stop_loss_manager.print_stop_loss_summary(args.stop_loss)
+            
+            sys.exit(0 if executed_orders is not None else 1)
+            
+        elif args.run or args.analyze_opportunities:
             # Execute bidding strategy or analyze opportunities
             bidder = SimulationBidder(
                 threshold=args.threshold,
@@ -250,7 +349,16 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable automatic stop loss checking after bidding
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             if args.analyze_opportunities:
@@ -315,7 +423,16 @@ def main():
                 random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             if args.update_only:
@@ -366,7 +483,16 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             seller = SimulationSeller(
@@ -376,7 +502,16 @@ def main():
                 random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             # Show opportunities analysis

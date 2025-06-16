@@ -1,6 +1,6 @@
-# Simulation Strategy 2 - Bidding Decision System
+# Simulation Strategy 2 - Bidding Decision System with Stop Loss
 
-This package provides a simulation-based bidding decision system that replicates the real-world auto bidding functionality but operates on simulated JSON data instead of making actual trades.
+This package provides a simulation-based bidding decision system that replicates the real-world auto bidding functionality but operates on simulated JSON data instead of making actual trades. **Strategy 2 includes advanced stop loss functionality** for automated risk management.
 
 ## Overview
 
@@ -10,6 +10,7 @@ The simulation strategy uses the same statistical analysis as the real `src/bidd
 - Executes "trades" in simulation JSON files instead of real markets
 - Tracks all positions, transactions, and balance changes in the simulation
 - **Matches real auto_bid behavior exactly** with identical CLI options and table display
+- **🛑 Includes comprehensive stop loss functionality** for automated risk management
 
 ## Features
 
@@ -21,6 +22,181 @@ The simulation strategy uses the same statistical analysis as the real `src/bidd
 - **Risk Management**: Applies the same thresholds and filters as the real system
 - **Auto-Sell Functionality**: Automatically execute sell orders with `--auto-sell`
 - **Weighted Selection**: Probabilistic selection from multiple opportunities
+- **🛑 Stop Loss System**: Automated position management with configurable thresholds
+- **🛑 Profit Taking**: Automatic profit realization at specified gain levels
+- **🛑 Loss Protection**: Automatic position reduction/liquidation at loss thresholds
+- **🛑 History Tracking**: Complete audit trail of all stop loss actions
+
+## 🛑 Stop Loss Functionality
+
+### Stop Loss Overview
+
+Strategy 2 includes a comprehensive **automated stop loss system** that manages risk by automatically selling positions when they reach predefined profit or loss thresholds. This feature helps protect against large losses and lock in profits.
+
+### Default Stop Loss Configuration
+
+```
+Loss Thresholds (Stop Loss Protection):
+- Sell 50% of position at -40% loss (partial protection)
+- Sell 100% of position at -60% loss (full liquidation)
+
+Gain Thresholds (Profit Taking):
+- Sell 40% of position at +40% gain (initial profit taking)
+- Sell 40% of position at +80% gain (additional profit taking)
+```
+
+### Stop Loss Features
+
+- **🔒 Loss Protection**: Automatically reduce or liquidate losing positions
+- **💰 Profit Taking**: Lock in gains at specified profit levels
+- **⚙️ Fully Configurable**: All thresholds and sell percentages are customizable
+- **📚 History Tracking**: Complete audit trail with timestamps and reasoning
+- **🧪 Dry Run Mode**: Test stop loss logic without executing trades
+- **🔄 Duplicate Prevention**: Prevents re-execution of previously triggered stops
+- **📊 Detailed Analysis**: Shows current P&L and trigger analysis
+- **🔗 Integrated**: Seamlessly works with regular selling strategy
+
+### Stop Loss Usage Examples
+
+#### Basic Stop Loss Commands
+
+```bash
+# Execute stop loss with default thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name>
+
+# Test stop loss logic first (RECOMMENDED)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> --dry-run
+
+# Detailed stop loss analysis and execution
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> --debug
+
+# View stop loss history only
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> --dry-run
+```
+
+#### Custom Stop Loss Thresholds
+
+```bash
+# Conservative stop loss (tighter risk management)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> \
+    --loss-threshold-1 -20.0 --loss-sell-1 30.0 \
+    --loss-threshold-2 -40.0 --loss-sell-2 100.0 \
+    --gain-threshold-1 20.0 --gain-sell-1 25.0 \
+    --gain-threshold-2 50.0 --gain-sell-2 25.0
+
+# Aggressive stop loss (wider risk tolerance)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> \
+    --loss-threshold-1 -60.0 --loss-sell-1 75.0 \
+    --loss-threshold-2 -80.0 --loss-sell-2 100.0 \
+    --gain-threshold-1 60.0 --gain-sell-1 50.0 \
+    --gain-threshold-2 120.0 --gain-sell-2 50.0
+
+# Profit-focused strategy (minimal loss protection, aggressive profit taking)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> \
+    --loss-threshold-1 -80.0 --loss-sell-1 100.0 \
+    --loss-threshold-2 -95.0 --loss-sell-2 100.0 \
+    --gain-threshold-1 10.0 --gain-sell-1 30.0 \
+    --gain-threshold-2 25.0 --gain-sell-2 40.0
+```
+
+### Stop Loss CLI Parameters
+
+```bash
+# Loss threshold parameters
+--loss-threshold-1 PERCENT    # First loss threshold (default: -40.0%)
+--loss-sell-1 PERCENT         # Percentage to sell at first loss (default: 50.0%)
+--loss-threshold-2 PERCENT    # Second loss threshold (default: -60.0%)
+--loss-sell-2 PERCENT         # Percentage to sell at second loss (default: 100.0%)
+
+# Gain threshold parameters
+--gain-threshold-1 PERCENT    # First gain threshold (default: 40.0%)
+--gain-sell-1 PERCENT         # Percentage to sell at first gain (default: 40.0%)
+--gain-threshold-2 PERCENT    # Second gain threshold (default: 80.0%)
+--gain-sell-2 PERCENT         # Percentage to sell at second gain (default: 40.0%)
+
+# Execution and testing options
+--dry-run                     # Test mode - shows what would happen
+--debug                       # Detailed analysis and execution information
+```
+
+### Stop Loss Integration with Selling Strategy
+
+The stop loss system is **automatically integrated** with the regular selling strategy:
+
+```bash
+# Selling strategy checks stop loss first, then regular opportunities
+python -m src.simulation.bidding_decision.strategy_2 --sell <run_name> --auto-sell
+
+# The workflow is:
+# 1. Update market prices
+# 2. Check and execute stop loss triggers
+# 3. Analyze regular selling opportunities
+# 4. Execute regular sells if requested
+
+# Disable stop loss integration if needed (not recommended)
+python -m src.simulation.bidding_decision.strategy_2 --sell <run_name> --auto-sell \
+    --loss-threshold-1 -999 --loss-threshold-2 -999 \
+    --gain-threshold-1 999 --gain-threshold-2 999
+```
+
+### Complete Stop Loss Workflow
+
+```bash
+# 1. Create simulation with stop loss management
+python -m src.simulation.initialization --create --market-name "Risk Managed Strategy" \
+    --balance 1000 --run-name "risk_managed"
+
+# 2. Initialize with real market data
+python -m src.simulation.initialization --init-markets-from-polymarket risk_managed
+
+# 3. Execute bidding strategy
+python -m src.simulation.bidding_decision.strategy_2 --run risk_managed \
+    --threshold 2.0 --amount 50.0 --weighted-selection
+
+# 4. Test stop loss configuration first
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss risk_managed --dry-run --debug
+
+# 5. Execute stop loss with custom thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss risk_managed \
+    --loss-threshold-1 -30.0 --gain-threshold-1 30.0
+
+# 6. Regular selling with integrated stop loss
+python -m src.simulation.bidding_decision.strategy_2 --sell risk_managed \
+    --threshold 1.0 --auto-sell
+
+# 7. Check results and stop loss history
+python -m src.simulation.initialization --info risk_managed
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss risk_managed --dry-run
+```
+
+### Advanced Stop Loss Scenarios
+
+#### Multiple Stop Loss Executions
+
+```bash
+# Execute stop loss, wait for market changes, execute again
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss risk_managed
+
+# ... market moves, prices change ...
+
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss risk_managed
+# Only NEW triggers are executed, previous ones are tracked in history
+```
+
+#### Stop Loss Monitoring and Analysis
+
+```bash
+# Detailed analysis of current positions vs stop loss thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss <run_name> \
+    --dry-run --debug
+
+# Shows:
+# - Current win/loss percentage for each position
+# - Which positions would trigger stop loss
+# - Exact number of shares that would be sold
+# - Reasoning for each stop loss decision
+# - Complete stop loss history
+```
 
 ## File Structure
 
@@ -28,8 +204,9 @@ The simulation strategy uses the same statistical analysis as the real `src/bidd
 src/simulation/bidding_decision/strategy_2/
 ├── README.md                    # This documentation
 ├── simulation_bidder.py         # Main simulation bidder class
-├── simulation_seller.py         # Position selling logic
-└── __main__.py                  # CLI interface
+├── simulation_seller.py         # Position selling logic (with stop loss integration)
+├── stop_loss_manager.py         # 🛑 Complete stop loss functionality
+└── __main__.py                  # CLI interface (with stop loss commands)
 ```
 
 ## Quick Start
@@ -101,6 +278,7 @@ python -m src.simulation.bidding_decision.strategy_2 [ACTION] [OPTIONS]
 - `--sell RUN_NAME`: Analyze and show selling opportunities for simulation run
 - `--analyze RUN_NAME`: Analyze opportunities and positions without executing trades
 - `--analyze-opportunities`: Analyze current market opportunities without any simulation run
+- `--stop-loss RUN_NAME`: Execute stop loss orders for positions that have triggered thresholds
 
 ### Bidding/Opportunity Parameters
 
@@ -114,6 +292,17 @@ python -m src.simulation.bidding_decision.strategy_2 [ACTION] [OPTIONS]
 - `--sell-below PERCENT`: Sell positions with prediction below this percentage (default: 0.0%)
 - `--auto-sell`: Automatically execute sell orders for recommended positions
 - `--active-market-only`: Only sell positions for the active market (current time frame)
+
+### Stop Loss Parameters
+
+- `--loss-threshold-1 PERCENT`: First loss threshold percentage (default: -40.0%)
+- `--loss-sell-1 PERCENT`: Percentage to sell at first loss threshold (default: 50.0%)
+- `--loss-threshold-2 PERCENT`: Second loss threshold percentage (default: -60.0%)
+- `--loss-sell-2 PERCENT`: Percentage to sell at second loss threshold (default: 100.0%)
+- `--gain-threshold-1 PERCENT`: First gain threshold percentage (default: 40.0%)
+- `--gain-sell-1 PERCENT`: Percentage to sell at first gain threshold (default: 40.0%)
+- `--gain-threshold-2 PERCENT`: Second gain threshold percentage (default: 80.0%)
+- `--gain-sell-2 PERCENT`: Percentage to sell at second gain threshold (default: 40.0%)
 
 ### Market Update Options
 
@@ -178,6 +367,35 @@ python -m src.simulation.bidding_decision.strategy_2 --sell election_strategy \
     --threshold 2.0 --active-market-only --auto-sell
 ```
 
+### 🛑 Stop Loss Strategy Examples
+
+```bash
+# Basic stop loss execution with default thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy
+
+# Test stop loss logic before execution (RECOMMENDED)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy --dry-run
+
+# Conservative stop loss (tighter risk management)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy \
+    --loss-threshold-1 -25.0 --loss-sell-1 40.0 \
+    --gain-threshold-1 25.0 --gain-sell-1 30.0 --debug
+
+# Aggressive stop loss (wider risk tolerance)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy \
+    --loss-threshold-1 -70.0 --loss-sell-1 80.0 \
+    --gain-threshold-1 70.0 --gain-sell-1 60.0
+
+# Profit-focused strategy (tight profit taking, wide loss tolerance)
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy \
+    --loss-threshold-1 -90.0 --loss-sell-1 100.0 \
+    --gain-threshold-1 15.0 --gain-sell-1 50.0 \
+    --gain-threshold-2 30.0 --gain-sell-2 50.0
+
+# View stop loss history and current analysis
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy --dry-run --debug
+```
+
 ### Analysis and Monitoring
 
 ```bash
@@ -203,6 +421,10 @@ python -m src.simulation.bidding_decision.strategy_2 --run election_strategy \
 # Test selling strategy with detailed output
 python -m src.simulation.bidding_decision.strategy_2 --sell election_strategy \
     --threshold 2.0 --sell-below 25.0 --auto-sell --dry-run --debug
+
+# Test stop loss with very sensitive thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss election_strategy \
+    --loss-threshold-1 -1.0 --gain-threshold-1 1.0 --dry-run --debug
 
 # Silent mode for scripting
 python -m src.simulation.bidding_decision.strategy_2 --run election_strategy \
@@ -240,39 +462,46 @@ Instead of placing real orders:
 - Tracks profit/loss for each trade
 - **Shows detailed order information** in dry-run mode
 
-### 4. Enhanced Position Management
+### 4. Enhanced Position Management with Stop Loss
 
 The selling strategy:
 
 - **Always updates market prices first** (like real auto_bid)
+- **Automatically checks stop loss triggers** before regular selling analysis
 - **Displays full comparison table** before analysis
 - Analyzes current positions against opportunities
 - Supports both opportunity-based and prediction-based selling
 - **Shows recommendations table** with detailed position information
 - Executes simulated sell orders with profit/loss calculation
+- **Tracks stop loss history** to prevent duplicate executions
 
 ## Workflow Examples
 
-### Complete Trading Session
+### Complete Trading Session with Stop Loss
 
 ```bash
-# 1. Initialize simulation
-python -m src.simulation.initialization --create --market-name "Trading Session" --balance 2000 --run-name "session1"
+# 1. Initialize simulation with stop loss management
+python -m src.simulation.initialization --create --market-name "Risk Managed Session" --balance 2000 --run-name "session1"
 python -m src.simulation.initialization --init-markets-from-polymarket session1
 
 # 2. Execute buying strategy
 python -m src.simulation.bidding_decision.strategy_2 --run session1 \
     --threshold 3.0 --amount 50.0 --weighted-selection --min-prediction 10.0
 
-# 3. Monitor and analyze
-python -m src.simulation.bidding_decision.strategy_2 --analyze session1 --debug
+# 3. Monitor positions and test stop loss
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss session1 --dry-run --debug
 
-# 4. Execute selling strategy
+# 4. Execute stop loss with custom thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss session1 \
+    --loss-threshold-1 -30.0 --gain-threshold-1 30.0
+
+# 5. Execute selling strategy (includes automatic stop loss check)
 python -m src.simulation.bidding_decision.strategy_2 --sell session1 \
     --threshold 2.0 --sell-below 20.0 --auto-sell
 
-# 5. Check final results
+# 6. Check final results and stop loss history
 python -m src.simulation.initialization --info session1
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss session1 --dry-run
 ```
 
 ### Market Opportunity Analysis
@@ -298,6 +527,8 @@ The system now **perfectly matches** all configuration options from the real bid
 - **Sell Below**: Exit positions with predictions below threshold
 - **Auto-sell**: Automatic execution vs. recommendation display
 - **Active Market Only**: Filter for current time frame markets
+- **🛑 Stop Loss Thresholds**: Configurable loss and gain thresholds for automatic position management
+- **🛑 Stop Loss Integration**: Seamless integration with regular selling strategy
 
 ## Integration with Real System
 
@@ -318,6 +549,8 @@ This simulation system is designed to:
 - **Transaction Logging**: Complete audit trail of all operations
 - **Dry Run Mode**: Test strategies without any changes
 - **Table Display**: Always shows what the system is analyzing
+- **🛑 Stop Loss Protection**: Automated risk management with configurable thresholds
+- **🛑 History Tracking**: Prevents duplicate stop loss executions
 
 ## Troubleshooting
 
@@ -328,6 +561,39 @@ This simulation system is designed to:
 3. **"Market not found"**: Ensure markets are properly initialized
 4. **"Connection errors"**: Real price updates require internet connection
 5. **"No positions to sell"**: Check if you have positions or adjust sell criteria
+6. **🛑 "No stop loss triggers found"**: Check position P&L values and adjust thresholds if needed
+
+### Stop Loss Issues
+
+#### Stop Loss Not Triggering
+
+```bash
+# Check current position P&L and thresholds
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss RUN_NAME --dry-run --debug
+
+# Update market prices to get current P&L values
+python -m src.simulation.initialization --update-markets-from-polymarket RUN_NAME
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss RUN_NAME --dry-run
+```
+
+#### Stop Loss Already Executed
+
+```bash
+# View stop loss history to see previous actions
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss RUN_NAME --dry-run
+
+# System prevents duplicate executions - check history section
+```
+
+#### Testing Stop Loss Logic
+
+```bash
+# Test with very sensitive thresholds to verify functionality
+python -m src.simulation.bidding_decision.strategy_2 --stop-loss RUN_NAME \
+    --loss-threshold-1 -1.0 --gain-threshold-1 1.0 --dry-run --debug
+
+# This should show which positions would trigger if they had 1% gain/loss
+```
 
 ### Debug Mode
 
@@ -339,26 +605,21 @@ Enable detailed logging with `--debug` to see:
 - Position matching logic and sell criteria
 - Trade execution steps with order details
 - Balance and position changes
-
-### Verbose Output
-
-Use `--verbose` or `-v` for enhanced logging:
-
-- Shows all HTTP requests to Polymarket
-- Displays detailed market update progress
-- Shows statistical calculation steps
-- Provides complete position analysis
+- **🛑 Stop loss analysis with current P&L values**
+- **🛑 Stop loss trigger logic and reasoning**
+- **🛑 Stop loss history and duplicate prevention**
 
 ## Comparison with Real Auto-Bid
 
-| Feature           | Real Auto-Bid            | Simulation System       |
-| ----------------- | ------------------------ | ----------------------- |
-| CLI Options       | ✅ Complete              | ✅ **Identical**        |
-| Table Display     | ✅ Full comparison table | ✅ **Identical**        |
-| Market Updates    | ✅ Live prices           | ✅ **Same API calls**   |
-| Order Execution   | ✅ Real trades           | ✅ **Simulated trades** |
-| Position Analysis | ✅ Real positions        | ✅ **Same logic**       |
-| Debug Output      | ✅ Detailed logs         | ✅ **Same format**      |
-| Safety Features   | ✅ Real money risk       | ✅ **No risk**          |
+| Feature           | Real Auto-Bid            | Simulation System         |
+| ----------------- | ------------------------ | ------------------------- |
+| CLI Options       | ✅ Complete              | ✅ **Identical**          |
+| Table Display     | ✅ Full comparison table | ✅ **Identical**          |
+| Market Updates    | ✅ Live prices           | ✅ **Same API calls**     |
+| Order Execution   | ✅ Real trades           | ✅ **Simulated trades**   |
+| Position Analysis | ✅ Real positions        | ✅ **Same logic**         |
+| Debug Output      | ✅ Detailed logs         | ✅ **Same format**        |
+| Safety Features   | ✅ Real money risk       | ✅ **No risk**            |
+| 🛑 Stop Loss      | ❌ Not available         | ✅ **Full functionality** |
 
-The simulation system now provides a **perfect testing environment** for the real auto-bid system with identical behavior and zero financial risk.
+The simulation system now provides a **perfect testing environment** for the real auto-bid system with identical behavior, zero financial risk, **and advanced stop loss functionality**.
