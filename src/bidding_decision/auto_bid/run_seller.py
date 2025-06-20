@@ -169,12 +169,20 @@ def main():
             active_end_month = active_end_date.split('-')[1]
             active_end_day = active_end_date.split('-')[2]
             
+            # Get the month name from the month number
+            months = {
+                '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+                '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+                '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+            }
+            month_name = months.get(active_start_month, 'Unknown')
+            
             # Different possible formats for the market name
-            format1 = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"  # 05-16–05-23
-            format2 = f"May {active_start_day}–{active_end_day}"  # May 16–23
-            format3 = f"May {active_start_day}-{active_end_day}"  # May 16-23
-            format4 = f"May {int(active_start_day)}–{int(active_end_day)}"  # May 16–23 (no leading zeros)
-            format5 = f"May {int(active_start_day)}-{int(active_end_day)}"  # May 16-23 (no leading zeros)
+            format1 = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"  # 06-13–06-20
+            format2 = f"{month_name} {active_start_day}–{active_end_day}"  # June 13–20
+            format3 = f"{month_name} {active_start_day}-{active_end_day}"  # June 13-20
+            format4 = f"{month_name} {int(active_start_day)}–{int(active_end_day)}"  # June 13–20 (no leading zeros)
+            format5 = f"{month_name} {int(active_start_day)}-{int(active_end_day)}"  # June 13-20 (no leading zeros)
             
             possible_formats = [format1, format2, format3, format4, format5]
             
