@@ -280,21 +280,32 @@ class EnhancedTweetPredictor:
         
         predictions = {}
         
-        # 1. Daily Prophet prediction
+        # 1. Daily Prophet prediction - FIX: Generate forecasts for each remaining day
         daily_future = self.daily_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         daily_forecast = self.daily_model.predict(daily_future)
-        daily_pred = daily_forecast.iloc[-1]['yhat'] * remaining_days
         
-        # Fix confidence interval scaling - use square root scaling for uncertainty
-        daily_uncertainty = (daily_forecast.iloc[-1]['yhat_upper'] - daily_forecast.iloc[-1]['yhat_lower']) / 2
-        scaled_daily_uncertainty = daily_uncertainty * np.sqrt(remaining_days)
-        daily_lower = max(0, daily_pred - scaled_daily_uncertainty)
-        daily_upper = daily_pred + scaled_daily_uncertainty
+        # FIX: Sum predictions for each remaining day instead of multiplying one day
+        current_date = current_time.date()
+        end_date = week_data['week_end'].date()
+        
+        # Convert daily forecast to timezone-naive for date comparison
+        daily_forecast['ds_date'] = daily_forecast['ds'].dt.date
+        
+        # Sum predictions for remaining days only
+        remaining_forecast = daily_forecast[daily_forecast['ds_date'] > current_date]
+        daily_pred = remaining_forecast['yhat'].sum()
+        
+        # Fix confidence interval - sum the individual day uncertainties properly
+        daily_uncertainties = (remaining_forecast['yhat_upper'] - remaining_forecast['yhat_lower']) / 2
+        # For independent daily predictions, uncertainty scales with sqrt of number of days
+        total_daily_uncertainty = np.sqrt(np.sum(daily_uncertainties**2))
+        daily_lower = max(0, daily_pred - total_daily_uncertainty)
+        daily_upper = daily_pred + total_daily_uncertainty
         
         predictions['prophet_daily'] = max(0, daily_pred)
         predictions['prophet_daily_ci'] = (daily_lower, daily_upper)
         
-        # 2. Hourly Prophet prediction
+        # 2. Hourly Prophet prediction - Keep existing logic but ensure proper aggregation
         hourly_future = self.hourly_model.make_future_dataframe(periods=int(np.ceil(remaining_hours)), freq='H')
         hourly_forecast = self.hourly_model.predict(hourly_future)
         
@@ -362,44 +373,56 @@ class EnhancedTweetPredictor:
         else:
             predictions['random_forest'] = predictions['prophet_daily']
         
-        # 5. Conservative Prophet prediction
+        # 5. Conservative Prophet prediction - FIX: Same as daily prophet
         conservative_future = self.conservative_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         conservative_forecast = self.conservative_model.predict(conservative_future)
-        conservative_pred = conservative_forecast.iloc[-1]['yhat'] * remaining_days
+        
+        # FIX: Sum predictions for remaining days
+        conservative_forecast['ds_date'] = conservative_forecast['ds'].dt.date
+        remaining_conservative = conservative_forecast[conservative_forecast['ds_date'] > current_date]
+        conservative_pred = remaining_conservative['yhat'].sum()
         
         # Fix conservative confidence interval scaling
-        conservative_uncertainty = (conservative_forecast.iloc[-1]['yhat_upper'] - conservative_forecast.iloc[-1]['yhat_lower']) / 2
-        scaled_conservative_uncertainty = conservative_uncertainty * np.sqrt(remaining_days)
-        conservative_lower = max(0, conservative_pred - scaled_conservative_uncertainty)
-        conservative_upper = conservative_pred + scaled_conservative_uncertainty
+        conservative_uncertainties = (remaining_conservative['yhat_upper'] - remaining_conservative['yhat_lower']) / 2
+        total_conservative_uncertainty = np.sqrt(np.sum(conservative_uncertainties**2))
+        conservative_lower = max(0, conservative_pred - total_conservative_uncertainty)
+        conservative_upper = conservative_pred + total_conservative_uncertainty
         
         predictions['conservative_prophet'] = max(0, conservative_pred)
         predictions['conservative_prophet_ci'] = (conservative_lower, conservative_upper)
         
-        # 6. Aggressive Prophet prediction
+        # 6. Aggressive Prophet prediction - FIX: Same as daily prophet
         aggressive_future = self.aggressive_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         aggressive_forecast = self.aggressive_model.predict(aggressive_future)
-        aggressive_pred = aggressive_forecast.iloc[-1]['yhat'] * remaining_days
+        
+        # FIX: Sum predictions for remaining days
+        aggressive_forecast['ds_date'] = aggressive_forecast['ds'].dt.date
+        remaining_aggressive = aggressive_forecast[aggressive_forecast['ds_date'] > current_date]
+        aggressive_pred = remaining_aggressive['yhat'].sum()
         
         # Fix aggressive confidence interval scaling
-        aggressive_uncertainty = (aggressive_forecast.iloc[-1]['yhat_upper'] - aggressive_forecast.iloc[-1]['yhat_lower']) / 2
-        scaled_aggressive_uncertainty = aggressive_uncertainty * np.sqrt(remaining_days)
-        aggressive_lower = max(0, aggressive_pred - scaled_aggressive_uncertainty)
-        aggressive_upper = aggressive_pred + scaled_aggressive_uncertainty
+        aggressive_uncertainties = (remaining_aggressive['yhat_upper'] - remaining_aggressive['yhat_lower']) / 2
+        total_aggressive_uncertainty = np.sqrt(np.sum(aggressive_uncertainties**2))
+        aggressive_lower = max(0, aggressive_pred - total_aggressive_uncertainty)
+        aggressive_upper = aggressive_pred + total_aggressive_uncertainty
         
         predictions['aggressive_prophet'] = max(0, aggressive_pred)
         predictions['aggressive_prophet_ci'] = (aggressive_lower, aggressive_upper)
         
-        # 7. Weekly-focused Prophet prediction
+        # 7. Weekly-focused Prophet prediction - FIX: Same as daily prophet
         weekly_future = self.weekly_focused_model.make_future_dataframe(periods=int(np.ceil(remaining_days)))
         weekly_forecast = self.weekly_focused_model.predict(weekly_future)
-        weekly_pred = weekly_forecast.iloc[-1]['yhat'] * remaining_days
+        
+        # FIX: Sum predictions for remaining days
+        weekly_forecast['ds_date'] = weekly_forecast['ds'].dt.date
+        remaining_weekly = weekly_forecast[weekly_forecast['ds_date'] > current_date]
+        weekly_pred = remaining_weekly['yhat'].sum()
         
         # Fix weekly confidence interval scaling
-        weekly_uncertainty = (weekly_forecast.iloc[-1]['yhat_upper'] - weekly_forecast.iloc[-1]['yhat_lower']) / 2
-        scaled_weekly_uncertainty = weekly_uncertainty * np.sqrt(remaining_days)
-        weekly_lower = max(0, weekly_pred - scaled_weekly_uncertainty)
-        weekly_upper = weekly_pred + scaled_weekly_uncertainty
+        weekly_uncertainties = (remaining_weekly['yhat_upper'] - remaining_weekly['yhat_lower']) / 2
+        total_weekly_uncertainty = np.sqrt(np.sum(weekly_uncertainties**2))
+        weekly_lower = max(0, weekly_pred - total_weekly_uncertainty)
+        weekly_upper = weekly_pred + total_weekly_uncertainty
         
         predictions['weekly_prophet'] = max(0, weekly_pred)
         predictions['weekly_prophet_ci'] = (weekly_lower, weekly_upper)
@@ -409,12 +432,19 @@ class EnhancedTweetPredictor:
         
         ensemble_pred = sum(predictions[model] * weight for model, weight in adaptive_weights.items())
         
-        # Apply activity multiplier to final prediction
-        ensemble_pred *= activity_info['multiplier']
+        # FIX: Reduce activity multiplier impact and add sanity check
+        activity_multiplier = activity_info['multiplier']
+        
+        # Sanity check: If activity multiplier would make prediction unreasonably low, cap it
+        if activity_multiplier < 1.0 and ensemble_pred * activity_multiplier < 20 * remaining_days:
+            print(f"Activity multiplier {activity_multiplier:.2f} too aggressive, using 0.9 instead")
+            activity_multiplier = 0.9
+        
+        ensemble_pred *= activity_multiplier
         
         predictions['ensemble'] = ensemble_pred
         predictions['activity_mode'] = activity_info['mode']
-        predictions['activity_multiplier'] = activity_info['multiplier']
+        predictions['activity_multiplier'] = activity_multiplier
         
         # Calculate improved confidence interval using Prophet CIs
         prophet_models = ['prophet_daily', 'prophet_hourly', 'conservative_prophet', 
@@ -632,34 +662,45 @@ class EnhancedTweetPredictor:
         """Calculate adaptive weights based on recent model performance and activity."""
         activity = self.detect_current_activity_mode(current_time)
         
-        # Base weights
+        # Base weights - FIX: Reduce weekly prophet weight significantly since it performs poorly
         base_weights = {
-            'prophet_daily': 0.35,
-            'pattern_based': 0.35, 
-            'aggressive_prophet': 0.20,
-            'prophet_hourly': 0.05,
-            'conservative_prophet': 0.03,
-            'weekly_prophet': 0.01,
-            'random_forest': 0.01
+            'prophet_daily': 0.30,
+            'pattern_based': 0.30, 
+            'aggressive_prophet': 0.15,
+            'prophet_hourly': 0.15,
+            'conservative_prophet': 0.05,
+            'weekly_prophet': 0.03,   # Reduced from 0.01 to 0.03 but still minimal impact
+            'random_forest': 0.02     # Increased slightly
         }
         
-        # Adjust based on activity mode
+        # Adjust based on activity mode - FIX: Be less aggressive with low activity adjustments
         if activity['mode'] == "high_activity":
             # Boost pattern-based and aggressive models
-            base_weights['pattern_based'] = 0.45
-            base_weights['aggressive_prophet'] = 0.25
+            base_weights['pattern_based'] = 0.35
+            base_weights['aggressive_prophet'] = 0.20
             base_weights['prophet_daily'] = 0.25
-            base_weights['conservative_prophet'] = 0.02
+            base_weights['prophet_hourly'] = 0.15
+            base_weights['conservative_prophet'] = 0.03
+            base_weights['weekly_prophet'] = 0.01
+            base_weights['random_forest'] = 0.01
         elif activity['mode'] == "low_activity":
-            # Favor conservative models
-            base_weights['conservative_prophet'] = 0.15
-            base_weights['prophet_daily'] = 0.40
-            base_weights['pattern_based'] = 0.25
-            base_weights['aggressive_prophet'] = 0.15
+            # FIX: Be less aggressive - don't heavily penalize recent patterns
+            base_weights['conservative_prophet'] = 0.10  # Reduced from 0.15
+            base_weights['prophet_daily'] = 0.35       # Increased from 0.40
+            base_weights['pattern_based'] = 0.25       # Kept reasonable
+            base_weights['aggressive_prophet'] = 0.12   # Reduced from 0.15
+            base_weights['prophet_hourly'] = 0.15      # Increased 
+            base_weights['weekly_prophet'] = 0.02
+            base_weights['random_forest'] = 0.01
         elif activity['mode'] == "increasing_activity":
             # Balanced but slightly aggressive
-            base_weights['pattern_based'] = 0.40
-            base_weights['aggressive_prophet'] = 0.22
+            base_weights['pattern_based'] = 0.35
+            base_weights['aggressive_prophet'] = 0.18
+            base_weights['prophet_daily'] = 0.27
+            base_weights['prophet_hourly'] = 0.15
+            base_weights['conservative_prophet'] = 0.03
+            base_weights['weekly_prophet'] = 0.01
+            base_weights['random_forest'] = 0.01
         
         return base_weights, activity
     
