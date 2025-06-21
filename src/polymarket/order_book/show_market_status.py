@@ -713,7 +713,7 @@ def main():
                 console = Console()
                 # Parse and then render to ensure proper formatting
                 json_str = json.dumps(market_data, ensure_ascii=False)
-                console.print(JSON.from_json(json_str))
+                console.print(JSON(json_str))
             except ImportError:
                 # Fallback to standard JSON printing if rich is not available
                 print(json.dumps(market_data, indent=2, ensure_ascii=False))

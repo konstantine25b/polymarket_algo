@@ -151,14 +151,15 @@ class AutoBidder:
                 
                 logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
                 logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
-                           f"(probability: {selected_probability:.2f})")
+                           f"(prediction: {best_row['Pred (%)']}%, selection probability: {selected_probability:.2f})")
             else:
                 # Find the row with the highest buy-only opportunity (original behavior)
                 best_idx = positive_opps[buy_only_col].idxmax()
                 best_row = positive_opps.loc[best_idx]
                 selection_method_used = 'best'
                 
-                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
+                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
+                           f"(prediction: {best_row['Pred (%)']}%)")
             
             # Extract information about the opportunity
             opportunity = {
