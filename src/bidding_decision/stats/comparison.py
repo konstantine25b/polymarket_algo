@@ -137,22 +137,104 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
         
         # Handle different prediction formats
         if 'predictions_by_frame' in predictions:
-            # Format used by ensemble, facebook_prophet, neural_prophet, timesfm
-            for frame_name, frame_data in predictions['predictions_by_frame'].items():
-                probability = frame_data['probability']
-                min_tweets = frame_data.get('min', 0)
-                max_tweets = frame_data.get('max', float('inf'))
+            # Special handling for ensemble algorithm to use corrected probabilities
+            if algorithm == "ensemble":
+                # Use the corrected ensemble probabilities instead of the flawed ones
+                individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
                 
-                # Calculate midpoint for expected value
-                if max_tweets == float('inf'):
-                    midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                if individual_probs:
+                    # Calculate corrected ensemble probabilities using renormalized weights
+                    displayed_total_weight = sum(data['weight'] for data in individual_probs.values())
+                    corrected_ensemble_probs = {}
+                    
+                    # Get all frame names
+                    from constants import TWEET_COUNT_FRAMES
+                    all_frame_names = [frame['name'] for frame in TWEET_COUNT_FRAMES]
+                    
+                    for frame_name in all_frame_names:
+                        weighted_sum = 0.0
+                        
+                        for algo_name, data in individual_probs.items():
+                            original_weight = data['weight']
+                            # Renormalize weight so displayed algorithms sum to 1.0
+                            renormalized_weight = original_weight / displayed_total_weight if displayed_total_weight > 0 else 0.0
+                            prob = data['probabilities'].get(frame_name, 0.0)
+                            weighted_sum += prob * renormalized_weight
+                        
+                        corrected_ensemble_probs[frame_name] = weighted_sum
+                    
+                    # Final normalization to ensure probabilities sum to 1
+                    total_corrected_prob = sum(corrected_ensemble_probs.values())
+                    if total_corrected_prob > 0:
+                        corrected_ensemble_probs = {frame: prob / total_corrected_prob for frame, prob in corrected_ensemble_probs.items()}
+                    
+                    # Use corrected probabilities
+                    for frame_name, probability in corrected_ensemble_probs.items():
+                        prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                        total_prob += probability
+                        
+                        # Calculate midpoint for expected value
+                        try:
+                            if "less than" in frame_name.lower():
+                                parts = frame_name.lower().split("less than")
+                                upper = float(parts[1].strip().split()[0])
+                                midpoint = upper / 2
+                            elif "or more" in frame_name.lower():
+                                parts = frame_name.lower().split("or more")
+                                lower = float(parts[0].strip().split()[-1])
+                                midpoint = lower * 1.2
+                            else:
+                                # Standard range like "150–174"
+                                range_clean = frame_name.replace('–', '-').strip()
+                                if '-' in range_clean:
+                                    parts = range_clean.split('-')
+                                    if len(parts) == 2:
+                                        lower = float(parts[0].strip())
+                                        upper = float(parts[1].strip())
+                                        midpoint = (lower + upper) / 2
+                                    else:
+                                        midpoint = 150  # Default
+                                else:
+                                    midpoint = 150  # Default
+                            
+                            expected_value += probability * midpoint
+                        except (ValueError, IndexError):
+                            # Default midpoint if parsing fails
+                            midpoint = 150
+                            expected_value += probability * midpoint
                 else:
-                    midpoint = (min_tweets + max_tweets) / 2
-                
-                prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
-                total_prob += probability
-                expected_value += probability * midpoint
-                
+                    # Fallback to original method if individual_probs calculation fails
+                    for frame_name, frame_data in predictions['predictions_by_frame'].items():
+                        probability = frame_data['probability']
+                        min_tweets = frame_data.get('min', 0)
+                        max_tweets = frame_data.get('max', float('inf'))
+                        
+                        # Calculate midpoint for expected value
+                        if max_tweets == float('inf'):
+                            midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                        else:
+                            midpoint = (min_tweets + max_tweets) / 2
+                        
+                        prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                        total_prob += probability
+                        expected_value += probability * midpoint
+            else:
+                # Standard handling for non-ensemble algorithms
+                for frame_name, frame_data in predictions['predictions_by_frame'].items():
+                    probability = frame_data['probability']
+                    min_tweets = frame_data.get('min', 0)
+                    max_tweets = frame_data.get('max', float('inf'))
+                    
+                    # Calculate midpoint for expected value
+                    if max_tweets == float('inf'):
+                        midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                    else:
+                        midpoint = (min_tweets + max_tweets) / 2
+                    
+                    prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                    total_prob += probability
+                    expected_value += probability * midpoint
+        
         elif 'ensemble_results' in predictions and 'probabilities' in predictions['ensemble_results']:
             # Format used by enhanced algorithms (enhanced_timesfm, enhanced_neural_prophet, enhanced_facebook_prophet)
             probabilities_dict = predictions['ensemble_results']['probabilities']

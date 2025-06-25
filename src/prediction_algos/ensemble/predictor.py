@@ -1377,24 +1377,55 @@ class EnsembleTweetPredictor:
         print()
         print("-" * 150)
         
-        # Print each algorithm's distribution
+        # Calculate the total weight of algorithms that are actually displayed
+        displayed_total_weight = sum(data['weight'] for data in individual_probs.values())
+        
+        # Print each algorithm's distribution with RENORMALIZED weights
+        renormalized_individual_probs = {}
         for algo_name, data in individual_probs.items():
             total_pred = data['total_predicted']
-            weight = data['weight']
+            original_weight = data['weight']
+            # Renormalize weight so displayed algorithms sum to 1.0
+            renormalized_weight = original_weight / displayed_total_weight if displayed_total_weight > 0 else 0.0
             probs = data['probabilities']
             
-            print(f"{algo_name:<20s} {weight:<8.3f} {total_pred:<6.1f}", end="")
+            print(f"{algo_name:<20s} {renormalized_weight:<8.3f} {total_pred:<6.1f}", end="")
             for frame_name in all_frame_names:
                 prob = probs.get(frame_name, 0)
                 print(f" {prob*100:<10.1f}", end="")
             print()
+            
+            # Store renormalized data for ensemble calculation
+            renormalized_individual_probs[algo_name] = {
+                'total_predicted': total_pred,
+                'probabilities': probs,
+                'weight': renormalized_weight  # Use renormalized weight
+            }
         
-        # Print ensemble for comparison
-        ensemble_probs = prediction_summary['predictions_by_frame']
-        ensemble_total = prediction_summary['total_predicted']
-        print(f"{'Ensemble (Final)':<20s} {'1.000':<8s} {ensemble_total:<6.1f}", end="")
+        # Calculate CORRECTED ensemble probabilities using renormalized weights
+        corrected_ensemble_probs = {}
         for frame_name in all_frame_names:
-            prob = ensemble_probs[frame_name]['probability']
+            weighted_sum = 0.0
+            
+            for algo_name, data in renormalized_individual_probs.items():
+                weight = data['weight']  # Already renormalized to sum to 1.0
+                prob = data['probabilities'].get(frame_name, 0.0)
+                weighted_sum += prob * weight
+            
+            corrected_ensemble_probs[frame_name] = weighted_sum
+        
+        # Final normalization to ensure probabilities sum to 1 (should already be close)
+        total_corrected_prob = sum(corrected_ensemble_probs.values())
+        if total_corrected_prob > 0:
+            corrected_ensemble_probs = {frame: prob / total_corrected_prob for frame, prob in corrected_ensemble_probs.items()}
+        
+        # Calculate corrected ensemble total as weighted average using renormalized weights
+        corrected_ensemble_total = sum(data['total_predicted'] * data['weight'] for data in renormalized_individual_probs.values())
+        
+        # Print corrected ensemble
+        print(f"{'Ensemble (Final)':<20s} {'1.000':<8s} {corrected_ensemble_total:<6.1f}", end="")
+        for frame_name in all_frame_names:
+            prob = corrected_ensemble_probs.get(frame_name, 0.0)
             print(f" {prob*100:<10.1f}", end="")
         print()
         
