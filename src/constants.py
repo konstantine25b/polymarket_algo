@@ -61,7 +61,7 @@ POLYMARKET_TIMEZONE = ET_TIMEZONE
 # ]
 
 TWEET_COUNT_FRAMES = [
-    {"name": "less than 90", "min": 0, "max": 89},
+    {"name": "<90", "min": 0, "max": 89},
     {"name": "90–104", "min": 90, "max": 104},
     {"name": "105–119", "min": 105, "max": 119},
     {"name": "120–134", "min": 120, "max": 134},
@@ -74,7 +74,7 @@ TWEET_COUNT_FRAMES = [
     {"name": "225–239", "min": 225, "max": 239},
     {"name": "240–254", "min": 240, "max": 254},
     {"name": "255–269", "min": 255, "max": 269},
-    {"name": "270 or more", "min": 270, "max": float('inf')}
+    {"name": "270+", "min": 270, "max": float('inf')}
 ]
 
 # Apify Constants

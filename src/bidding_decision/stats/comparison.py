@@ -175,12 +175,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
                         
                         # Calculate midpoint for expected value
                         try:
-                            if "less than" in frame_name.lower():
-                                parts = frame_name.lower().split("less than")
+                            if "<" in frame_name:
+                                parts = frame_name.split("<")
                                 upper = float(parts[1].strip().split()[0])
                                 midpoint = upper / 2
-                            elif "or more" in frame_name.lower():
-                                parts = frame_name.lower().split("or more")
+                            elif "+" in frame_name:
+                                parts = frame_name.split("+")
                                 lower = float(parts[0].strip().split()[-1])
                                 midpoint = lower * 1.2
                             else:
@@ -241,12 +241,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
             for frame_name, probability in probabilities_dict.items():
                 # Try to get midpoint from frame name
                 try:
-                    if "less than" in frame_name.lower():
-                        parts = frame_name.lower().split("less than")
+                    if "<" in frame_name:
+                        parts = frame_name.split("<")
                         upper = float(parts[1].strip().split()[0])
                         midpoint = upper / 2
-                    elif "or more" in frame_name.lower():
-                        parts = frame_name.lower().split("or more")
+                    elif "+" in frame_name:
+                        parts = frame_name.split("+")
                         lower = float(parts[0].strip().split()[-1])
                         midpoint = lower * 1.2
                     else:
@@ -280,12 +280,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
                 
                 # Try to get midpoint from frame name
                 try:
-                    if "less than" in frame_name.lower():
-                        parts = frame_name.lower().split("less than")
+                    if "<" in frame_name:
+                        parts = frame_name.split("<")
                         upper = float(parts[1].strip().split()[0])
                         midpoint = upper / 2
-                    elif "or more" in frame_name.lower():
-                        parts = frame_name.lower().split("or more")
+                    elif "+" in frame_name:
+                        parts = frame_name.split("+")
                         lower = float(parts[0].strip().split()[-1])
                         midpoint = lower * 1.2
                     else:
@@ -436,12 +436,15 @@ def normalize_range_name(range_name: str) -> str:
     # Convert to lowercase for case-insensitive comparison
     name = range_name.lower().strip()
     
-    # Remove any date suffixes first (e.g., "June 6–13?", "April 25–May 2")
-    # Look for patterns like "june 6–13?" or "april 25–may 2"
-    # Remove date patterns at the end
+    # Remove any date suffixes first (e.g., "June 6–13?", "April 25–May 2", "June 27–July 4?")
+    # Handle cross-month patterns first (e.g., "june 27–july 4?")
+    name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-](january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+\??.*$', '', name)
+    # Handle same-month patterns (e.g., "june 6–13?")
     name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-]\d+\??.*$', '', name)
     name = re.sub(r'\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d+[–-]\d+\??.*$', '', name)
-    # Also handle cases like "June 6–13?" 
+    # Generic cross-month pattern for any unmatched cases
+    name = re.sub(r'\s+\w+\s+\d+[–-]\w+\s+\d+\??.*$', '', name)
+    # Generic same-month pattern for any unmatched cases  
     name = re.sub(r'\s+\w+\s+\d+[–-]\d+\??.*$', '', name)
     name = name.strip()
     
@@ -452,16 +455,25 @@ def normalize_range_name(range_name: str) -> str:
             match = re.search(r'less than (\d+)', name)
             if match:
                 num = int(match.group(1))
-                return f"less than {num}"
+                return f"<{num}"
             else:
                 # Fallback to the current frames from constants
                 from src.constants import TWEET_COUNT_FRAMES
                 for frame in TWEET_COUNT_FRAMES:
-                    if frame["name"].lower().startswith("less than"):
+                    if frame["name"].startswith("<"):
                         return frame["name"]
-                return "less than 150"  # Default fallback
+                # If no frame found starting with "<", use the first frame
+                return TWEET_COUNT_FRAMES[0]["name"]
         except (ValueError, ImportError):
-            return "less than 150"  # Default fallback
+            # Import and use constants as fallback
+            try:
+                from src.constants import TWEET_COUNT_FRAMES
+                for frame in TWEET_COUNT_FRAMES:
+                    if frame["name"].startswith("<"):
+                        return frame["name"]
+                return TWEET_COUNT_FRAMES[0]["name"]
+            except ImportError:
+                return "<90"  # Last resort fallback
     
     # Handle "X or more" format
     if "or more" in name:
@@ -470,14 +482,22 @@ def normalize_range_name(range_name: str) -> str:
             match = re.search(r'(\d+)\s*or more', name)
             if match:
                 num = int(match.group(1))
-                return f"{num} or more"
+                return f"{num}+"
             else:
                 # Fallback to extracting any number
                 num = int(''.join(filter(str.isdigit, name.split("or more")[0])))
-                return f"{num} or more"
+                return f"{num}+"
         except (ValueError, ImportError):
-            # If we can't extract a number, return the original format
-            return "500 or more"  # Default case for new frames
+            # Import and use constants as fallback
+            try:
+                from src.constants import TWEET_COUNT_FRAMES
+                for frame in TWEET_COUNT_FRAMES:
+                    if "+" in frame["name"] or frame["max"] == float('inf'):
+                        return frame["name"]
+                # If no frame found ending with "+", use the last frame
+                return TWEET_COUNT_FRAMES[-1]["name"]
+            except ImportError:
+                return "270+"  # Last resort fallback
     
     # Strip any "Will Elon tweet" prefix 
     if "will elon tweet" in name:
