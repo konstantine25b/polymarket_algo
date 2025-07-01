@@ -444,6 +444,7 @@ class TimesFMTweetPredictor:
             dict: Probabilities for each range defined in TWEET_COUNT_FRAMES
         """
         total_predicted = prediction_results['total_predicted']
+        current_tweets = prediction_results['current_tweets']
         ci_lower = prediction_results['confidence_interval']['lower']
         ci_upper = prediction_results['confidence_interval']['upper']
         
@@ -459,14 +460,21 @@ class TimesFMTweetPredictor:
             min_tweets = frame['min']
             max_tweets = frame['max']
             
-            if max_tweets == float('inf'):  # "X or more" case
+            # If the frame's maximum is less than current tweets, it's impossible
+            if max_tweets != float('inf') and max_tweets < current_tweets:
+                prob = 0.0
+            elif max_tweets == float('inf'):  # "X or more" case
                 prob = 1 - stats.norm.cdf(min_tweets, loc=total_predicted, scale=std_estimate)
             else:
                 prob_lower = stats.norm.cdf(min_tweets, loc=total_predicted, scale=std_estimate)
                 prob_upper = stats.norm.cdf(max_tweets + 1, loc=total_predicted, scale=std_estimate)
                 prob = prob_upper - prob_lower
             
-            probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability
+            # Only apply minimum probability for non-impossible frames
+            if max_tweets == float('inf') or max_tweets >= current_tweets:
+                probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability for possible frames
+            else:
+                probabilities[frame_name] = 0.0  # 0% for impossible frames
         
         # Normalize probabilities to sum to 1
         total_prob = sum(probabilities.values())

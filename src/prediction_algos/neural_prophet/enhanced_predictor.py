@@ -496,9 +496,14 @@ class EnhancedNeuralTweetPredictor:
             min_tweets = frame['min']
             max_tweets = frame['max']
             
-            if max_tweets == float('inf'):  # "X or more" case
+            # If the frame's maximum is less than current tweets, it's impossible
+            if max_tweets != float('inf') and max_tweets < current_tweets:
+                prob = 0.0
+            elif max_tweets == float('inf'):  # "X or more" case
                 prob_normal = 1 - stats.norm.cdf(min_tweets, loc=total_predicted, scale=final_uncertainty)
                 prob_t = 1 - stats.t.cdf(min_tweets, df=t_df, loc=total_predicted, scale=final_uncertainty)
+                # Mixture probability
+                prob = normal_weight * prob_normal + t_weight * prob_t
             else:
                 prob_normal_lower = stats.norm.cdf(min_tweets, loc=total_predicted, scale=final_uncertainty)
                 prob_normal_upper = stats.norm.cdf(max_tweets + 1, loc=total_predicted, scale=final_uncertainty)
@@ -507,10 +512,15 @@ class EnhancedNeuralTweetPredictor:
                 prob_t_lower = stats.t.cdf(min_tweets, df=t_df, loc=total_predicted, scale=final_uncertainty)
                 prob_t_upper = stats.t.cdf(max_tweets + 1, df=t_df, loc=total_predicted, scale=final_uncertainty)
                 prob_t = prob_t_upper - prob_t_lower
+                
+                # Mixture probability
+                prob = normal_weight * prob_normal + t_weight * prob_t
             
-            # Mixture probability
-            prob = normal_weight * prob_normal + t_weight * prob_t
-            probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability
+            # Only apply minimum probability for non-impossible frames
+            if max_tweets == float('inf') or max_tweets >= current_tweets:
+                probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability for possible frames
+            else:
+                probabilities[frame_name] = 0.0  # 0% for impossible frames
         
         # Normalize probabilities
         total_prob = sum(probabilities.values())
