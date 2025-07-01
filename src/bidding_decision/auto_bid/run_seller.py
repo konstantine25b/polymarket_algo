@@ -175,20 +175,33 @@ def main():
                 '05': 'May', '06': 'June', '07': 'July', '08': 'August',
                 '09': 'September', '10': 'October', '11': 'November', '12': 'December'
             }
-            month_name = months.get(active_start_month, 'Unknown')
+            start_month_name = months.get(active_start_month, 'Unknown')
+            end_month_name = months.get(active_end_month, 'Unknown')
             
             # Different possible formats for the market name
-            format1 = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"  # 06-13–06-20
-            format2 = f"{month_name} {active_start_day}–{active_end_day}"  # June 13–20
-            format3 = f"{month_name} {active_start_day}-{active_end_day}"  # June 13-20
-            format4 = f"{month_name} {int(active_start_day)}–{int(active_end_day)}"  # June 13–20 (no leading zeros)
-            format5 = f"{month_name} {int(active_start_day)}-{int(active_end_day)}"  # June 13-20 (no leading zeros)
+            # Handle both same-month and cross-month date ranges
+            if active_start_month == active_end_month:
+                # Same month: "June 27–30", "June 27-30"
+                format1 = f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}"
+                format2 = f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}"
+                format3 = f"{start_month_name} {active_start_day}–{active_end_day}"
+                format4 = f"{start_month_name} {active_start_day}-{active_end_day}"
+                possible_formats = [format1, format2, format3, format4]
+            else:
+                # Cross-month: "June 27–July 4", "June 27-July 4"
+                format1 = f"{start_month_name} {int(active_start_day)}–{end_month_name} {int(active_end_day)}"
+                format2 = f"{start_month_name} {int(active_start_day)}-{end_month_name} {int(active_end_day)}"
+                format3 = f"{start_month_name} {active_start_day}–{end_month_name} {active_end_day}"
+                format4 = f"{start_month_name} {active_start_day}-{end_month_name} {active_end_day}"
+                possible_formats = [format1, format2, format3, format4]
             
-            possible_formats = [format1, format2, format3, format4, format5]
+            # Also include the numeric format for fallback
+            numeric_format = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
+            possible_formats.append(numeric_format)
             
             # Log the active market we're filtering for
-            logger.info(f"Filtering for active market only: {format1}")
-            print(f"\nFiltering for active market only: {format1}")
+            logger.info(f"Filtering for active market only: {numeric_format}")
+            print(f"\nFiltering for active market only: {numeric_format}")
             logger.debug(f"Looking for market names containing any of: {possible_formats}")
             
             # Filter positions to only include those from the active market
