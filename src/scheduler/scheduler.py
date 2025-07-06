@@ -62,6 +62,7 @@ Options:
     --gain-sell-1       Percentage of position to sell at first gain threshold (default: 40.0)
     --gain-threshold-2    Second gain threshold percentage (default: 80.0)
     --gain-sell-2       Percentage of position to sell at second gain threshold (default: 40.0)
+    --auto-sell          Enable automatic execution of sell orders in simulation mode
 """
 
 import argparse
@@ -189,6 +190,8 @@ def setup_argparse():
                         help='Second gain threshold percentage (default: 80.0)')
     parser.add_argument('--gain-sell-2', type=float, default=40.0,
                         help='Percentage of position to sell at second gain threshold (default: 40.0)')
+    parser.add_argument('--auto-sell', action='store_true',
+                        help='Enable automatic execution of sell orders in simulation mode')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -609,7 +612,7 @@ def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount
 def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
                          show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False,
                          loss_threshold_1=-40.0, loss_sell_1=50.0, loss_threshold_2=-60.0, loss_sell_2=100.0,
-                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0):
+                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0, auto_sell=False):
     """Run the simulation seller for the specified strategy.
     
     Args:
@@ -632,6 +635,7 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
         gain_sell_1: Percentage to sell at first gain threshold (for strategy_2)
         gain_threshold_2: Second gain threshold percentage (for strategy_2)
         gain_sell_2: Percentage to sell at second gain threshold (for strategy_2)
+        auto_sell: Whether to automatically execute sell orders (default: False)
     
     Returns:
         bool: Whether the selling was successful
@@ -662,6 +666,13 @@ def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_b
     
     if dry_run:
         cmd.append("--dry-run")
+    else:
+        # Add the auto-sell flag to execute orders when not in dry run
+        if auto_sell:
+            cmd.append("--auto-sell")
+            logger.info("Auto-sell enabled: will execute sell orders")
+        else:
+            logger.info("Auto-sell disabled: will only show sell recommendations")
         
     if not show_stats:
         cmd.append("--no-stats")
@@ -1309,7 +1320,8 @@ def run_scheduled_jobs(args):
                     gain_threshold_1=args.gain_threshold_1,
                     gain_sell_1=args.gain_sell_1,
                     gain_threshold_2=args.gain_threshold_2,
-                    gain_sell_2=args.gain_sell_2
+                    gain_sell_2=args.gain_sell_2,
+                    auto_sell=args.auto_sell
                 )
         else:
             # Normal mode - real bidding and selling
