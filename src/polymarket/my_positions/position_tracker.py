@@ -1732,6 +1732,16 @@ class PolymarketPositionTracker:
                 f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
                 f"{start_month_name} {active_start_day}-{active_end_day}",
                 f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                # Add patterns for repeated month names
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+                # Add patterns for repeated month names (like "August 1–August 8")
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
             ])
         else:
             # Cross-month patterns (like "June 27–July 4")
@@ -1745,6 +1755,16 @@ class PolymarketPositionTracker:
                 f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
                 f"{start_month_name} {active_start_day}-{active_end_day}",
                 f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                # Add patterns for repeated month names
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+                # Add patterns for repeated month names (like "August 1–August 8")
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
             ])
         
         # Add numeric date format pattern for both cases
