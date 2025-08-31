@@ -16,7 +16,7 @@ POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
 
 # Polymarket Event URLs
 # Current Elon Musk tweets event
-POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-august-1-8?tid=1754390795372"
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-august-29-september-5?tid=1756647472325"
 
 # Data Paths
 DATA_DIR = Path("src/polymarket/data")
@@ -26,9 +26,9 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
 MARKET_ID = "0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00"
-MARKET_HASH = "will-elon-musk-tweet-over-100-times-august-01-august-08"
-EVENT_HASH = "elon-musk-of-tweets-august-01-august-08"
-FULL_EVENT_HASH = "elon-musk-of-tweets-august-01-august-08"
+MARKET_HASH = "will-elon-musk-tweet-over-100-times-august-29-september-05"
+EVENT_HASH = "elon-musk-of-tweets-august-29-september-05"
+FULL_EVENT_HASH = "elon-musk-of-tweets-august-29-september-05"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
@@ -38,8 +38,8 @@ DEFAULT_DATA_PATH = os.path.join(
 )
 
 # Polymarket event timeframe (Eastern Time)
-POLYMARKET_START_TIME = "2025-08-01 12:00:00"
-POLYMARKET_END_TIME = "2025-08-08 12:00:00"
+POLYMARKET_START_TIME = "2025-08-29 12:00:00"
+POLYMARKET_END_TIME = "2025-09-05 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket
@@ -61,19 +61,28 @@ POLYMARKET_TIMEZONE = ET_TIMEZONE
 # ]
 
 TWEET_COUNT_FRAMES = [
-    {"name": "<90", "min": 0, "max": 89},
-    {"name": "90–104", "min": 90, "max": 104},
-    {"name": "105–119", "min": 105, "max": 119},
-    {"name": "120–134", "min": 120, "max": 134},
-    {"name": "135–149", "min": 135, "max": 149},
-    {"name": "150–164", "min": 150, "max": 164},
-    {"name": "165–179", "min": 165, "max": 179},
-    {"name": "180–194", "min": 180, "max": 194},
-    {"name": "195–209", "min": 195, "max": 209},
-    {"name": "210–224", "min": 210, "max": 224},
-    {"name": "225–239", "min": 225, "max": 239},
-    {"name": "240–254", "min": 240, "max": 254},
-    {"name": "255+", "min": 255, "max": float('inf')}
+    {"name": "<100", "min": 0, "max": 99},
+    {"name": "100–114", "min": 100, "max": 114},
+    {"name": "115–129", "min": 115, "max": 129},
+    {"name": "130–144", "min": 130, "max": 144},
+    {"name": "145–159", "min": 145, "max": 159},
+    {"name": "160–174", "min": 160, "max": 174},
+    {"name": "175–189", "min": 175, "max": 189},
+    {"name": "190–204", "min": 190, "max": 204},
+    {"name": "205–219", "min": 205, "max": 219},
+    {"name": "220–234", "min": 220, "max": 234},
+    {"name": "235–249", "min": 235, "max": 249},
+    {"name": "250–264", "min": 250, "max": 264},
+    {"name": "265–279", "min": 265, "max": 279},
+    {"name": "280–294", "min": 280, "max": 294},
+    {"name": "295–309", "min": 295, "max": 309},
+    {"name": "310–324", "min": 310, "max": 324},
+    {"name": "325–339", "min": 325, "max": 339},
+    {"name": "340–354", "min": 340, "max": 354},
+    {"name": "355–369", "min": 355, "max": 369},
+    {"name": "370–384", "min": 370, "max": 384},
+    {"name": "385–399", "min": 385, "max": 399},
+    {"name": "400+", "min": 400, "max": float('inf')}
 ]
 
 # Apify Constants
