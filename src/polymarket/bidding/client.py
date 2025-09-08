@@ -40,8 +40,50 @@ class PolymarketClient:
         # Initialize the CLOB client
         self.client = ClobClient(host, key=private_key, chain_id=chain_id)
         
+        # Add browser-like headers to avoid Cloudflare blocks
+        self._configure_headers()
+        
         # Set up API credentials
         self._setup_api_credentials()
+    
+    def _configure_headers(self):
+        """
+        Configure browser-like headers to avoid Cloudflare blocks.
+        This helps the requests appear more like legitimate browser traffic.
+        """
+        try:
+            # Add browser-like headers to the client's session
+            if hasattr(self.client, '_session') and self.client._session:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-site',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+                self.client._session.headers.update(headers)
+            elif hasattr(self.client, 'session') and self.client.session:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-site',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+                self.client.session.headers.update(headers)
+        except Exception as e:
+            # If header configuration fails, continue anyway - it's not critical
+            print(f"Warning: Could not configure headers: {e}")
     
     def _setup_api_credentials(self):
         """
