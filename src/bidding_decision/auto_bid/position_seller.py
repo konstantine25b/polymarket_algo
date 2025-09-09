@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import json
 import datetime
 
-from src.bidding_decision.stats.comparison import generate_comparison_table
+from src.bidding_decision.stats.comparison import generate_comparison_table, normalize_range_name
 from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
 from src.polymarket.bidding.sell.market.run import run_market_sell
 
@@ -144,13 +144,34 @@ class PositionSeller:
             
             # Debug info for this range
             logger.debug(f"Processing range: {range_name}, token_id: {token_id}, prediction: {prediction}%")
-            
-            # Check for all range_name entries in position names
+
+            # Prefer robust matching by Market ID when available
+            row_market_id = row.get('Market ID', 'N/A')
+
+            # Iterate all held markets
             for market_id, outcomes in non_zero_positions.items():
                 market_name = self.position_tracker.get_market_name(market_id)
-                
-                # Debug: Check if the market name contains the range
-                if range_name in market_name:
+
+                # Determine if this row corresponds to this market
+                matched_market = False
+
+                # 1) Strong match by Market ID
+                if row_market_id and row_market_id != 'N/A' and market_id == row_market_id:
+                    matched_market = True
+                else:
+                    # 2) Fallback: string matching with normalization to handle formats like
+                    #    "220–239" vs "between 220 and 239"
+                    try:
+                        norm_range = normalize_range_name(range_name)
+                        norm_market = normalize_range_name(market_name)
+                        if norm_range == norm_market:
+                            matched_market = True
+                    except Exception:
+                        # Last resort: substring check as legacy behavior
+                        if range_name in market_name:
+                            matched_market = True
+
+                if matched_market:
                     logger.debug(f"Found match for range '{range_name}' in market '{market_name}' (ID: {market_id})")
                     if self.debug:
                         print(f"\nDEBUG - Found match: Range '{range_name}' in market '{market_name}'")

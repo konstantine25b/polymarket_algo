@@ -7,6 +7,7 @@ import os
 import time
 import random
 from dotenv import load_dotenv
+import requests
 from py_clob_client.constants import POLYGON
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, TradeParams, MarketOrderArgs, OrderType
@@ -79,25 +80,53 @@ class PolymarketClient:
                 'Referer': 'https://polymarket.com/'
             }
             
-            # Try to configure the session
+            # Try to configure the session on the underlying client
             session = None
-            if hasattr(self.client, '_session') and self.client._session:
-                session = self.client._session
-            elif hasattr(self.client, 'session') and self.client.session:
-                session = self.client.session
-            
-            if session:
-                session.headers.update(headers)
-                
+            # Prefer an existing session-like attribute if present
+            if hasattr(self.client, '_session') and getattr(self.client, '_session') is not None:
+                session = getattr(self.client, '_session')
+            elif hasattr(self.client, 'session') and getattr(self.client, 'session') is not None:
+                session = getattr(self.client, 'session')
+
+            # If no session is available, create a requests.Session and attach it
+            if session is None:
+                try:
+                    new_session = requests.Session()
+                    # Respect system/env proxies if provided (e.g., HTTPS_PROXY/HTTP_PROXY)
+                    new_session.trust_env = True
+                    new_session.headers.update(headers)
+                    # Attach to both common attributes to maximize compatibility
+                    try:
+                        setattr(self.client, '_session', new_session)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(self.client, 'session', new_session)
+                    except Exception:
+                        pass
+                    session = new_session
+                except Exception:
+                    session = None
+
+            if session is not None:
+                try:
+                    session.headers.update(headers)
+                except Exception:
+                    pass
+
                 # Additional session configuration to mimic browser behavior
-                session.cookies.clear()  # Start fresh
-                
+                try:
+                    if hasattr(session, 'cookies'):
+                        session.cookies.clear()  # Start fresh
+                except Exception:
+                    pass
+
                 # Add some realistic timing
                 time.sleep(random.uniform(0.1, 0.5))
-                
-                print("Successfully configured advanced headers for Cloudflare bypass")
+
+                print("Successfully configured advanced headers for Cloudflare bypass (session applied)")
             else:
-                print("Warning: Could not access session object for header configuration")
+                print("Warning: Could not access or create session for header configuration")
                 
         except Exception as e:
             # If header configuration fails, continue anyway - it's not critical
