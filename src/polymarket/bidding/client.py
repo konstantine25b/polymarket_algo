@@ -40,6 +40,9 @@ class PolymarketClient:
         self.chain_id = chain_id
         self.private_key = private_key
         
+        # Optionally force IPv4 to avoid IPv6-specific Cloudflare filtering on some hosts
+        self._enforce_ipv4_if_requested()
+
         # Initialize the CLOB client
         self.client = ClobClient(host, key=private_key, chain_id=chain_id)
         
@@ -49,6 +52,29 @@ class PolymarketClient:
         # Set up API credentials
         self._setup_api_credentials()
     
+    def _enforce_ipv4_if_requested(self):
+        """
+        Force requests/urllib3 to use IPv4 only when FORCE_IPV4=1 is set in the environment.
+        This helps on hosts where IPv6 egress gets blocked by Cloudflare while IPv4 is allowed.
+        """
+        try:
+            if os.environ.get("FORCE_IPV4", "0") == "1":
+                import socket
+                try:
+                    # requests vendored urllib3 path
+                    from requests.packages.urllib3.util import connection as urllib3_conn  # type: ignore
+                except Exception:
+                    # system urllib3 path
+                    from urllib3.util import connection as urllib3_conn  # type: ignore
+
+                def allowed_gai_family():
+                    return socket.AF_INET
+
+                urllib3_conn.allowed_gai_family = allowed_gai_family  # type: ignore
+        except Exception:
+            # Non-fatal; continue without IPv4 enforcement
+            pass
+
     def _configure_headers(self):
         """
         Configure advanced browser-like headers and session settings to avoid Cloudflare blocks.
