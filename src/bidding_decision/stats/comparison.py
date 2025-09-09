@@ -139,8 +139,13 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
         if 'predictions_by_frame' in predictions:
             # Special handling for ensemble algorithm to use corrected probabilities
             if algorithm == "ensemble":
-                # Use the corrected ensemble probabilities instead of the flawed ones
-                individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
+                # Try to use the corrected ensemble probabilities instead of the flawed ones
+                individual_probs = None
+                try:
+                    individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate individual algorithm probabilities: {e}")
+                    individual_probs = None
                 
                 if individual_probs:
                     # Calculate corrected ensemble probabilities using renormalized weights
@@ -202,8 +207,11 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
                             # Default midpoint if parsing fails
                             midpoint = 150
                             expected_value += probability * midpoint
-                else:
-                    # Fallback to original method if individual_probs calculation fails
+                
+                # Always fall back to standard method (either if individual_probs failed or as additional processing)
+                # This ensures ensemble predictions are always displayed even if corrected calculation fails
+                if not individual_probs:
+                    logger.info("Using standard predictions_by_frame processing for ensemble algorithm")
                     for frame_name, frame_data in predictions['predictions_by_frame'].items():
                         probability = frame_data['probability']
                         min_tweets = frame_data.get('min', 0)
@@ -505,6 +513,20 @@ def normalize_range_name(range_name: str) -> str:
     
     # Remove " times" suffix if present
     name = name.replace(" times", "").strip()
+    
+    # Handle "between X and Y" format
+    if "between" in name and "and" in name:
+        # Extract numbers from "between X and Y" format
+        try:
+            # Use regex to find the two numbers
+            match = re.search(r'between\s+(\d+)\s+and\s+(\d+)', name)
+            if match:
+                start_num = int(match.group(1))
+                end_num = int(match.group(2))
+                # Return in standard format with en dash
+                return f"{start_num}–{end_num}"
+        except (ValueError, AttributeError):
+            pass
     
     # Extract just the numeric range part
     if "–" in name or "-" in name:
