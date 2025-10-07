@@ -444,16 +444,25 @@ def normalize_range_name(range_name: str) -> str:
     # Convert to lowercase for case-insensitive comparison
     name = range_name.lower().strip()
     
-    # Remove any date suffixes first (e.g., "June 6–13?", "April 25–May 2", "June 27–July 4?")
-    # Handle cross-month patterns first (e.g., "june 27–july 4?")
+    # First, try to extract the numeric range BEFORE date removal
+    # This handles patterns like "post 260-279 tweets from October 3..."
+    early_range_match = re.search(r'(\d+)\s*[–-]\s*(\d+)', name)
+    if early_range_match:
+        # Check if this looks like a tweet count range (typically 2-3 digits)
+        start_num = int(early_range_match.group(1))
+        end_num = int(early_range_match.group(2))
+        # If it's in a reasonable tweet count range, return it immediately
+        if 10 <= start_num <= 999 and 10 <= end_num <= 999 and start_num < end_num:
+            return f"{start_num}–{end_num}"
+    
+    # Remove any date suffixes (e.g., "June 6–13?", "April 25–May 2", "from October 3 to October 10")
+    # Handle "from Month Day to Month Day" pattern first
+    name = re.sub(r'\s+from\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+\s+to\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+(,\s*\d{4})?\??.*$', '', name)
+    # Handle cross-month patterns (e.g., "june 27–july 4?")
     name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-](january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+\??.*$', '', name)
     # Handle same-month patterns (e.g., "june 6–13?")
     name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-]\d+\??.*$', '', name)
     name = re.sub(r'\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d+[–-]\d+\??.*$', '', name)
-    # Generic cross-month pattern for any unmatched cases
-    name = re.sub(r'\s+\w+\s+\d+[–-]\w+\s+\d+\??.*$', '', name)
-    # Generic same-month pattern for any unmatched cases  
-    name = re.sub(r'\s+\w+\s+\d+[–-]\d+\??.*$', '', name)
     name = name.strip()
     
     # Handle "less than X" format - extract the actual number
@@ -507,14 +516,7 @@ def normalize_range_name(range_name: str) -> str:
             except ImportError:
                 return "270+"  # Last resort fallback
     
-    # Strip any "Will Elon tweet" prefix 
-    if "will elon tweet" in name:
-        name = name.replace("will elon tweet", "").strip()
-    
-    # Remove " times" suffix if present
-    name = name.replace(" times", "").strip()
-    
-    # Handle "between X and Y" format
+    # Handle "between X and Y" format BEFORE stripping text
     if "between" in name and "and" in name:
         # Extract numbers from "between X and Y" format
         try:
@@ -528,24 +530,28 @@ def normalize_range_name(range_name: str) -> str:
         except (ValueError, AttributeError):
             pass
     
-    # Extract just the numeric range part
-    if "–" in name or "-" in name:
-        # Split by any dash character
-        separator = "–" if "–" in name else "-"
-        parts = name.split(separator)
-        
-        if len(parts) == 2:
-            start, end = parts
-            # Try to convert to numbers to ensure it's a valid range
-            try:
-                start_num = int(start.strip())
-                end_num = int(end.strip())
-                # Return in standard format with en dash
-                return f"{start_num}–{end_num}"
-            except ValueError:
-                pass
+    # Extract just the numeric range part BEFORE stripping text
+    # This handles patterns like "post 260-279 tweets" or "tweet 260–279 times"
+    range_match = re.search(r'(\d+)\s*[–-]\s*(\d+)', name)
+    if range_match:
+        try:
+            start_num = int(range_match.group(1))
+            end_num = int(range_match.group(2))
+            # Return in standard format with en dash
+            return f"{start_num}–{end_num}"
+        except ValueError:
+            pass
     
-    # If all else fails, return the original name, but clean it up
+    # Strip any "Will Elon tweet/post" prefix as a last resort
+    if "will elon tweet" in name:
+        name = name.replace("will elon tweet", "").strip()
+    if "will elon musk post" in name:
+        name = name.replace("will elon musk post", "").strip()
+    
+    # Remove " times" or " tweets" suffix if present
+    name = name.replace(" times", "").replace(" tweets", "").strip()
+    
+    # If all else fails, return the cleaned name
     return name.strip()
 
 def generate_comparison_table(

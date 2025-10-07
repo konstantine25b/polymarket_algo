@@ -1722,7 +1722,7 @@ class PolymarketPositionTracker:
         start_month_name = months.get(active_start_month, 'Unknown')
         end_month_name = months.get(active_end_month, 'Unknown')
         
-        # Create patterns to match for active market
+        # Create patterns to match for active market (case-insensitive)
         patterns = []
         
         # Same month patterns
@@ -1767,8 +1767,9 @@ class PolymarketPositionTracker:
                 f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
             ])
         
-        # Add numeric date format pattern for both cases
+        # Add numeric date format pattern and "from X to Y" phrasing
         patterns.append(f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}")
+        patterns.append(f"from {start_month_name} {int(active_start_day)} to {end_month_name} {int(active_end_day)}")
         
         # Filter positions for active market
         active_positions = {}
@@ -1776,11 +1777,12 @@ class PolymarketPositionTracker:
         for market_id, outcomes in all_positions.items():
             # Get market name for pattern matching
             market_name = self.get_market_name(market_id)
+            name_lower = market_name.lower() if isinstance(market_name, str) else ""
             
             # Check if this market matches the active market pattern
             is_active_market = False
             for pattern in patterns:
-                if pattern in market_name and "Will Elon tweet" in market_name:
+                if pattern.lower() in name_lower and ("will elon" in name_lower) and ("tweet" in name_lower or "post" in name_lower):
                     is_active_market = True
                     break
                     

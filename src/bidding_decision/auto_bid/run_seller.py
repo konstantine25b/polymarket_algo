@@ -180,20 +180,30 @@ def main():
             
             # Different possible formats for the market name
             # Handle both same-month and cross-month date ranges
+            possible_formats = []
+            
             if active_start_month == active_end_month:
                 # Same month: "June 27–30", "June 27-30"
-                format1 = f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}"
-                format2 = f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}"
-                format3 = f"{start_month_name} {active_start_day}–{active_end_day}"
-                format4 = f"{start_month_name} {active_start_day}-{active_end_day}"
-                possible_formats = [format1, format2, format3, format4]
+                possible_formats.extend([
+                    f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
+                    f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                    f"{start_month_name} {active_start_day}–{active_end_day}",
+                    f"{start_month_name} {active_start_day}-{active_end_day}"
+                ])
             else:
                 # Cross-month: "June 27–July 4", "June 27-July 4"
-                format1 = f"{start_month_name} {int(active_start_day)}–{end_month_name} {int(active_end_day)}"
-                format2 = f"{start_month_name} {int(active_start_day)}-{end_month_name} {int(active_end_day)}"
-                format3 = f"{start_month_name} {active_start_day}–{end_month_name} {active_end_day}"
-                format4 = f"{start_month_name} {active_start_day}-{end_month_name} {active_end_day}"
-                possible_formats = [format1, format2, format3, format4]
+                possible_formats.extend([
+                    f"{start_month_name} {int(active_start_day)}–{end_month_name} {int(active_end_day)}",
+                    f"{start_month_name} {int(active_start_day)}-{end_month_name} {int(active_end_day)}",
+                    f"{start_month_name} {active_start_day}–{end_month_name} {active_end_day}",
+                    f"{start_month_name} {active_start_day}-{end_month_name} {active_end_day}"
+                ])
+            
+            # Add "from Month Day to Month Day" format (new market phrasing)
+            possible_formats.extend([
+                f"from {start_month_name} {int(active_start_day)} to {end_month_name} {int(active_end_day)}",
+                f"from {start_month_name} {active_start_day} to {end_month_name} {active_end_day}"
+            ])
             
             # Also include the numeric format for fallback
             numeric_format = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"

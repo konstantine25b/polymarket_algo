@@ -16,7 +16,7 @@ POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
 
 # Polymarket Event URLs
 # Current Elon Musk tweets event
-POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-september-5-12"
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-october-3-october-10"
 
 # Data Paths
 DATA_DIR = Path("src/polymarket/data")
@@ -25,10 +25,10 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
-MARKET_ID = "0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00"
-MARKET_HASH = "elon-musk-of-tweets-september-5-12"
-EVENT_HASH = "elon-musk-of-tweets-september-5-12"
-FULL_EVENT_HASH = "elon-musk-of-tweets-september-5-12"
+MARKET_ID = "0x3b34b5dbc1f7baf76b9984d9661f70e1c4ef39d60f911205741450086ecceb00"  # NOTE: update when new market_id is known
+MARKET_HASH = "elon-musk-of-tweets-october-3-october-10"
+EVENT_HASH = "elon-musk-of-tweets-october-3-october-10"
+FULL_EVENT_HASH = "elon-musk-of-tweets-october-3-october-10"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
@@ -38,8 +38,8 @@ DEFAULT_DATA_PATH = os.path.join(
 )
 
 # Polymarket event timeframe (Eastern Time)
-POLYMARKET_START_TIME = "2025-09-05 12:00:00"
-POLYMARKET_END_TIME = "2025-09-12 12:00:00"
+POLYMARKET_START_TIME = "2025-10-03 12:00:00"
+POLYMARKET_END_TIME = "2025-10-10 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket
@@ -61,7 +61,16 @@ POLYMARKET_TIMEZONE = ET_TIMEZONE
 # ]
 
 TWEET_COUNT_FRAMES = [
-    {"name": "<200", "min": 0, "max": 199},
+    {"name": "<20", "min": 0, "max": 19},
+    {"name": "20–39", "min": 20, "max": 39},
+    {"name": "40–59", "min": 40, "max": 59},
+    {"name": "60–79", "min": 60, "max": 79},
+    {"name": "80–99", "min": 80, "max": 99},
+    {"name": "100–119", "min": 100, "max": 119},
+    {"name": "120–139", "min": 120, "max": 139},
+    {"name": "140–159", "min": 140, "max": 159},
+    {"name": "160–179", "min": 160, "max": 179},
+    {"name": "180–199", "min": 180, "max": 199},
     {"name": "200–219", "min": 200, "max": 219},
     {"name": "220–239", "min": 220, "max": 239},
     {"name": "240–259", "min": 240, "max": 259},
@@ -77,12 +86,7 @@ TWEET_COUNT_FRAMES = [
     {"name": "440–459", "min": 440, "max": 459},
     {"name": "460–479", "min": 460, "max": 479},
     {"name": "480–499", "min": 480, "max": 499},
-    {"name": "500–519", "min": 500, "max": 519},
-    {"name": "520–539", "min": 520, "max": 539},
-    {"name": "540–559", "min": 540, "max": 559},
-    {"name": "560–579", "min": 560, "max": 579},
-    {"name": "580–599", "min": 580, "max": 599},
-    {"name": "600+", "min": 600, "max": float('inf')}
+    {"name": "500+", "min": 500, "max": float('inf')}
 ]
 
 # Apify Constants
