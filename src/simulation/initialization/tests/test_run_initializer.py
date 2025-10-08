@@ -750,6 +750,336 @@ class TestRunInitializer(unittest.TestCase):
         position = run_data['positions'][0]
         self.assertAlmostEqual(position['num_shares'], 50.2, places=1)
 
+    def test_portfolio_metrics_initialization(self):
+        """Test that portfolio metrics are correctly initialized in new runs."""
+        result = self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance
+        )
+        
+        run_data = self.initializer.get_run_info(result['run_name'])
+        
+        # Check that new metrics are initialized to correct values
+        self.assertEqual(run_data['win_loss_percentage_if_sold_now'], 0.0)
+        self.assertEqual(run_data['win_loss_percentage'], 0.0)
+        self.assertEqual(run_data['total_balance_if_all_positions_sold'], self.initial_balance)
+        
+        # Check that metrics are in the balance history
+        balance_history = run_data['total_balances'][0]
+        self.assertEqual(balance_history['win_loss_percentage_if_sold_now'], 0.0)
+        self.assertEqual(balance_history['win_loss_percentage'], 0.0)
+        self.assertEqual(balance_history['total_balance_if_all_positions_sold'], self.initial_balance)
+
+    def test_portfolio_metrics_with_profitable_position(self):
+        """Test portfolio metrics calculation with a profitable position."""
+        # Create run and market
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            market_name="Test Market",
+            description="Test Description",
+            category="test",
+            initial_price=0.50,
+            bid_price=0.48,
+            ask_price=0.52
+        )
+        
+        # Add position at ask price (0.52)
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=100
+        )
+        
+        # Update prices to make position profitable
+        # Market price increases to 0.60, bid to 0.58, ask to 0.62
+        self.initializer.update_market_prices(
+            run_name=self.test_run_name,
+            price_updates={
+                "0x123": {
+                    "price": 0.60,
+                    "bid": 0.58,
+                    "ask": 0.62
+                }
+            }
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Calculate expected values
+        shares = 100
+        invested = shares * 0.52  # 52.0
+        current_market_value = shares * 0.60  # 60.0
+        current_bid_value = shares * 0.58  # 58.0
+        
+        expected_win_loss_pct = ((current_market_value - invested) / invested) * 100  # 15.38%
+        expected_win_loss_if_sold_pct = ((current_bid_value - invested) / invested) * 100  # 11.54%
+        expected_total_if_sold = run_data['current_balance'] + current_bid_value
+        
+        self.assertAlmostEqual(run_data['win_loss_percentage'], expected_win_loss_pct, places=2)
+        self.assertAlmostEqual(run_data['win_loss_percentage_if_sold_now'], expected_win_loss_if_sold_pct, places=2)
+        self.assertAlmostEqual(run_data['total_balance_if_all_positions_sold'], expected_total_if_sold, places=2)
+
+    def test_portfolio_metrics_with_losing_position(self):
+        """Test portfolio metrics calculation with a losing position."""
+        # Create run and market
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            market_name="Test Market",
+            description="Test Description",
+            category="test",
+            initial_price=0.70,
+            bid_price=0.68,
+            ask_price=0.72
+        )
+        
+        # Add position at ask price (0.72)
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=100
+        )
+        
+        # Update prices to make position lose value
+        # Market price decreases to 0.50, bid to 0.48, ask to 0.52
+        self.initializer.update_market_prices(
+            run_name=self.test_run_name,
+            price_updates={
+                "0x123": {
+                    "price": 0.50,
+                    "bid": 0.48,
+                    "ask": 0.52
+                }
+            }
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Calculate expected values
+        shares = 100
+        invested = shares * 0.72  # 72.0
+        current_market_value = shares * 0.50  # 50.0
+        current_bid_value = shares * 0.48  # 48.0
+        
+        expected_win_loss_pct = ((current_market_value - invested) / invested) * 100  # -30.56%
+        expected_win_loss_if_sold_pct = ((current_bid_value - invested) / invested) * 100  # -33.33%
+        expected_total_if_sold = run_data['current_balance'] + current_bid_value
+        
+        self.assertAlmostEqual(run_data['win_loss_percentage'], expected_win_loss_pct, places=2)
+        self.assertAlmostEqual(run_data['win_loss_percentage_if_sold_now'], expected_win_loss_if_sold_pct, places=2)
+        self.assertAlmostEqual(run_data['total_balance_if_all_positions_sold'], expected_total_if_sold, places=2)
+
+    def test_portfolio_metrics_with_multiple_positions(self):
+        """Test portfolio metrics calculation with multiple positions."""
+        # Create run
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        # Create two markets
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            market_name="Market 1",
+            description="Test Market 1",
+            category="test",
+            initial_price=0.50,
+            bid_price=0.48,
+            ask_price=0.52
+        )
+        
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x456",
+            market_name="Market 2",
+            description="Test Market 2",
+            category="test",
+            initial_price=0.30,
+            bid_price=0.28,
+            ask_price=0.32
+        )
+        
+        # Add positions
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=100  # Cost: 100 * 0.52 = 52.0
+        )
+        
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x456",
+            num_shares=200  # Cost: 200 * 0.32 = 64.0
+        )
+        
+        # Update prices to create mixed results
+        self.initializer.update_market_prices(
+            run_name=self.test_run_name,
+            price_updates={
+                "0x123": {
+                    "price": 0.60,  # Profitable: 100 * 0.60 = 60.0
+                    "bid": 0.58,     # If sold: 100 * 0.58 = 58.0
+                    "ask": 0.62
+                },
+                "0x456": {
+                    "price": 0.25,  # Loss: 200 * 0.25 = 50.0
+                    "bid": 0.23,     # If sold: 200 * 0.23 = 46.0
+                    "ask": 0.27
+                }
+            }
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Calculate expected values
+        total_invested = 52.0 + 64.0  # 116.0
+        total_market_value = 60.0 + 50.0  # 110.0
+        total_bid_value = 58.0 + 46.0  # 104.0
+        
+        expected_win_loss_pct = ((total_market_value - total_invested) / total_invested) * 100  # -5.17%
+        expected_win_loss_if_sold_pct = ((total_bid_value - total_invested) / total_invested) * 100  # -10.34%
+        expected_total_if_sold = run_data['current_balance'] + total_bid_value
+        
+        self.assertAlmostEqual(run_data['win_loss_percentage'], expected_win_loss_pct, places=2)
+        self.assertAlmostEqual(run_data['win_loss_percentage_if_sold_now'], expected_win_loss_if_sold_pct, places=2)
+        self.assertAlmostEqual(run_data['total_balance_if_all_positions_sold'], expected_total_if_sold, places=2)
+
+    def test_portfolio_metrics_after_selling_position(self):
+        """Test portfolio metrics after selling a position."""
+        # Create run and market
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            market_name="Test Market",
+            description="Test Description",
+            category="test",
+            initial_price=0.50,
+            bid_price=0.48,
+            ask_price=0.52
+        )
+        
+        # Add position
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=100
+        )
+        
+        # Sell half the position
+        self.initializer.sell_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=50
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Should have 50 shares left, invested 26.0 (50 * 0.52)
+        # Current values based on initial prices
+        remaining_invested = 26.0  # 50 * 0.52
+        current_market_value = 50 * 0.50  # 25.0
+        current_bid_value = 50 * 0.48  # 24.0
+        
+        expected_win_loss_pct = ((current_market_value - remaining_invested) / remaining_invested) * 100
+        expected_win_loss_if_sold_pct = ((current_bid_value - remaining_invested) / remaining_invested) * 100
+        expected_total_if_sold = run_data['current_balance'] + current_bid_value
+        
+        self.assertAlmostEqual(run_data['win_loss_percentage'], expected_win_loss_pct, places=2)
+        self.assertAlmostEqual(run_data['win_loss_percentage_if_sold_now'], expected_win_loss_if_sold_pct, places=2)
+        self.assertAlmostEqual(run_data['total_balance_if_all_positions_sold'], expected_total_if_sold, places=2)
+
+    def test_portfolio_metrics_with_no_positions(self):
+        """Test portfolio metrics when there are no active positions."""
+        # Create run but no positions
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Should all be zero or equal to current balance
+        self.assertEqual(run_data['win_loss_percentage'], 0.0)
+        self.assertEqual(run_data['win_loss_percentage_if_sold_now'], 0.0)
+        self.assertEqual(run_data['total_balance_if_all_positions_sold'], run_data['current_balance'])
+
+    def test_portfolio_metrics_balance_history_tracking(self):
+        """Test that portfolio metrics are correctly tracked in balance history."""
+        # Create run and market
+        self.initializer.create_new_run(
+            market_name=self.test_market_name,
+            initial_balance=self.initial_balance,
+            run_name=self.test_run_name
+        )
+        
+        self.initializer.create_market(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            market_name="Test Market",
+            description="Test Description",
+            category="test",
+            initial_price=0.50,
+            bid_price=0.48,
+            ask_price=0.52
+        )
+        
+        # Add position
+        self.initializer.add_position(
+            run_name=self.test_run_name,
+            market_id="0x123",
+            num_shares=100
+        )
+        
+        # Update prices
+        self.initializer.update_market_prices(
+            run_name=self.test_run_name,
+            price_updates={
+                "0x123": {
+                    "price": 0.60,
+                    "bid": 0.58,
+                    "ask": 0.62
+                }
+            }
+        )
+        
+        run_data = self.initializer.get_run_info(self.test_run_name)
+        
+        # Check that we have multiple balance history entries
+        self.assertGreaterEqual(len(run_data['total_balances']), 3)  # Initial + add_position + update_prices
+        
+        # Check that the latest balance history has the correct metrics
+        latest_balance = run_data['total_balances'][-1]
+        self.assertIn('win_loss_percentage_if_sold_now', latest_balance)
+        self.assertIn('win_loss_percentage', latest_balance)
+        self.assertIn('total_balance_if_all_positions_sold', latest_balance)
+        
+        # Values should match current run data
+        self.assertAlmostEqual(latest_balance['win_loss_percentage'], run_data['win_loss_percentage'], places=2)
+        self.assertAlmostEqual(latest_balance['win_loss_percentage_if_sold_now'], run_data['win_loss_percentage_if_sold_now'], places=2)
+        self.assertAlmostEqual(latest_balance['total_balance_if_all_positions_sold'], run_data['total_balance_if_all_positions_sold'], places=2)
+
 
 class TestIntegrationScenarios(unittest.TestCase):
     """Integration tests for complete trading scenarios."""

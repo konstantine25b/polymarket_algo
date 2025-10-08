@@ -7,12 +7,16 @@ This module provides functionality to periodically:
 2. Run the Polymarket predictor to update predictions
 3. Run the auto-bidder to place orders based on statistical opportunities
 4. Add the auto-seller to place sell orders based on statistical opportunities
+5. Run simulation mode using the simulation framework
 
 Usage:
     python -m src.scheduler.scheduler [options]
 
 Options:
     --interval MINUTES     Set the interval between runs (default: 20 minutes)
+    --tweet-interval MINUTES Interval between tweet fetching runs in minutes (overrides global interval)
+    --buy-interval MINUTES  Interval between auto-bidder runs in minutes (overrides global interval)
+    --sell-interval MINUTES Interval between auto-seller runs in minutes (overrides global interval)
     --tweets-only          Only run the tweet fetching job
     --predictions-only     Only run the prediction job
     --max-tweets N         Set maximum number of tweets to fetch (default: 40)
@@ -46,6 +50,19 @@ Options:
     --max-count-retries    Maximum number of retries for tweet count retrieval (default: 3)
     --show-positions       Show all current positions when running
     --show-active-positions Show positions for active market when running
+    --simulate RUN_NAME    Run in simulation mode using the specified simulation run
+    --strategy STRATEGY    Strategy to use for simulation (default: strategy_1)
+    --sim-balance FLOAT    Initial balance for new simulation runs (default: 1000.0)
+    --show-eachalgo-distribution Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)
+    --loss-threshold-1     First loss threshold percentage (default: -40.0)
+    --loss-sell-1        Percentage of position to sell at first loss threshold (default: 50.0)
+    --loss-threshold-2     Second loss threshold percentage (default: -60.0)
+    --loss-sell-2        Percentage of position to sell at second loss threshold (default: 100.0)
+    --gain-threshold-1    First gain threshold percentage (default: 40.0)
+    --gain-sell-1       Percentage of position to sell at first gain threshold (default: 40.0)
+    --gain-threshold-2    Second gain threshold percentage (default: 80.0)
+    --gain-sell-2       Percentage of position to sell at second gain threshold (default: 40.0)
+    --auto-sell          Enable automatic execution of sell orders in simulation mode
 """
 
 import argparse
@@ -107,6 +124,21 @@ def setup_argparse():
                         help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                         help='Random seed for reproducible predictions (default: 42)')
+    
+    # Ensemble model weight arguments
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
+                        help='Weight for Neural Prophet model in ensemble (default: 0.17, set to 0 to exclude)')
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
+                        help='Weight for Facebook Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model in ensemble (default: 0.30, set to 0 to exclude)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.015,
+                        help='Weight for Moving Average in ensemble (default: 0.015, set to 0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.015,
+                        help='Weight for Linear Trend in ensemble (default: 0.015, set to 0 to exclude)')
+    
     parser.add_argument('--no-bidding', action='store_true',
                         help="Don't run the auto-bidder")
     parser.add_argument('--no-selling', action='store_true',
@@ -149,6 +181,32 @@ def setup_argparse():
                         help='Show all current positions when running')
     parser.add_argument('--show-active-positions', action='store_true',
                         help='Show positions for active market when running')
+    parser.add_argument('--simulate', type=str, default=None,
+                        help='Run in simulation mode using the specified simulation run')
+    parser.add_argument('--strategy', type=str, default='strategy_1',
+                        help='Strategy to use for simulation (default: strategy_1)')
+    parser.add_argument('--sim-balance', type=float, default=1000.0,
+                        help='Initial balance for new simulation runs (default: 1000.0)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                        help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
+    parser.add_argument('--loss-threshold-1', type=float, default=-40.0,
+                        help='First loss threshold percentage (default: -40.0)')
+    parser.add_argument('--loss-sell-1', type=float, default=50.0,
+                        help='Percentage of position to sell at first loss threshold (default: 50.0)')
+    parser.add_argument('--loss-threshold-2', type=float, default=-60.0,
+                        help='Second loss threshold percentage (default: -60.0)')
+    parser.add_argument('--loss-sell-2', type=float, default=100.0,
+                        help='Percentage of position to sell at second loss threshold (default: 100.0)')
+    parser.add_argument('--gain-threshold-1', type=float, default=40.0,
+                        help='First gain threshold percentage (default: 40.0)')
+    parser.add_argument('--gain-sell-1', type=float, default=40.0,
+                        help='Percentage of position to sell at first gain threshold (default: 40.0)')
+    parser.add_argument('--gain-threshold-2', type=float, default=80.0,
+                        help='Second gain threshold percentage (default: 80.0)')
+    parser.add_argument('--gain-sell-2', type=float, default=40.0,
+                        help='Percentage of position to sell at second gain threshold (default: 40.0)')
+    parser.add_argument('--auto-sell', action='store_true',
+                        help='Enable automatic execution of sell orders in simulation mode')
     return parser.parse_args()
 
 def fetch_tweets(max_tweets=40, debug=True, quiet=False, use_incremental=True, initial_batch=40, max_batch=200):
@@ -404,6 +462,286 @@ def check_wallet_balance():
         logger.error(f"Error checking wallet balance: {e}")
         return {"success": False, "error": str(e), "usdc_balance": 0, "matic_balance": 0}
 
+def initialize_simulation_run(run_name, balance, strategy="strategy_1"):
+    """Initialize a new simulation run if it doesn't exist.
+    
+    Args:
+        run_name: Name of the simulation run
+        balance: Initial balance for the simulation
+        strategy: Strategy to use (default: strategy_1)
+    
+    Returns:
+        bool: Whether initialization was successful
+    """
+    logger.info(f"Initializing simulation run: {run_name} with balance: ${balance}")
+    
+    # Check if run already exists
+    check_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--info", run_name
+    ]
+    
+    try:
+        process = subprocess.run(check_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Check if the output contains "not found" to determine if run exists
+        if "not found" not in process.stdout:
+            logger.info(f"Simulation run '{run_name}' already exists, skipping initialization")
+            return True
+    except Exception as e:
+        logger.debug(f"Error checking existing run (expected if run doesn't exist): {e}")
+    
+    # Create new simulation run
+    create_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--create", 
+        "--market-name", f"Scheduler Simulation - {strategy}",
+        "--balance", str(balance),
+        "--run-name", run_name
+    ]
+    
+    try:
+        logger.info("Creating new simulation run...")
+        process = subprocess.run(create_cmd)
+        if process.returncode != 0:
+            logger.error("Failed to create simulation run")
+            return False
+            
+        logger.info("Simulation run created successfully")
+    except Exception as e:
+        logger.error(f"Error creating simulation run: {e}")
+        return False
+    
+    # Initialize markets from Polymarket
+    init_markets_cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--init-markets-from-polymarket", run_name
+    ]
+    
+    try:
+        logger.info("Initializing markets from Polymarket...")
+        process = subprocess.run(init_markets_cmd)
+        if process.returncode != 0:
+            logger.error("Failed to initialize markets")
+            return False
+            
+        logger.info("Markets initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing markets: {e}")
+        return False
+
+def run_simulation_bidder(run_name, strategy="strategy_1", threshold=0.0, amount=1.0, dry_run=False, 
+                         show_stats=True, weighted_selection=False, min_prediction=0.0, quiet=False,
+                         algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False,
+                         loss_threshold_1=-40.0, loss_sell_1=50.0, loss_threshold_2=-60.0, loss_sell_2=100.0,
+                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0):
+    """Run the simulation bidder for the specified strategy.
+    
+    Args:
+        run_name: Name of the simulation run
+        strategy: Strategy to use (default: strategy_1)
+        threshold: Minimum opportunity percentage to place bids
+        amount: Amount to bid in USD
+        dry_run: Whether to run in dry run mode
+        show_stats: Whether to show full statistics table
+        weighted_selection: Whether to use weighted selection
+        min_prediction: Minimum prediction percentage required
+        quiet: Whether to suppress output
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
+        loss_threshold_1: First loss threshold percentage (for strategy_2)
+        loss_sell_1: Percentage to sell at first loss threshold (for strategy_2)
+        loss_threshold_2: Second loss threshold percentage (for strategy_2)
+        loss_sell_2: Percentage to sell at second loss threshold (for strategy_2)
+        gain_threshold_1: First gain threshold percentage (for strategy_2)
+        gain_sell_1: Percentage to sell at first gain threshold (for strategy_2)
+        gain_threshold_2: Second gain threshold percentage (for strategy_2)
+        gain_sell_2: Percentage to sell at second gain threshold (for strategy_2)
+    
+    Returns:
+        bool: Whether the bidding was successful
+    """
+    logger.info(f"Running simulation bidder for run '{run_name}' with strategy '{strategy}'")
+    
+    cmd = [
+        sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
+        "--run", run_name,
+        f"--threshold={threshold}",
+        f"--amount={amount}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
+    ]
+    
+    # Add stop loss parameters for strategy_2
+    if strategy == "strategy_2":
+        cmd.extend([
+            f"--loss-threshold-1={loss_threshold_1}",
+            f"--loss-sell-1={loss_sell_1}",
+            f"--loss-threshold-2={loss_threshold_2}",
+            f"--loss-sell-2={loss_sell_2}",
+            f"--gain-threshold-1={gain_threshold_1}",
+            f"--gain-sell-1={gain_sell_1}",
+            f"--gain-threshold-2={gain_threshold_2}",
+            f"--gain-sell-2={gain_sell_2}"
+        ])
+        logger.info(f"Added stop loss parameters: loss thresholds {loss_threshold_1}%/{loss_threshold_2}%, gain thresholds {gain_threshold_1}%/{gain_threshold_2}%")
+    
+    if dry_run:
+        cmd.append("--dry-run")
+        
+    if not show_stats:
+        cmd.append("--no-stats")
+        
+    if weighted_selection:
+        cmd.append("--weighted-selection")
+        
+    if min_prediction > 0:
+        cmd.append(f"--min-prediction={min_prediction}")
+    
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
+    
+    try:
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Simulation bidder failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Simulation bidder completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Simulation bidder failed")
+            else:
+                logger.info("Simulation bidder completed successfully")
+    except Exception as e:
+        logger.error(f"Error running simulation bidder: {e}")
+        return False
+    
+    return process.returncode == 0
+
+def run_simulation_seller(run_name, strategy="strategy_1", threshold=0.0, sell_below=0.0, dry_run=False,
+                         show_stats=True, debug=False, quiet=False, algorithm="enhanced_facebook_prophet", random_seed=42, show_eachalgo_distribution=False,
+                         loss_threshold_1=-40.0, loss_sell_1=50.0, loss_threshold_2=-60.0, loss_sell_2=100.0,
+                         gain_threshold_1=40.0, gain_sell_1=40.0, gain_threshold_2=80.0, gain_sell_2=40.0, auto_sell=False):
+    """Run the simulation seller for the specified strategy.
+    
+    Args:
+        run_name: Name of the simulation run
+        strategy: Strategy to use (default: strategy_1)
+        threshold: Minimum opportunity percentage to place sells
+        sell_below: Automatically sell positions with prediction below this percentage
+        dry_run: Whether to run in dry run mode
+        show_stats: Whether to show full statistics table
+        debug: Show detailed debugging information
+        quiet: Whether to suppress output
+        algorithm: Prediction algorithm to use
+        random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
+        loss_threshold_1: First loss threshold percentage (for strategy_2)
+        loss_sell_1: Percentage to sell at first loss threshold (for strategy_2)
+        loss_threshold_2: Second loss threshold percentage (for strategy_2)
+        loss_sell_2: Percentage to sell at second loss threshold (for strategy_2)
+        gain_threshold_1: First gain threshold percentage (for strategy_2)
+        gain_sell_1: Percentage to sell at first gain threshold (for strategy_2)
+        gain_threshold_2: Second gain threshold percentage (for strategy_2)
+        gain_sell_2: Percentage to sell at second gain threshold (for strategy_2)
+        auto_sell: Whether to automatically execute sell orders (default: False)
+    
+    Returns:
+        bool: Whether the selling was successful
+    """
+    logger.info(f"Running simulation seller for run '{run_name}' with strategy '{strategy}'")
+    
+    cmd = [
+        sys.executable, "-m", f"src.simulation.bidding_decision.{strategy}",
+        "--sell", run_name,
+        f"--threshold={threshold}",
+        f"--algorithm={algorithm}",
+        f"--random-seed={random_seed}"
+    ]
+    
+    # Add stop loss parameters for strategy_2
+    if strategy == "strategy_2":
+        cmd.extend([
+            f"--loss-threshold-1={loss_threshold_1}",
+            f"--loss-sell-1={loss_sell_1}",
+            f"--loss-threshold-2={loss_threshold_2}",
+            f"--loss-sell-2={loss_sell_2}",
+            f"--gain-threshold-1={gain_threshold_1}",
+            f"--gain-sell-1={gain_sell_1}",
+            f"--gain-threshold-2={gain_threshold_2}",
+            f"--gain-sell-2={gain_sell_2}"
+        ])
+        logger.info(f"Added stop loss parameters: loss thresholds {loss_threshold_1}%/{loss_threshold_2}%, gain thresholds {gain_threshold_1}%/{gain_threshold_2}%")
+    
+    if dry_run:
+        cmd.append("--dry-run")
+    else:
+        # Add the auto-sell flag to execute orders when not in dry run
+        if auto_sell:
+            cmd.append("--auto-sell")
+            logger.info("Auto-sell enabled: will execute sell orders")
+        else:
+            logger.info("Auto-sell disabled: will only show sell recommendations")
+        
+    if not show_stats:
+        cmd.append("--no-stats")
+        
+    if sell_below > 0:
+        cmd.append(f"--sell-below={sell_below}")
+        
+    if debug:
+        cmd.append("--debug")
+    
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
+    
+    try:
+        if quiet and not dry_run:  # Always show output in dry run mode
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"Simulation seller failed with error: {process.stderr.decode()}")
+            else:
+                logger.info("Simulation seller completed successfully")
+                output = process.stdout.decode()
+                print("\n" + output)
+        else:
+            process = subprocess.run(cmd)
+            if process.returncode != 0:
+                logger.error("Simulation seller failed")
+            else:
+                logger.info("Simulation seller completed successfully")
+    except Exception as e:
+        logger.error(f"Error running simulation seller: {e}")
+        return False
+    
+    return process.returncode == 0
+
+def display_simulation_info(run_name):
+    """Display information about the simulation run.
+    
+    Args:
+        run_name: Name of the simulation run
+    """
+    print(f"\n🎯 SIMULATION RUN: {run_name}")
+    print("=" * 60)
+    
+    cmd = [
+        sys.executable, "-m", "src.simulation.initialization",
+        "--info", run_name
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        print(f"❌ Could not retrieve information for simulation run: {run_name}")
+
 def display_wallet_balance():
     """Display the wallet balance in a formatted way."""
     balance_info = check_wallet_balance()
@@ -423,7 +761,7 @@ def display_wallet_balance():
     
     return balance_info
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30, basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -436,6 +774,13 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         min_prediction: Minimum prediction percentage required to consider an opportunity
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
+        neural_prophet_weight: Weight for Neural Prophet in ensemble
+        facebook_prophet_weight: Weight for Facebook Prophet in ensemble
+        timesfm_weight: Weight for TimesFM in ensemble
+        basic_prophet_weight: Weight for Basic Prophet in ensemble
+        moving_average_weight: Weight for Moving Average in ensemble
+        linear_trend_weight: Weight for Linear Trend in ensemble
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -449,6 +794,17 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add ensemble weight parameters if algorithm is ensemble
+    if algorithm == "ensemble":
+        cmd.extend([
+            f"--neural-prophet-weight={neural_prophet_weight}",
+            f"--facebook-prophet-weight={facebook_prophet_weight}",
+            f"--timesfm-weight={timesfm_weight}",
+            f"--basic-prophet-weight={basic_prophet_weight}",
+            f"--moving-average-weight={moving_average_weight}",
+            f"--linear-trend-weight={linear_trend_weight}"
+        ])
     
     # Add dry run mode if requested
     if dry_run:
@@ -468,6 +824,11 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     if min_prediction > 0:
         cmd.append(f"--min-prediction={min_prediction}")
         logger.info(f"Using minimum prediction threshold of {min_prediction}% for buy opportunities")
+    
+    # Add show individual algorithm distributions if requested
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
     
     logger.info(f"Using prediction algorithm: {algorithm} with random seed: {random_seed}")
     
@@ -493,7 +854,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42):
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, show_positions=False, show_active_positions=False, neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30, basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015):
     """Run the auto-seller to sell positions based on statistical analysis.
     
     Args:
@@ -505,6 +866,15 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         debug: Show detailed debugging information
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
+        show_eachalgo_distribution: Whether to show individual algorithm distributions
+        show_positions: Whether to show all current positions
+        show_active_positions: Whether to show active market positions
+        neural_prophet_weight: Weight for Neural Prophet in ensemble
+        facebook_prophet_weight: Weight for Facebook Prophet in ensemble
+        timesfm_weight: Weight for TimesFM in ensemble
+        basic_prophet_weight: Weight for Basic Prophet in ensemble
+        moving_average_weight: Weight for Moving Average in ensemble
+        linear_trend_weight: Weight for Linear Trend in ensemble
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
@@ -517,6 +887,17 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add ensemble weight parameters if algorithm is ensemble
+    if algorithm == "ensemble":
+        cmd.extend([
+            f"--neural-prophet-weight={neural_prophet_weight}",
+            f"--facebook-prophet-weight={facebook_prophet_weight}",
+            f"--timesfm-weight={timesfm_weight}",
+            f"--basic-prophet-weight={basic_prophet_weight}",
+            f"--moving-average-weight={moving_average_weight}",
+            f"--linear-trend-weight={linear_trend_weight}"
+        ])
     
     # Add dry run mode if requested
     if dry_run:
@@ -539,6 +920,20 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
     if debug:
         cmd.append("--debug")
         logger.info("Enabling debug mode for position seller")
+    
+    # Add show individual algorithm distributions if requested
+    if show_eachalgo_distribution:
+        cmd.append("--show-eachalgo-distribution")
+        logger.info("Showing individual algorithm probability distributions")
+    
+    # Add position display flags if requested
+    if show_positions:
+        cmd.append("--show-positions")
+        logger.info("Will display all current positions")
+    
+    if show_active_positions:
+        cmd.append("--show-active-positions")
+        logger.info("Will display active market positions")
     
     # Add flag to focus on active market only
     cmd.append("--active-market-only")
@@ -614,7 +1009,7 @@ def run_scheduled_jobs(args):
                     print(f"📊 Both local database and Polymarket site show {db_count} tweets")
                     print("🔄 Skipping tweet fetching as counts already match")
                     print("=" * 60 + "\n")
-                    skip_tweet_fetching = True
+                    skip_tweet_fetching = True  # Actually skip tweet fetching when counts match
                 else:
                     diff = abs(db_count - polymarket_count)
                     logger.info(f"Tweet counts don't match: DB={db_count}, Polymarket={polymarket_count}, Difference={diff}")
@@ -892,29 +1287,135 @@ def run_scheduled_jobs(args):
     
     # Run the prediction job if configured and tweet fetching succeeded (or was skipped)
     if not args.tweets_only and (tweets_success or skip_tweet_fetching or getattr(args, '_component_run', False)):
-        # For component-specific runs, ensure we run prediction
+        # For component-specific runs, skip the extra prediction since bidder/seller will run their own
+        # with the correct algorithm parameters
         if getattr(args, '_component_run', False):
-            logger.info("Running prediction for component-specific run")
-            
-        prediction_success = run_prediction(
-            quiet=True,  # Always run prediction quietly since we'll show bidder output instead
-            use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
-        )
+            logger.info("Skipping generic prediction for component-specific run (bidder/seller will run their own)")
+            prediction_success = True  # Skip the generic prediction since bidder/seller will run their own with correct algorithm
+        else:
+            # Normal prediction run for regular scheduling
+            prediction_success = run_prediction(
+                quiet=True,  # Always run prediction quietly since we'll show bidder output instead
+                use_prophet=not args.no_prophet  # Use Prophet by default unless --no-prophet is specified
+            )
         
-        # Check wallet balance if needed
-        if prediction_success and not args.no_bidding and not args.skip_balance_check:
-            balance_info = display_wallet_balance()
-            has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+        # Handle simulation mode
+        if args.simulate:
+            # Initialize simulation run if needed
+            if not initialize_simulation_run(args.simulate, args.sim_balance, args.strategy):
+                logger.error("Failed to initialize simulation run")
+                return False
             
-            if not has_sufficient_balance and not args.dry_run and not args.no_buy:
-                logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
-                logger.warning("Skipping auto-bidder due to insufficient USDC balance")
-                print("\n" + "=" * 60)
-                print(f"⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance")
-                print("=" * 60)
-                print(f"💲 Current balance: {balance_info.get('usdc_balance', 0)} USDC")
-                print(f"💲 Minimum required: {args.min_usdc} USDC")
-                print("=" * 60 + "\n")
+            # Display simulation info
+            display_simulation_info(args.simulate)
+            
+            # Run simulation bidder if bidding not disabled
+            if prediction_success and not args.no_bidding:
+                # If --no-buy is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_buy
+                
+                # Log the appropriate mode
+                if args.no_buy and not args.dry_run:
+                    logger.info("Running simulation bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                
+                run_simulation_bidder(
+                    run_name=args.simulate,
+                    strategy=args.strategy,
+                    threshold=args.buy_threshold,
+                    amount=args.amount,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    weighted_selection=args.weighted_selection,
+                    min_prediction=args.min_prediction,
+                    quiet=args.quiet,
+                    algorithm=args.algorithm,
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    loss_threshold_1=args.loss_threshold_1,
+                    loss_sell_1=args.loss_sell_1,
+                    loss_threshold_2=args.loss_threshold_2,
+                    loss_sell_2=args.loss_sell_2,
+                    gain_threshold_1=args.gain_threshold_1,
+                    gain_sell_1=args.gain_sell_1,
+                    gain_threshold_2=args.gain_threshold_2,
+                    gain_sell_2=args.gain_sell_2
+                )
+                
+            # Run simulation seller if selling not disabled
+            if prediction_success and not args.no_selling:
+                # If --no-sell is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_sell
+                
+                # Log the appropriate mode
+                if args.no_sell and not args.dry_run:
+                    logger.info("Running simulation seller in no-sell mode (opportunities will be shown but no orders placed)")
+                
+                run_simulation_seller(
+                    run_name=args.simulate,
+                    strategy=args.strategy,
+                    threshold=args.sell_threshold,
+                    sell_below=args.sell_below,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    debug=args.debug_seller,
+                    quiet=args.quiet,
+                    algorithm=args.algorithm,
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    loss_threshold_1=args.loss_threshold_1,
+                    loss_sell_1=args.loss_sell_1,
+                    loss_threshold_2=args.loss_threshold_2,
+                    loss_sell_2=args.loss_sell_2,
+                    gain_threshold_1=args.gain_threshold_1,
+                    gain_sell_1=args.gain_sell_1,
+                    gain_threshold_2=args.gain_threshold_2,
+                    gain_sell_2=args.gain_sell_2,
+                    auto_sell=args.auto_sell
+                )
+        else:
+            # Normal mode - real bidding and selling
+            # Check wallet balance if needed
+            if prediction_success and not args.no_bidding and not args.skip_balance_check:
+                balance_info = display_wallet_balance()
+                has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
+                
+                if not has_sufficient_balance and not args.dry_run and not args.no_buy:
+                    logger.warning(f"Insufficient USDC balance ({balance_info.get('usdc_balance', 0)} USDC) for auto-bidding. Minimum required: {args.min_usdc} USDC")
+                    logger.warning("Skipping auto-bidder due to insufficient USDC balance")
+                    print("\n" + "=" * 60)
+                    print(f"⚠️ SKIPPING AUTO-BIDDER: Insufficient USDC balance")
+                    print("=" * 60)
+                    print(f"💲 Current balance: {balance_info.get('usdc_balance', 0)} USDC")
+                    print(f"💲 Minimum required: {args.min_usdc} USDC")
+                    print("=" * 60 + "\n")
+                elif prediction_success and not args.no_bidding:
+                    # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
+                    if has_sufficient_balance or args.dry_run or args.no_buy:
+                        # If --no-buy is specified, force dry run mode
+                        effective_dry_run = args.dry_run or args.no_buy
+                        
+                        # Log the appropriate mode
+                        if args.no_buy and not args.dry_run:
+                            logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
+                        
+                        run_auto_bidder(
+                            quiet=args.quiet,
+                            threshold=args.buy_threshold,
+                            amount=args.amount,
+                            dry_run=effective_dry_run,
+                            show_stats=not args.no_stats,
+                            weighted_selection=args.weighted_selection,
+                            min_prediction=args.min_prediction,
+                            algorithm=args.algorithm,
+                            random_seed=args.random_seed,
+                            show_eachalgo_distribution=args.show_eachalgo_distribution,
+                            neural_prophet_weight=args.neural_prophet_weight,
+                            facebook_prophet_weight=args.facebook_prophet_weight,
+                            timesfm_weight=args.timesfm_weight,
+                            basic_prophet_weight=args.basic_prophet_weight,
+                            moving_average_weight=args.moving_average_weight,
+                            linear_trend_weight=args.linear_trend_weight
+                        )
             elif prediction_success and not args.no_bidding:
                 # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
                 if has_sufficient_balance or args.dry_run or args.no_buy:
@@ -934,49 +1435,45 @@ def run_scheduled_jobs(args):
                         weighted_selection=args.weighted_selection,
                         min_prediction=args.min_prediction,
                         algorithm=args.algorithm,
-                        random_seed=args.random_seed
+                        random_seed=args.random_seed,
+                        show_eachalgo_distribution=args.show_eachalgo_distribution,
+                        neural_prophet_weight=args.neural_prophet_weight,
+                        facebook_prophet_weight=args.facebook_prophet_weight,
+                        timesfm_weight=args.timesfm_weight,
+                        basic_prophet_weight=args.basic_prophet_weight,
+                        moving_average_weight=args.moving_average_weight,
+                        linear_trend_weight=args.linear_trend_weight
                     )
-        elif prediction_success and not args.no_bidding:
-            # Skip balance check if requested
-            # If --no-buy is specified, force dry run mode
-            effective_dry_run = args.dry_run or args.no_buy
             
-            # Log the appropriate mode
-            if args.no_buy and not args.dry_run:
-                logger.info("Running auto-bidder in no-buy mode (opportunities will be shown but no orders placed)")
-            
-            run_auto_bidder(
-                quiet=args.quiet,
-                threshold=args.buy_threshold,
-                amount=args.amount,
-                dry_run=effective_dry_run,
-                show_stats=not args.no_stats,
-                weighted_selection=args.weighted_selection,
-                min_prediction=args.min_prediction,
-                algorithm=args.algorithm,
-                random_seed=args.random_seed
-            )
-            
-        # Run the auto-seller if prediction succeeded and selling not disabled
-        # (always run auto-seller regardless of balance)
-        if prediction_success and not args.no_selling:
-            # If --no-sell is specified, force dry run mode
-            effective_dry_run = args.dry_run or args.no_sell
-            
-            # Log the appropriate mode
-            if args.no_sell and not args.dry_run:
-                logger.info("Running auto-seller in no-sell mode (opportunities will be shown but no orders placed)")
-            
-            run_auto_seller(
-                quiet=args.quiet,
-                threshold=args.sell_threshold,
-                dry_run=effective_dry_run,
-                show_stats=not args.no_stats,
-                sell_below=args.sell_below,
-                debug=args.debug_seller,
-                algorithm=args.algorithm,
-                random_seed=args.random_seed
-            )
+            # Run the auto-seller if prediction succeeded and selling not disabled
+            # (always run auto-seller regardless of balance)
+            if prediction_success and not args.no_selling:
+                # If --no-sell is specified, force dry run mode
+                effective_dry_run = args.dry_run or args.no_sell
+                
+                # Log the appropriate mode
+                if args.no_sell and not args.dry_run:
+                    logger.info("Running auto-seller in no-sell mode (opportunities will be shown but no orders placed)")
+                
+                run_auto_seller(
+                    quiet=args.quiet,
+                    threshold=args.sell_threshold,
+                    dry_run=effective_dry_run,
+                    show_stats=not args.no_stats,
+                    sell_below=args.sell_below,
+                    debug=args.debug_seller,
+                    algorithm=args.algorithm,
+                    random_seed=args.random_seed,
+                    show_eachalgo_distribution=args.show_eachalgo_distribution,
+                    show_positions=args.show_positions,
+                    show_active_positions=args.show_active_positions,
+                    neural_prophet_weight=args.neural_prophet_weight,
+                    facebook_prophet_weight=args.facebook_prophet_weight,
+                    timesfm_weight=args.timesfm_weight,
+                    basic_prophet_weight=args.basic_prophet_weight,
+                    moving_average_weight=args.moving_average_weight,
+                    linear_trend_weight=args.linear_trend_weight
+                )
     
     return tweets_success and prediction_success or skip_tweet_fetching
 
@@ -1055,13 +1552,22 @@ def main():
     
     # Display a clear startup banner
     print("\n" + "=" * 80)
-    print("🤖 POLYMARKET AUTOMATED SCHEDULER STARTING")
+    if args.simulate:
+        print("🎯 POLYMARKET SIMULATION SCHEDULER STARTING")
+        print("=" * 80)
+        print(f"🎮 Simulation run:       {args.simulate}")
+        print(f"🧠 Strategy:             {args.strategy}")
+        print(f"💰 Initial balance:      ${args.sim_balance}")
+    else:
+        print("🤖 POLYMARKET AUTOMATED SCHEDULER STARTING")
     print("=" * 80)
     print(f"📊 Tweet checking interval: {tweet_interval} minutes")
     print(f"💰 Auto-bidder interval:    {buy_interval} minutes")
     print(f"💸 Auto-seller interval:    {sell_interval} minutes")
     if args.dry_run:
         print("🔒 Running in DRY RUN mode - no real orders will be placed")
+    if args.simulate:
+        print("🎯 Running in SIMULATION mode - using simulation framework")
     print("=" * 80 + "\n")
     
     # Log the scheduler startup
@@ -1072,6 +1578,13 @@ def main():
         logger.info(f"Auto-bidder interval: {buy_interval} minutes")
     if args.sell_interval is not None:
         logger.info(f"Auto-seller interval: {sell_interval} minutes")
+    
+    # Log simulation mode if enabled
+    if args.simulate:
+        logger.info(f"Running in SIMULATION mode")
+        logger.info(f"Simulation run: {args.simulate}")
+        logger.info(f"Simulation strategy: {args.strategy}")
+        logger.info(f"Initial balance for new runs: ${args.sim_balance}")
     
     if args.tweets_only:
         logger.info("Configured to run tweet fetching only")

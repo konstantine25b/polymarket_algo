@@ -5,6 +5,7 @@ Displays a summary of current market percentages and key statistics.
 """
 
 import os
+import re
 import json
 import glob
 import argparse
@@ -125,9 +126,22 @@ def calculate_market_stats(order_book_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def extract_range_value(question: str) -> Tuple[float, float]:
     """Extract the numeric range from a market question."""
+    # Normalize for parsing
+    q = question.lower().strip()
+
+    # Handle explicit patterns first
+    # e.g., "500+ tweets"
+    plus_match = re.search(r'(\d+)\s*\+', q)
+    if plus_match:
+        try:
+            lower = float(plus_match.group(1))
+            return lower, float('inf')
+        except ValueError:
+            pass
+
     # Handle special cases
     if 'less than' in question.lower():
-        parts = question.split('less than')
+        parts = q.split('less than')
         if len(parts) > 1:
             try:
                 upper = float(parts[1].strip().split()[0])
@@ -135,24 +149,26 @@ def extract_range_value(question: str) -> Tuple[float, float]:
             except (ValueError, IndexError):
                 return 0, 100
     
-    if 'or more' in question.lower():
-        parts = question.split('or more')
+    if 'or more' in q:
+        parts = q.split('or more')
         if len(parts) > 1:
             try:
-                lower = float(parts[0].strip().split()[-1])
+                # Extract the last number before "or more"
+                nums = re.findall(r'(\d+)', parts[0])
+                lower = float(nums[-1]) if nums else 0
                 return lower, float('inf')
             except (ValueError, IndexError):
                 return 400, float('inf')
     
-    # Handle standard ranges like "175–199"
-    try:
-        range_part = question.split('tweet')[1].split('times')[0].strip()
-        range_part = range_part.replace('–', '-')  # Normalize en-dash to hyphen
-        if '-' in range_part:
-            lower, upper = range_part.split('-')
-            return float(lower.strip()), float(upper.strip())
-    except (ValueError, IndexError):
-        pass
+    # Handle standard ranges like "175–199" or "175-199" anywhere in the string
+    range_match = re.search(r'(\d+)\s*[–-]\s*(\d+)', q)
+    if range_match:
+        try:
+            lower = float(range_match.group(1))
+            upper = float(range_match.group(2))
+            return lower, upper
+        except ValueError:
+            pass
     
     # Fallback to 0, 0 if we can't parse
     return 0, 0
@@ -227,11 +243,34 @@ def get_market_data_json(refresh: bool = True) -> Dict[str, Any]:
         
         for question, question_stats in stats.get('markets', {}).items():
             lower, upper = extract_range_value(question)
-            display_name = question.replace('Will Elon tweet ', '').strip()
-            
-            # Make the display name shorter by removing the date part if it exists
-            short_name = display_name.split('April')[0].strip() if 'April' in display_name else display_name
-            short_name = short_name.replace('times', '').strip()
+
+            # Derive a clean, standardized display name matching prediction frames
+            name = None
+            q_lower = question.lower()
+            # Less than X
+            lt_match = re.search(r'less than\s+(\d+)', q_lower)
+            if lt_match:
+                name = f"<{int(lt_match.group(1))}"
+            # X+
+            if name is None:
+                plus_match = re.search(r'(\d+)\s*\+', q_lower)
+                if plus_match:
+                    name = f"{int(plus_match.group(1))}+"
+            # X–Y or X-Y
+            if name is None and lower > 0 and upper > 0 and upper != float('inf'):
+                name = f"{int(lower)}–{int(upper)}"
+            # Fallback: attempt to strip leading question text and dates
+            if name is None:
+                display_name = question
+                # Remove common prefixes irrespective of capitalization
+                display_name = re.sub(r'^will\s+elon\s+musk\s+post\s+', '', display_name, flags=re.IGNORECASE)
+                display_name = re.sub(r'^will\s+elon\s+tweet\s+', '', display_name, flags=re.IGNORECASE)
+                # Remove dates like "from October 3 to October 10, 2025?"
+                display_name = re.sub(r'\s*from\s+[a-z]+\s+\d+\s+to\s+[a-z]+\s+\d+(,\s*\d{4})?\??', '', display_name, flags=re.IGNORECASE)
+                display_name = display_name.replace('times', '').replace('tweets', '').strip()
+                name = display_name
+
+            short_name = name
             
             # Add to display list with 5 elements
             sorted_markets_for_display.append((lower, upper, short_name, question_stats, question))
@@ -713,7 +752,7 @@ def main():
                 console = Console()
                 # Parse and then render to ensure proper formatting
                 json_str = json.dumps(market_data, ensure_ascii=False)
-                console.print(JSON.from_json(json_str))
+                console.print(JSON(json_str))
             except ImportError:
                 # Fallback to standard JSON printing if rich is not available
                 print(json.dumps(market_data, indent=2, ensure_ascii=False))

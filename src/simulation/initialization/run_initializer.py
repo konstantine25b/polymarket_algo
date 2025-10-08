@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+import pandas as pd
 
 # Import Polymarket price fetching
 try:
@@ -78,7 +79,11 @@ class RunInitializer:
             "total_balance": initial_balance,
             "balance_of_shares": 0.0,
             "balance_invested": 0.0,
+            "win_loss_percentage_if_sold_now": 0.0,  # Win/loss percentage based on current bid prices
+            "win_loss_percentage": 0.0,  # Win/loss percentage based on current market prices
+            "total_balance_if_all_positions_sold": initial_balance,  # Total balance if all positions sold at current bid prices
             "shares": [],  # List of {"market_id": str, "market_name": str, "num_shares": int}
+            "positions": [],  # List of current positions with detailed info
             "transactions": [],  # List of all transactions
             "total_balances": [  # Time series of total balances
                 {
@@ -86,11 +91,14 @@ class RunInitializer:
                     "total_balance": initial_balance,
                     "current_balance": initial_balance,
                     "balance_of_shares": 0.0,
-                    "balance_invested": 0.0
+                    "balance_invested": 0.0,
+                    "win_loss_percentage_if_sold_now": 0.0,
+                    "win_loss_percentage": 0.0,
+                    "total_balance_if_all_positions_sold": initial_balance
                 }
             ],
-            "positions": [],  # List of current positions with detailed info
-            "markets": []  # List of all markets: {"market_id": str, "market_name": str, "description": str, "category": str}
+            "markets": [],  # List of all markets: {"market_id": str, "market_name": str, "description": str, "category": str}
+            "comparison_tables": []  # List of comparison tables with timestamps and metadata
         }
         
         # Save to JSON file
@@ -210,7 +218,8 @@ class RunInitializer:
         run_name: str,
         market_id: str,
         num_shares: float,
-        allow_negative_balance: bool = False
+        allow_negative_balance: bool = False,
+        opportunity_details: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Add a new position to an existing run or update existing position.
@@ -222,6 +231,7 @@ class RunInitializer:
             market_id: Unique identifier for the market (must exist)
             num_shares: Number of shares purchased (can be fractional, must be positive)
             allow_negative_balance: Whether to allow transactions that result in negative balance
+            opportunity_details: Optional dict with opportunity analysis details (prediction, opportunity_edge, etc.)
             
         Returns:
             bool: True if position was added successfully
@@ -284,7 +294,8 @@ class RunInitializer:
             "type": "BUY",
             "num_shares": num_shares,
             "price_per_share": purchase_price,
-            "total_amount": total_cost
+            "total_amount": total_cost,
+            "opportunity_details": opportunity_details
         }
         
         if existing_position_idx is not None:
@@ -388,6 +399,12 @@ class RunInitializer:
         # Calculate new total balance (current_balance + current market value of all positions)
         run_data["total_balance"] = run_data["current_balance"] + total_current_value
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add transaction record
         transaction = {
             "timestamp": datetime.now().isoformat(),
@@ -396,7 +413,8 @@ class RunInitializer:
             "market_name": market_name,
             "num_shares": num_shares,
             "price_per_share": purchase_price,
-            "total_amount": total_cost
+            "total_amount": total_cost,
+            "opportunity_details": opportunity_details
         }
         run_data["transactions"].append(transaction)
         
@@ -407,6 +425,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -549,7 +570,8 @@ class RunInitializer:
             existing_position["transaction_history"].append(sell_transaction)
             
             remaining_shares = current_shares - num_shares
-            remaining_total_invested = total_invested - cost_basis_sold
+            # FIXED: Keep total_invested as cumulative amount invested, don't reduce it
+            remaining_total_invested = total_invested  # Don't reduce total_invested when selling
             
             # Calculate current values for remaining position
             current_market_value = remaining_shares * market["current_price"]
@@ -587,6 +609,12 @@ class RunInitializer:
         # Calculate new total balance (current_balance + current market value of all positions)
         run_data["total_balance"] = run_data["current_balance"] + total_current_value
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add transaction record
         transaction = {
             "timestamp": datetime.now().isoformat(),
@@ -608,6 +636,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -730,6 +761,12 @@ class RunInitializer:
         total_invested_in_shares = sum(pos["total_invested"] for pos in run_data["positions"])
         run_data["balance_invested"] = total_invested_in_shares
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add balance snapshot
         balance_snapshot = {
             "timestamp": timestamp,
@@ -737,6 +774,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -971,6 +1011,48 @@ class RunInitializer:
             "total_proceeds": total_proceeds,
             "net_pnl": net_pnl,
             "net_pnl_percentage": (net_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        }
+
+    def _calculate_portfolio_metrics(self, run_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Calculate portfolio-wide metrics including win/loss percentages and potential balance if all sold.
+        
+        Args:
+            run_data: The complete run data dictionary
+            
+        Returns:
+            Dict containing calculated metrics
+        """
+        positions = run_data.get("positions", [])
+        current_balance = run_data.get("current_balance", 0.0)
+        balance_invested = run_data.get("balance_invested", 0.0)
+        
+        # Calculate total current market value and total value if sold at bid prices
+        total_current_market_value = 0.0
+        total_value_if_sold_at_bid = 0.0
+        
+        for position in positions:
+            if position.get("position_status") == "ACTIVE" and position.get("num_shares", 0) > 0:
+                total_current_market_value += position.get("current_total_price", 0.0)
+                total_value_if_sold_at_bid += position.get("current_value_if_sold", 0.0)
+        
+        # Calculate win/loss percentage based on market prices
+        win_loss_percentage = 0.0
+        if balance_invested > 0:
+            win_loss_percentage = ((total_current_market_value - balance_invested) / balance_invested) * 100
+        
+        # Calculate win/loss percentage if sold at current bid prices
+        win_loss_percentage_if_sold_now = 0.0
+        if balance_invested > 0:
+            win_loss_percentage_if_sold_now = ((total_value_if_sold_at_bid - balance_invested) / balance_invested) * 100
+        
+        # Calculate total balance if all positions were sold at current bid prices
+        total_balance_if_all_positions_sold = current_balance + total_value_if_sold_at_bid
+        
+        return {
+            "win_loss_percentage": win_loss_percentage,
+            "win_loss_percentage_if_sold_now": win_loss_percentage_if_sold_now,
+            "total_balance_if_all_positions_sold": total_balance_if_all_positions_sold
         }
     
     def initialize_markets_from_polymarket(
@@ -1319,6 +1401,12 @@ class RunInitializer:
         total_invested_in_shares = sum(pos["total_invested"] for pos in run_data["positions"])
         run_data["balance_invested"] = total_invested_in_shares
         
+        # Calculate portfolio metrics
+        portfolio_metrics = self._calculate_portfolio_metrics(run_data)
+        run_data["win_loss_percentage"] = portfolio_metrics["win_loss_percentage"]
+        run_data["win_loss_percentage_if_sold_now"] = portfolio_metrics["win_loss_percentage_if_sold_now"]
+        run_data["total_balance_if_all_positions_sold"] = portfolio_metrics["total_balance_if_all_positions_sold"]
+        
         # Add balance snapshot
         balance_snapshot = {
             "timestamp": timestamp,
@@ -1326,6 +1414,9 @@ class RunInitializer:
             "current_balance": run_data["current_balance"],
             "balance_of_shares": run_data["balance_of_shares"],
             "balance_invested": run_data["balance_invested"],
+            "win_loss_percentage_if_sold_now": run_data["win_loss_percentage_if_sold_now"],
+            "win_loss_percentage": run_data["win_loss_percentage"],
+            "total_balance_if_all_positions_sold": run_data["total_balance_if_all_positions_sold"],
             "total_market_value": total_current_value
         }
         run_data["total_balances"].append(balance_snapshot)
@@ -1340,5 +1431,86 @@ class RunInitializer:
         print(f"   💰 New total balance: ${run_data['total_balance']:,.2f}")
         print(f"   📈 Total market value: ${total_current_value:,.2f}")
         print(f"   📁 Run: {run_name}")
+        
+        return True
+    
+    def add_comparison_table(
+        self,
+        run_name: str,
+        comparison_df,
+        threshold: float,
+        operation_type: str,
+        algorithm: str = "unknown",
+        found_opportunity: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Add a comparison table to the simulation run data.
+        
+        Args:
+            run_name: Name of the simulation run
+            comparison_df: DataFrame containing the comparison table
+            threshold: Threshold used for the comparison
+            operation_type: Type of operation ("bidding" or "selling")
+            algorithm: Algorithm used for predictions
+            found_opportunity: Optional dict with details of the found opportunity
+            
+        Returns:
+            bool: True if comparison table was added successfully
+        """
+        json_file_path = self.base_runs_dir / run_name / "simulation_data.json"
+        
+        if not json_file_path.exists():
+            print(f"❌ Run '{run_name}' not found!")
+            return False
+        
+        # Load existing data
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            run_data = json.load(f)
+        
+        # Ensure comparison_tables field exists (for backward compatibility)
+        if "comparison_tables" not in run_data:
+            run_data["comparison_tables"] = []
+        
+        # Convert DataFrame to JSON-serializable format
+        comparison_data = []
+        for _, row in comparison_df.iterrows():
+            row_dict = {}
+            for col, value in row.items():
+                # Handle NaN values and convert to JSON-serializable types
+                if pd.isna(value):
+                    row_dict[col] = None
+                elif isinstance(value, (int, float)):
+                    row_dict[col] = float(value) if not pd.isna(value) else None
+                else:
+                    row_dict[col] = str(value)
+            comparison_data.append(row_dict)
+        
+        # Create comparison table entry
+        timestamp = datetime.now().isoformat()
+        comparison_entry = {
+            "timestamp": timestamp,
+            "threshold": threshold,
+            "operation_type": operation_type,
+            "algorithm": algorithm,
+            "data": comparison_data
+        }
+        
+        # Add opportunity details if provided
+        if found_opportunity:
+            comparison_entry["found_opportunity"] = {
+                "range": found_opportunity.get("range"),
+                "prediction": found_opportunity.get("prediction"),
+                "opportunity_edge": found_opportunity.get("opportunity"),
+                "selection_method": found_opportunity.get("selection_method"),
+                "total_opportunities": found_opportunity.get("total_opportunities"),
+                "probability": found_opportunity.get("probability")  # Will be None for non-weighted selection
+            }
+        
+        # Add to comparison tables list
+        run_data["comparison_tables"].append(comparison_entry)
+        
+        # Save updated data
+        with open(json_file_path, 'w', encoding='utf-8') as f:
+            json.dump(run_data, f, indent=2, ensure_ascii=False)
         
         return True 

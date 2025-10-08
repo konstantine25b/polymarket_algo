@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.simulation.initialization.run_initializer import RunInitializer
+from .stop_loss_manager import StopLossManager
 
 # Configure logging
 logging.basicConfig(
@@ -22,12 +23,22 @@ logger = logging.getLogger(__name__)
 class SimulationSeller:
     """
     Position analyzer that identifies which simulated positions should be sold
-    based on statistical opportunities.
+    based on statistical opportunities and stop loss conditions.
     """
     
     def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, 
                  algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
-                 debug: bool = False, active_market_only: bool = False, show_eachalgo_distribution: bool = False):
+                 debug: bool = False, active_market_only: bool = False, 
+                 show_eachalgo_distribution: bool = False,
+                 enable_stop_loss: bool = True,
+                 loss_threshold_1: float = -40.0,
+                 loss_sell_percentage_1: float = 50.0,
+                 loss_threshold_2: float = -60.0,
+                 loss_sell_percentage_2: float = 100.0,
+                 gain_threshold_1: float = 40.0,
+                 gain_sell_percentage_1: float = 40.0,
+                 gain_threshold_2: float = 80.0,
+                 gain_sell_percentage_2: float = 40.0):
         """
         Initialize the SimulationSeller.
         
@@ -38,7 +49,16 @@ class SimulationSeller:
             random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
             active_market_only: Only analyze positions for the active market
-            show_eachalgo_distribution: Whether to show individual algorithm distributions
+            show_eachalgo_distribution: Show probability distribution for each individual algorithm
+            enable_stop_loss: Whether to enable automatic stop loss checking (default: True)
+            loss_threshold_1: First loss threshold percentage (default: -40.0)
+            loss_sell_percentage_1: Percentage to sell at first loss threshold (default: 50.0)
+            loss_threshold_2: Second loss threshold percentage (default: -60.0)
+            loss_sell_percentage_2: Percentage to sell at second loss threshold (default: 100.0)
+            gain_threshold_1: First gain threshold percentage (default: 40.0)
+            gain_sell_percentage_1: Percentage to sell at first gain threshold (default: 40.0)
+            gain_threshold_2: Second gain threshold percentage (default: 80.0)
+            gain_sell_percentage_2: Percentage to sell at second gain threshold (default: 40.0)
         """
         self.threshold = threshold
         self.sell_below = sell_below
@@ -47,7 +67,27 @@ class SimulationSeller:
         self.debug = debug
         self.active_market_only = active_market_only
         self.show_eachalgo_distribution = show_eachalgo_distribution
+        self.enable_stop_loss = enable_stop_loss
         self.run_initializer = RunInitializer()
+        
+        # Initialize stop loss manager if enabled
+        if self.enable_stop_loss:
+            self.stop_loss_manager = StopLossManager(
+                loss_threshold_1=loss_threshold_1,
+                loss_sell_percentage_1=loss_sell_percentage_1,
+                loss_threshold_2=loss_threshold_2,
+                loss_sell_percentage_2=loss_sell_percentage_2,
+                gain_threshold_1=gain_threshold_1,
+                gain_sell_percentage_1=gain_sell_percentage_1,
+                gain_threshold_2=gain_threshold_2,
+                gain_sell_percentage_2=gain_sell_percentage_2,
+                debug=debug
+            )
+        else:
+            self.stop_loss_manager = None
+            
+        if self.debug and self.enable_stop_loss:
+            print("Stop loss functionality enabled in SimulationSeller")
         
     def get_simulation_positions(self, run_name: str) -> Dict[str, Any]:
         """
@@ -164,7 +204,7 @@ class SimulationSeller:
             )
         
         if comparison_df.empty:
-            logger.info("Failed to generate comparison table.")
+            logger.info("No specific range opportunities found in comparison table.")
             return [], comparison_df
             
         # Find the column names for buy-only and sell-only opportunities
@@ -524,6 +564,7 @@ class SimulationSeller:
                                 auto_sell: bool = False, dry_run: bool = False) -> bool:
         """
         Execute the complete selling strategy matching real auto_bid behavior.
+        Includes automatic stop loss checking and execution.
         
         Args:
             run_name: Name of the simulation run
@@ -543,6 +584,23 @@ class SimulationSeller:
                 if not success:
                     logger.error("Failed to update market prices")
                     return False
+            
+            # Check and execute stop loss orders first if enabled
+            stop_loss_executed = []
+            if self.enable_stop_loss and self.stop_loss_manager:
+                logger.info("Checking for stop loss triggers...")
+                stop_loss_executed = self.stop_loss_manager.execute_stop_loss_orders(
+                    run_name=run_name,
+                    dry_run=dry_run
+                )
+                
+                if stop_loss_executed:
+                    logger.info(f"Stop loss orders: {len(stop_loss_executed)} {'simulated' if dry_run else 'executed'}")
+                    # Update markets again after stop loss executions to get fresh position values
+                    if not dry_run:
+                        self.run_initializer.update_markets_from_polymarket(run_name)
+                else:
+                    logger.info("No stop loss triggers found")
             
             # Generate and (optionally) display the comparison table only ONCE
             comparison_df = None
@@ -594,21 +652,22 @@ class SimulationSeller:
                 logger.info("Active market filtering requested (feature needs constants implementation)")
                 print("Note: Active market filtering not yet implemented in simulation")
             
-            # Filter to positions that should be sold
+            # Filter to positions that should be sold (excluding those already handled by stop loss)
             positions_to_sell = [pos for pos in all_positions if pos.get('should_sell', False)]
             
             if auto_sell:
                 # Execute sell orders automatically
                 if positions_to_sell:
-                    self.execute_sell_orders(run_name, positions_to_sell, dry_run=dry_run)
+                    regular_sell_executed = self.execute_sell_orders(run_name, positions_to_sell, dry_run=dry_run)
+                    logger.info(f"Regular sell orders: {len(regular_sell_executed)} {'simulated' if dry_run else 'executed'}")
                 else:
-                    print(f"\nNo positions recommended for selling with threshold {self.threshold:.1f}%")
+                    print(f"\nNo additional positions recommended for selling with threshold {self.threshold:.1f}%")
                     if self.sell_below > 0:
                         print(f"or prediction below {self.sell_below}%.")
                     
                     # Show all positions even if none to sell
                     if all_positions:
-                        print(f"\nAll positions in simulation run '{run_name}':")
+                        print(f"\nAll remaining positions in simulation run '{run_name}':")
                         for position in all_positions:
                             market_name = self.get_market_name_from_simulation(run_name, position['market_id'])
                             print(f"  {market_name} - {position['outcome']}: {position['quantity']:.6f} shares")
@@ -617,23 +676,33 @@ class SimulationSeller:
                 if positions_to_sell:
                     self.print_sell_recommendations(run_name, positions_to_sell)
                 else:
-                    print(f"\nNo positions recommended for selling with threshold {self.threshold:.1f}%")
+                    print(f"\nNo additional positions recommended for selling with threshold {self.threshold:.1f}%")
                     if self.sell_below > 0:
                         print(f"or prediction below {self.sell_below}%.")
                     
                     # Show all positions even if none to sell
                     if all_positions:
-                        print(f"\nAll positions in simulation run '{run_name}':")
+                        print(f"\nAll remaining positions in simulation run '{run_name}':")
                         for position in all_positions:
                             market_name = self.get_market_name_from_simulation(run_name, position['market_id'])
                             print(f"  {market_name} - {position['outcome']}: {position['quantity']:.6f} shares")
             
+            # Print summary of all actions taken
+            total_actions = len(stop_loss_executed) + len(positions_to_sell if auto_sell else [])
+            if total_actions > 0:
+                print(f"\n📊 Selling Summary:")
+                if stop_loss_executed:
+                    print(f"  🛑 Stop loss actions: {len(stop_loss_executed)}")
+                if auto_sell and positions_to_sell:
+                    print(f"  💰 Regular sell actions: {len(positions_to_sell)}")
+                print(f"  📈 Total positions affected: {total_actions}")
+            
             # Log summary
             num_positions = len(positions_to_sell)
             if num_positions > 0:
-                logger.info(f"Positions marked for selling: {num_positions} out of {len(all_positions)} total")
+                logger.info(f"Regular positions marked for selling: {num_positions} out of {len(all_positions)} total")
             else:
-                logger.info(f"Positions marked for selling: 0 out of {len(all_positions)} total")
+                logger.info(f"Regular positions marked for selling: 0 out of {len(all_positions)} total")
             
             return True
             

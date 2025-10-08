@@ -71,7 +71,13 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
             from src.prediction_algos.ensemble.predictor import EnsembleTweetPredictor
             predictor = EnsembleTweetPredictor(
                 save_plots=False,
-                random_seed=kwargs.get('random_seed', 42)
+                random_seed=kwargs.get('random_seed', 42),
+                neural_prophet_weight=kwargs.get('neural_prophet_weight', 0.17),
+                facebook_prophet_weight=kwargs.get('facebook_prophet_weight', 0.25),
+                timesfm_weight=kwargs.get('timesfm_weight', 0.30),
+                basic_prophet_weight=kwargs.get('basic_prophet_weight', 0.25),
+                moving_average_weight=kwargs.get('moving_average_weight', 0.015),
+                linear_trend_weight=kwargs.get('linear_trend_weight', 0.015)
             )
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
@@ -115,6 +121,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
             # Standard models use generate_predictions
             predictions = predictor.generate_predictions(current_time=current_time)
         
+        # Handle show_eachalgo_distribution for ensemble algorithm
+        if algorithm == "ensemble" and kwargs.get('show_eachalgo_distribution', False):
+            # Calculate and display individual algorithm distributions
+            individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
+            predictor.print_individual_algorithm_distributions(predictions)
+        
         # Convert predictions to the expected format
         prediction_data = {
             'frame_probabilities': {},
@@ -131,34 +143,124 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
         
         # Handle different prediction formats
         if 'predictions_by_frame' in predictions:
-            # Format used by ensemble, facebook_prophet, neural_prophet, timesfm
-            for frame_name, frame_data in predictions['predictions_by_frame'].items():
-                probability = frame_data['probability']
-                min_tweets = frame_data.get('min', 0)
-                max_tweets = frame_data.get('max', float('inf'))
+            # Special handling for ensemble algorithm to use corrected probabilities
+            if algorithm == "ensemble":
+                # Try to use the corrected ensemble probabilities instead of the flawed ones
+                individual_probs = None
+                try:
+                    individual_probs = predictor.calculate_individual_algorithm_probabilities(predictions)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate individual algorithm probabilities: {e}")
+                    individual_probs = None
                 
-                # Calculate midpoint for expected value
-                if max_tweets == float('inf'):
-                    midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
-                else:
-                    midpoint = (min_tweets + max_tweets) / 2
+                if individual_probs:
+                    # Calculate corrected ensemble probabilities using renormalized weights
+                    displayed_total_weight = sum(data['weight'] for data in individual_probs.values())
+                    corrected_ensemble_probs = {}
+                    
+                    # Get all frame names
+                    from constants import TWEET_COUNT_FRAMES
+                    all_frame_names = [frame['name'] for frame in TWEET_COUNT_FRAMES]
+                    
+                    for frame_name in all_frame_names:
+                        weighted_sum = 0.0
+                        
+                        for algo_name, data in individual_probs.items():
+                            original_weight = data['weight']
+                            # Renormalize weight so displayed algorithms sum to 1.0
+                            renormalized_weight = original_weight / displayed_total_weight if displayed_total_weight > 0 else 0.0
+                            prob = data['probabilities'].get(frame_name, 0.0)
+                            weighted_sum += prob * renormalized_weight
+                        
+                        corrected_ensemble_probs[frame_name] = weighted_sum
+                    
+                    # Final normalization to ensure probabilities sum to 1
+                    total_corrected_prob = sum(corrected_ensemble_probs.values())
+                    if total_corrected_prob > 0:
+                        corrected_ensemble_probs = {frame: prob / total_corrected_prob for frame, prob in corrected_ensemble_probs.items()}
+                    
+                    # Use corrected probabilities
+                    for frame_name, probability in corrected_ensemble_probs.items():
+                        prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                        total_prob += probability
+                        
+                        # Calculate midpoint for expected value
+                        try:
+                            if "<" in frame_name:
+                                parts = frame_name.split("<")
+                                upper = float(parts[1].strip().split()[0])
+                                midpoint = upper / 2
+                            elif "+" in frame_name:
+                                parts = frame_name.split("+")
+                                lower = float(parts[0].strip().split()[-1])
+                                midpoint = lower * 1.2
+                            else:
+                                # Standard range like "150–174"
+                                range_clean = frame_name.replace('–', '-').strip()
+                                if '-' in range_clean:
+                                    parts = range_clean.split('-')
+                                    if len(parts) == 2:
+                                        lower = float(parts[0].strip())
+                                        upper = float(parts[1].strip())
+                                        midpoint = (lower + upper) / 2
+                                    else:
+                                        midpoint = 150  # Default
+                                else:
+                                    midpoint = 150  # Default
+                            
+                            expected_value += probability * midpoint
+                        except (ValueError, IndexError):
+                            # Default midpoint if parsing fails
+                            midpoint = 150
+                            expected_value += probability * midpoint
                 
-                prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
-                total_prob += probability
-                expected_value += probability * midpoint
-                
+                # Always fall back to standard method (either if individual_probs failed or as additional processing)
+                # This ensures ensemble predictions are always displayed even if corrected calculation fails
+                if not individual_probs:
+                    logger.info("Using standard predictions_by_frame processing for ensemble algorithm")
+                    for frame_name, frame_data in predictions['predictions_by_frame'].items():
+                        probability = frame_data['probability']
+                        min_tweets = frame_data.get('min', 0)
+                        max_tweets = frame_data.get('max', float('inf'))
+                        
+                        # Calculate midpoint for expected value
+                        if max_tweets == float('inf'):
+                            midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                        else:
+                            midpoint = (min_tweets + max_tweets) / 2
+                        
+                        prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                        total_prob += probability
+                        expected_value += probability * midpoint
+            else:
+                # Standard handling for non-ensemble algorithms
+                for frame_name, frame_data in predictions['predictions_by_frame'].items():
+                    probability = frame_data['probability']
+                    min_tweets = frame_data.get('min', 0)
+                    max_tweets = frame_data.get('max', float('inf'))
+                    
+                    # Calculate midpoint for expected value
+                    if max_tweets == float('inf'):
+                        midpoint = min_tweets * 1.2  # Estimate for "X or more" cases
+                    else:
+                        midpoint = (min_tweets + max_tweets) / 2
+                    
+                    prediction_data['frame_probabilities'][frame_name] = probability * 100  # Convert to percentage
+                    total_prob += probability
+                    expected_value += probability * midpoint
+        
         elif 'ensemble_results' in predictions and 'probabilities' in predictions['ensemble_results']:
             # Format used by enhanced algorithms (enhanced_timesfm, enhanced_neural_prophet, enhanced_facebook_prophet)
             probabilities_dict = predictions['ensemble_results']['probabilities']
             for frame_name, probability in probabilities_dict.items():
                 # Try to get midpoint from frame name
                 try:
-                    if "less than" in frame_name.lower():
-                        parts = frame_name.lower().split("less than")
+                    if "<" in frame_name:
+                        parts = frame_name.split("<")
                         upper = float(parts[1].strip().split()[0])
                         midpoint = upper / 2
-                    elif "or more" in frame_name.lower():
-                        parts = frame_name.lower().split("or more")
+                    elif "+" in frame_name:
+                        parts = frame_name.split("+")
                         lower = float(parts[0].strip().split()[-1])
                         midpoint = lower * 1.2
                     else:
@@ -192,12 +294,12 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
                 
                 # Try to get midpoint from frame name
                 try:
-                    if "less than" in frame_name.lower():
-                        parts = frame_name.lower().split("less than")
+                    if "<" in frame_name:
+                        parts = frame_name.split("<")
                         upper = float(parts[1].strip().split()[0])
                         midpoint = upper / 2
-                    elif "or more" in frame_name.lower():
-                        parts = frame_name.lower().split("or more")
+                    elif "+" in frame_name:
+                        parts = frame_name.split("+")
                         lower = float(parts[0].strip().split()[-1])
                         midpoint = lower * 1.2
                     else:
@@ -317,7 +419,7 @@ def get_market_data(refresh: bool = True) -> Dict[str, Any]:
     """
     try:
         # Build the command to run
-        cmd = ["python", "-m", "src.polymarket.order_book.show_market_status", "--json"]
+        cmd = [sys.executable, "-m", "src.polymarket.order_book.show_market_status", "--json"]
         if refresh:
             cmd.append("--refresh")
         
@@ -348,13 +450,25 @@ def normalize_range_name(range_name: str) -> str:
     # Convert to lowercase for case-insensitive comparison
     name = range_name.lower().strip()
     
-    # Remove any date suffixes first (e.g., "June 6–13?", "April 25–May 2")
-    # Look for patterns like "june 6–13?" or "april 25–may 2"
-    # Remove date patterns at the end
+    # First, try to extract the numeric range BEFORE date removal
+    # This handles patterns like "post 260-279 tweets from October 3..."
+    early_range_match = re.search(r'(\d+)\s*[–-]\s*(\d+)', name)
+    if early_range_match:
+        # Check if this looks like a tweet count range (typically 2-3 digits)
+        start_num = int(early_range_match.group(1))
+        end_num = int(early_range_match.group(2))
+        # If it's in a reasonable tweet count range, return it immediately
+        if 10 <= start_num <= 999 and 10 <= end_num <= 999 and start_num < end_num:
+            return f"{start_num}–{end_num}"
+    
+    # Remove any date suffixes (e.g., "June 6–13?", "April 25–May 2", "from October 3 to October 10")
+    # Handle "from Month Day to Month Day" pattern first
+    name = re.sub(r'\s+from\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+\s+to\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+(,\s*\d{4})?\??.*$', '', name)
+    # Handle cross-month patterns (e.g., "june 27–july 4?")
+    name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-](january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+\??.*$', '', name)
+    # Handle same-month patterns (e.g., "june 6–13?")
     name = re.sub(r'\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+[–-]\d+\??.*$', '', name)
     name = re.sub(r'\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d+[–-]\d+\??.*$', '', name)
-    # Also handle cases like "June 6–13?" 
-    name = re.sub(r'\s+\w+\s+\d+[–-]\d+\??.*$', '', name)
     name = name.strip()
     
     # Handle "less than X" format - extract the actual number
@@ -364,16 +478,25 @@ def normalize_range_name(range_name: str) -> str:
             match = re.search(r'less than (\d+)', name)
             if match:
                 num = int(match.group(1))
-                return f"less than {num}"
+                return f"<{num}"
             else:
                 # Fallback to the current frames from constants
                 from src.constants import TWEET_COUNT_FRAMES
                 for frame in TWEET_COUNT_FRAMES:
-                    if frame["name"].lower().startswith("less than"):
+                    if frame["name"].startswith("<"):
                         return frame["name"]
-                return "less than 150"  # Default fallback
+                # If no frame found starting with "<", use the first frame
+                return TWEET_COUNT_FRAMES[0]["name"]
         except (ValueError, ImportError):
-            return "less than 150"  # Default fallback
+            # Import and use constants as fallback
+            try:
+                from src.constants import TWEET_COUNT_FRAMES
+                for frame in TWEET_COUNT_FRAMES:
+                    if frame["name"].startswith("<"):
+                        return frame["name"]
+                return TWEET_COUNT_FRAMES[0]["name"]
+            except ImportError:
+                return "<90"  # Last resort fallback
     
     # Handle "X or more" format
     if "or more" in name:
@@ -382,40 +505,59 @@ def normalize_range_name(range_name: str) -> str:
             match = re.search(r'(\d+)\s*or more', name)
             if match:
                 num = int(match.group(1))
-                return f"{num} or more"
+                return f"{num}+"
             else:
                 # Fallback to extracting any number
                 num = int(''.join(filter(str.isdigit, name.split("or more")[0])))
-                return f"{num} or more"
+                return f"{num}+"
         except (ValueError, ImportError):
-            # If we can't extract a number, return the original format
-            return "500 or more"  # Default case for new frames
-    
-    # Strip any "Will Elon tweet" prefix 
-    if "will elon tweet" in name:
-        name = name.replace("will elon tweet", "").strip()
-    
-    # Remove " times" suffix if present
-    name = name.replace(" times", "").strip()
-    
-    # Extract just the numeric range part
-    if "–" in name or "-" in name:
-        # Split by any dash character
-        separator = "–" if "–" in name else "-"
-        parts = name.split(separator)
-        
-        if len(parts) == 2:
-            start, end = parts
-            # Try to convert to numbers to ensure it's a valid range
+            # Import and use constants as fallback
             try:
-                start_num = int(start.strip())
-                end_num = int(end.strip())
+                from src.constants import TWEET_COUNT_FRAMES
+                for frame in TWEET_COUNT_FRAMES:
+                    if "+" in frame["name"] or frame["max"] == float('inf'):
+                        return frame["name"]
+                # If no frame found ending with "+", use the last frame
+                return TWEET_COUNT_FRAMES[-1]["name"]
+            except ImportError:
+                return "270+"  # Last resort fallback
+    
+    # Handle "between X and Y" format BEFORE stripping text
+    if "between" in name and "and" in name:
+        # Extract numbers from "between X and Y" format
+        try:
+            # Use regex to find the two numbers
+            match = re.search(r'between\s+(\d+)\s+and\s+(\d+)', name)
+            if match:
+                start_num = int(match.group(1))
+                end_num = int(match.group(2))
                 # Return in standard format with en dash
                 return f"{start_num}–{end_num}"
-            except ValueError:
-                pass
+        except (ValueError, AttributeError):
+            pass
     
-    # If all else fails, return the original name, but clean it up
+    # Extract just the numeric range part BEFORE stripping text
+    # This handles patterns like "post 260-279 tweets" or "tweet 260–279 times"
+    range_match = re.search(r'(\d+)\s*[–-]\s*(\d+)', name)
+    if range_match:
+        try:
+            start_num = int(range_match.group(1))
+            end_num = int(range_match.group(2))
+            # Return in standard format with en dash
+            return f"{start_num}–{end_num}"
+        except ValueError:
+            pass
+    
+    # Strip any "Will Elon tweet/post" prefix as a last resort
+    if "will elon tweet" in name:
+        name = name.replace("will elon tweet", "").strip()
+    if "will elon musk post" in name:
+        name = name.replace("will elon musk post", "").strip()
+    
+    # Remove " times" or " tweets" suffix if present
+    name = name.replace(" times", "").replace(" tweets", "").strip()
+    
+    # If all else fails, return the cleaned name
     return name.strip()
 
 def generate_comparison_table(

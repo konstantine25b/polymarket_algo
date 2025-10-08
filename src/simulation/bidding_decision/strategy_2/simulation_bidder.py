@@ -12,6 +12,7 @@ import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.simulation.initialization.run_initializer import RunInitializer
+from src.simulation.bidding_decision.strategy_2.stop_loss_manager import StopLossManager
 
 # Configure logging
 logging.basicConfig(
@@ -62,12 +63,22 @@ class SimulationBidder:
     """
     Automated bidder that uses statistical opportunities to place simulated buy orders.
     Replicates the exact logic of the real AutoBidder but operates on simulation JSON files.
+    Includes automatic stop loss checking after placing orders.
     """
     
     def __init__(self, threshold: float = 0.0, order_amount: float = 10.0, 
                  use_weighted_selection: bool = False, min_prediction: float = 0.0, 
                  algorithm: str = 'enhanced_facebook_prophet', random_seed: int = 42,
-                 debug: bool = False, show_eachalgo_distribution: bool = False):
+                 debug: bool = False, show_eachalgo_distribution: bool = False,
+                 enable_stop_loss: bool = True,
+                 loss_threshold_1: float = -40.0,
+                 loss_sell_percentage_1: float = 50.0,
+                 loss_threshold_2: float = -60.0,
+                 loss_sell_percentage_2: float = 100.0,
+                 gain_threshold_1: float = 40.0,
+                 gain_sell_percentage_1: float = 40.0,
+                 gain_threshold_2: float = 80.0,
+                 gain_sell_percentage_2: float = 40.0):
         """
         Initialize the SimulationBidder.
         
@@ -79,7 +90,16 @@ class SimulationBidder:
             algorithm: Prediction algorithm to use (default: enhanced_facebook_prophet)
             random_seed: Random seed for reproducible results (default: 42)
             debug: Whether to show detailed debugging information
-            show_eachalgo_distribution: Whether to show individual algorithm distributions
+            show_eachalgo_distribution: Show probability distribution for each individual algorithm
+            enable_stop_loss: Whether to automatically check and execute stop loss orders after bidding
+            loss_threshold_1: First loss threshold percentage (default: -40%)
+            loss_sell_percentage_1: Percentage to sell at first loss threshold (default: 50%)
+            loss_threshold_2: Second loss threshold percentage (default: -60%)
+            loss_sell_percentage_2: Percentage to sell at second loss threshold (default: 100%)
+            gain_threshold_1: First gain threshold percentage (default: 40%)
+            gain_sell_percentage_1: Percentage to sell at first gain threshold (default: 40%)
+            gain_threshold_2: Second gain threshold percentage (default: 80%)
+            gain_sell_percentage_2: Percentage to sell at second gain threshold (default: 40%)
         """
         self.threshold = threshold
         self.order_amount = order_amount
@@ -90,6 +110,26 @@ class SimulationBidder:
         self.debug = debug
         self.show_eachalgo_distribution = show_eachalgo_distribution
         self.run_initializer = RunInitializer()
+        
+        # Stop loss configuration
+        self.enable_stop_loss = enable_stop_loss
+        if self.enable_stop_loss:
+            self.stop_loss_manager = StopLossManager(
+                loss_threshold_1=loss_threshold_1,
+                loss_sell_percentage_1=loss_sell_percentage_1,
+                loss_threshold_2=loss_threshold_2,
+                loss_sell_percentage_2=loss_sell_percentage_2,
+                gain_threshold_1=gain_threshold_1,
+                gain_sell_percentage_1=gain_sell_percentage_1,
+                gain_threshold_2=gain_threshold_2,
+                gain_sell_percentage_2=gain_sell_percentage_2,
+                debug=debug
+            )
+        else:
+            self.stop_loss_manager = None
+            
+        if self.debug and self.enable_stop_loss:
+            print("🛑 Stop loss functionality enabled in SimulationBidder")
         
     def find_best_opportunity(self, update_markets: bool = True, show_stats: bool = True) -> tuple[Optional[Dict[str, Any]], Optional[pd.DataFrame]]:
         """
@@ -136,53 +176,59 @@ class SimulationBidder:
                 logger.info("No specific range opportunities found.")
                 return None, None
             
-            # Filter to positive opportunities only
+            # Filter for positive buy opportunities above the threshold
             positive_opps = data_rows[data_rows[buy_only_col] > 0].copy()
             
+            # Check if there are any meaningful buy opportunities above the threshold
+            if positive_opps.empty or positive_opps[buy_only_col].max() <= 0:
+                logger.info(f"No buy opportunities found above threshold {self.threshold}%.")
+                return None, None
+                
             # Apply minimum prediction filter if set
             if self.min_prediction > 0:
+                prev_count = len(positive_opps)
                 positive_opps = positive_opps[positive_opps['Pred (%)'] >= self.min_prediction].copy()
-            
-            if positive_opps.empty:
-                logger.info(f"No opportunities found above threshold {self.threshold}% and min prediction {self.min_prediction}%")
-                return None, None
-            
-            # Sort by buy-only opportunity descending
-            positive_opps = positive_opps.sort_values(by=buy_only_col, ascending=False)
-            
-            if self.debug:
-                print(f"DEBUG - Found {len(positive_opps)} positive opportunities")
-                for i, (_, row) in enumerate(positive_opps.head(3).iterrows()):
-                    print(f"  {i+1}. {row['Range']}: {row[buy_only_col]:.1f}% edge")
-            
-            # Select opportunity based on strategy
+                filtered_count = prev_count - len(positive_opps)
+                
+                if filtered_count > 0:
+                    logger.info(f"Filtered out {filtered_count} opportunities below minimum prediction threshold of {self.min_prediction}%")
+                
+                if positive_opps.empty:
+                    logger.info(f"No opportunities meet the minimum prediction threshold of {self.min_prediction}%")
+                    return None, None
+                
+            best_row = None
             selected_probability = None
             selection_method_used = 'best'  # Default
             
+            # Use weighted selection if enabled
             if self.use_weighted_selection:
-                # Weighted random selection based on opportunity values
-                weights = positive_opps[buy_only_col].values
-                weights = np.maximum(weights, 0.1)  # Ensure minimum weight
-                
                 # Use separate random generator for weighted choice to avoid interference from prediction algorithms
                 # Create a new random generator instance with current time as seed for true randomness
                 selection_rng = np.random.RandomState(int(time.time() * 1000000) % 2**32)
                 
-                probabilities = weights / weights.sum()
-                choice_idx = selection_rng.choice(len(positive_opps), p=probabilities)
-                best_row = positive_opps.iloc[choice_idx]
-                selected_probability = probabilities[choice_idx]
+                # Calculate weights based on opportunity values
+                weights = positive_opps[buy_only_col].values
+                # Normalize weights to probabilities
+                probs = weights / weights.sum()
+                
+                # Select a row using weighted probabilities
+                selected_idx = selection_rng.choice(positive_opps.index, p=probs)
+                best_row = positive_opps.loc[selected_idx]
+                selected_probability = probs[positive_opps.index.get_loc(selected_idx)]
                 selection_method_used = 'weighted'
                 
-                if self.debug:
-                    print(f"DEBUG - Weighted selection chose index {choice_idx}: {best_row['Range']} (probability: {selected_probability:.2f})")
+                logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
+                logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
+                           f"(prediction: {best_row['Pred (%)']}%, selection probability: {selected_probability:.2f})")
             else:
-                # Take the best opportunity (highest buy-only value)
-                best_row = positive_opps.iloc[0]
+                # Find the row with the highest buy-only opportunity (original behavior)
+                best_idx = positive_opps[buy_only_col].idxmax()
+                best_row = positive_opps.loc[best_idx]
                 selection_method_used = 'best'
                 
-                if self.debug:
-                    print(f"DEBUG - Best opportunity selected: {best_row['Range']}")
+                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
+                           f"(prediction: {best_row['Pred (%)']}%)")
             
             # Extract information about the opportunity
             opportunity = {
@@ -369,16 +415,57 @@ class SimulationBidder:
                 logger.warning(f"Failed to store comparison table: {e}")
             
             # Step 3: Place the simulated order
-            if opportunity.get('probability') is not None:
-                logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge (probability: {opportunity['probability']:.3f})")
-            else:
-                logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge")
+            logger.info(f"💡 Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge")
             success = self.place_simulated_order(run_name, opportunity, dry_run=dry_run)
             
             if success and not dry_run:
                 logger.info("🎉 Simulation bidding completed successfully!")
+                
+                # Step 4: Automatically check and execute stop loss orders after successful bidding
+                if self.enable_stop_loss and self.stop_loss_manager:
+                    logger.info("🛑 Checking for stop loss triggers after bidding...")
+                    try:
+                        # Update market prices to get fresh position values for stop loss check
+                        self.update_simulation_markets(run_name)
+                        
+                        # Execute stop loss check
+                        stop_loss_executed = self.stop_loss_manager.execute_stop_loss_orders(
+                            run_name=run_name,
+                            dry_run=False  # Execute actual stop loss orders after real bidding
+                        )
+                        
+                        if stop_loss_executed:
+                            logger.info(f"🛑 Stop loss orders executed: {len(stop_loss_executed)}")
+                            for executed_order in stop_loss_executed:
+                                print(f"  ✅ {executed_order.get('action', 'Stop loss')} executed for {executed_order.get('market_name', 'unknown market')}")
+                        else:
+                            logger.info("🛑 No stop loss triggers found")
+                            
+                    except Exception as e:
+                        logger.warning(f"Stop loss check failed: {e}")
+                        if self.debug:
+                            import traceback
+                            traceback.print_exc()
+                
             elif success and dry_run:
                 logger.info("🔍 Dry run completed - no actual changes made")
+                
+                # For dry run, also show what stop loss would do
+                if self.enable_stop_loss and self.stop_loss_manager:
+                    logger.info("🛑 Checking what stop loss would do (dry run)...")
+                    try:
+                        stop_loss_executed = self.stop_loss_manager.execute_stop_loss_orders(
+                            run_name=run_name,
+                            dry_run=True  # Dry run for stop loss as well
+                        )
+                        
+                        if stop_loss_executed:
+                            logger.info(f"🔍 Stop loss would execute: {len(stop_loss_executed)} orders")
+                        else:
+                            logger.info("🔍 No stop loss triggers would be found")
+                            
+                    except Exception as e:
+                        logger.warning(f"Stop loss dry run check failed: {e}")
                 
             return success
             

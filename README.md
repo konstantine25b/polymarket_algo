@@ -32,7 +32,7 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Run the automated scheduler with reasonable defaults when 2-6 days remain in the market
-python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 7.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 10 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
+python3 -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 3.0 --min-prediction 8.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 5 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --show-eachalgo-distribution --dry-run
 # Option explanations:
 # --algorithm ensemble         : Use ensemble method combining all prediction algorithms for maximum accuracy
 # --random-seed 42             : Set random seed for reproducible predictions and consistent trading decisions
@@ -49,6 +49,14 @@ python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-th
 # --show-positions             : Display all your current positions when running
 # --show-active-positions      : Display only positions for the active market week
 # --dry-run                    : Test without placing actual orders (remove this for real trading)
+
+
+# for simulation:
+
+python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0
+
+
+python -m src.terminal_logger.logger -n simulation_1 "python -m src.scheduler.scheduler --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad_1 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0"
 
 # Run the automated scheduler with reasonable defaults when 1-2 days remain in the market
 python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --buy-threshold 1.5 --sell-threshold 0.5 --sell-below 2.0 --min-prediction 9.0 --weighted-selection --interval 60 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --dry-run
@@ -86,8 +94,20 @@ The system now supports multiple advanced prediction algorithms for enhanced tra
 # Use Enhanced Facebook Prophet (recommended for most cases)
 python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42
 
+# Use Enhanced Facebook Prophet with individual algorithm analysis
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --show-eachalgo-distribution
+
 # Use Ensemble for maximum accuracy (slower but best results)
 python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --interval 60
+
+# Use Ensemble with individual algorithm analysis
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --interval 60 --show-eachalgo-distribution
+
+# For detailed algorithm analysis, run Enhanced Facebook Prophet directly:
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42 --show-eachalgo-distribution
+
+# For detailed algorithm analysis, run Ensemble directly:
+python -m src.prediction_algos.ensemble.main --random-seed 42 --show-eachalgo-distribution
 
 # Use Neural Prophet for complex pattern detection
 python -m src.scheduler.scheduler --algorithm neural_prophet --random-seed 42
@@ -235,6 +255,31 @@ This configuration uses an optimized approach:
 
 This minimizes unnecessary API calls while ensuring all trading decisions are made with up-to-date data.
 
+#### Individual Algorithm Analysis
+
+For enhanced debugging and model understanding, both Enhanced Facebook Prophet and Ensemble algorithms support showing individual algorithm probability distributions:
+
+```bash
+# Show individual algorithm distributions with Enhanced Facebook Prophet
+python -m src.scheduler.scheduler --algorithm enhanced_facebook_prophet --random-seed 42 --show-eachalgo-distribution --dry-run
+
+# Show individual algorithm distributions with Ensemble
+python -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --show-eachalgo-distribution --dry-run
+
+# Run directly for detailed analysis
+python -m src.prediction_algos.facebook_prophet.enhanced_main --random-seed 42 --show-eachalgo-distribution
+python -m src.prediction_algos.ensemble.main --random-seed 42 --show-eachalgo-distribution
+```
+
+This feature displays:
+
+- **Enhanced Facebook Prophet**: Shows distributions for Daily Prophet, Hourly Prophet, Conservative Prophet, Aggressive Prophet, Weekly Prophet, Pattern-based, and Random Forest models
+- **Ensemble**: Shows distributions for Neural Prophet, Facebook Prophet, TimesFM, and Basic Prophet models
+- **All probability categories**: Displays probabilities for all tweet count ranges, not just the top ones
+- **Model weights**: Shows how much each algorithm contributes to the final prediction
+
+Perfect for understanding which models are conservative vs aggressive and how they contribute to the final ensemble prediction.
+
 #### `/src/terminal_logger/` - Terminal Output Logging
 
 Simple utility for logging terminal output to files when running commands.
@@ -328,6 +373,7 @@ The scheduler is the main entry point for the automated system. Key options incl
 --weighted-selection   Use weighted probability selection instead of always choosing the best opportunity
 --show-positions       Show all current positions when running
 --show-active-positions Show positions for active market when running
+--show-eachalgo-distribution Show individual algorithm probability distributions (enhanced_facebook_prophet and ensemble only)
 ```
 
 ### Example with Different Intervals

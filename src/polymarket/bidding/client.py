@@ -4,7 +4,10 @@ Handles authentication and order creation.
 """
 
 import os
+import time
+import random
 from dotenv import load_dotenv
+import requests
 from py_clob_client.constants import POLYGON
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, TradeParams, MarketOrderArgs, OrderType
@@ -37,11 +40,123 @@ class PolymarketClient:
         self.chain_id = chain_id
         self.private_key = private_key
         
+        # Optionally force IPv4 to avoid IPv6-specific Cloudflare filtering on some hosts
+        self._enforce_ipv4_if_requested()
+
         # Initialize the CLOB client
         self.client = ClobClient(host, key=private_key, chain_id=chain_id)
         
+        # Add browser-like headers to avoid Cloudflare blocks
+        self._configure_headers()
+        
         # Set up API credentials
         self._setup_api_credentials()
+    
+    def _enforce_ipv4_if_requested(self):
+        """
+        Force requests/urllib3 to use IPv4 only when FORCE_IPV4=1 is set in the environment.
+        This helps on hosts where IPv6 egress gets blocked by Cloudflare while IPv4 is allowed.
+        """
+        try:
+            if os.environ.get("FORCE_IPV4", "0") == "1":
+                import socket
+                try:
+                    # requests vendored urllib3 path
+                    from requests.packages.urllib3.util import connection as urllib3_conn  # type: ignore
+                except Exception:
+                    # system urllib3 path
+                    from urllib3.util import connection as urllib3_conn  # type: ignore
+
+                def allowed_gai_family():
+                    return socket.AF_INET
+
+                urllib3_conn.allowed_gai_family = allowed_gai_family  # type: ignore
+        except Exception:
+            # Non-fatal; continue without IPv4 enforcement
+            pass
+
+    def _configure_headers(self):
+        """
+        Configure advanced browser-like headers and session settings to avoid Cloudflare blocks.
+        This helps the requests appear more like legitimate browser traffic.
+        """
+        try:
+            # More realistic browser headers with randomization
+            user_agents = [
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+            
+            headers = {
+                'User-Agent': random.choice(user_agents),
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'cross-site',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Linux"',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Origin': 'https://polymarket.com',
+                'Referer': 'https://polymarket.com/'
+            }
+            
+            # Try to configure the session on the underlying client
+            session = None
+            # Prefer an existing session-like attribute if present
+            if hasattr(self.client, '_session') and getattr(self.client, '_session') is not None:
+                session = getattr(self.client, '_session')
+            elif hasattr(self.client, 'session') and getattr(self.client, 'session') is not None:
+                session = getattr(self.client, 'session')
+
+            # If no session is available, create a requests.Session and attach it
+            if session is None:
+                try:
+                    new_session = requests.Session()
+                    # Respect system/env proxies if provided (e.g., HTTPS_PROXY/HTTP_PROXY)
+                    new_session.trust_env = True
+                    new_session.headers.update(headers)
+                    # Attach to both common attributes to maximize compatibility
+                    try:
+                        setattr(self.client, '_session', new_session)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(self.client, 'session', new_session)
+                    except Exception:
+                        pass
+                    session = new_session
+                except Exception:
+                    session = None
+
+            if session is not None:
+                try:
+                    session.headers.update(headers)
+                except Exception:
+                    pass
+
+                # Additional session configuration to mimic browser behavior
+                try:
+                    if hasattr(session, 'cookies'):
+                        session.cookies.clear()  # Start fresh
+                except Exception:
+                    pass
+
+                # Add some realistic timing
+                time.sleep(random.uniform(0.1, 0.5))
+
+                print("Successfully configured advanced headers for Cloudflare bypass (session applied)")
+            else:
+                print("Warning: Could not access or create session for header configuration")
+                
+        except Exception as e:
+            # If header configuration fails, continue anyway - it's not critical
+            print(f"Warning: Could not configure headers: {e}")
     
     def _setup_api_credentials(self):
         """
@@ -61,6 +176,13 @@ class PolymarketClient:
             str: Wallet address
         """
         return self.client.get_address()
+    
+    def _human_like_delay(self):
+        """
+        Add a small random delay to mimic human behavior and avoid rate limiting.
+        """
+        delay = random.uniform(0.5, 2.0)  # Random delay between 0.5-2 seconds
+        time.sleep(delay)
         
     def get_trades(self, maker_address=None):
         """

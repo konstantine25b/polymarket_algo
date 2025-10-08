@@ -12,7 +12,7 @@ import os
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from constants import ET_TIMEZONE, GEORGIA_TIMESTAMP_FORMAT
+from constants import ET_TIMEZONE, GEORGIA_TIMESTAMP_FORMAT, POLYMARKET_START_TIME, POLYMARKET_END_TIME
 from polymarket_predictor.time_utils import parse_timestamp
 
 
@@ -108,22 +108,33 @@ class TweetDataProcessor:
         elif current_time.tzinfo is None:
             current_time = ET_TIMEZONE.localize(current_time)
         
-        # Define week as Friday 12 PM ET to Friday 12 PM ET
-        if current_time.weekday() < 4:  # Monday=0 to Thursday=3
-            # Current week started last Friday
-            days_since_friday = (current_time.weekday() + 3) % 7
-            week_start = current_time.replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=days_since_friday)
-        else:  # Friday=4, Saturday=5, Sunday=6
-            # Current week started this Friday (or will start)
-            days_to_friday = (4 - current_time.weekday()) % 7
-            if current_time.weekday() == 4 and current_time.hour < 12:
-                # It's Friday before 12 PM, so week hasn't started yet
-                week_start = current_time.replace(hour=12, minute=0, second=0, microsecond=0)
-            else:
-                # Week already started
-                week_start = current_time.replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=days_to_friday)
+        # Use Polymarket event timeframe from constants instead of Friday-to-Friday calculation
+        try:
+            week_start = ET_TIMEZONE.localize(
+                datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S"), 
+                is_dst=None
+            )
+        except Exception as e:
+            print(f"Warning: Error parsing Polymarket start time: {e}")
+            # Fallback to DST-aware localization
+            week_start = ET_TIMEZONE.localize(
+                datetime.strptime(POLYMARKET_START_TIME, "%Y-%m-%d %H:%M:%S"), 
+                is_dst=True
+            )
         
-        week_end = week_start + timedelta(days=7)
+        try:
+            week_end = ET_TIMEZONE.localize(
+                datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S"), 
+                is_dst=None
+            )
+        except Exception as e:
+            print(f"Warning: Error parsing Polymarket end time: {e}")
+            # Fallback to DST-aware localization
+            week_end = ET_TIMEZONE.localize(
+                datetime.strptime(POLYMARKET_END_TIME, "%Y-%m-%d %H:%M:%S"), 
+                is_dst=True
+            )
+        
         time_remaining = week_end - current_time
         
         # Count tweets in current week

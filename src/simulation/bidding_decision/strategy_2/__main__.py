@@ -8,6 +8,7 @@ Usage examples:
     python -m src.simulation.bidding_decision.strategy_1 --run test_run --algorithm ensemble --random-seed 42
     python -m src.simulation.bidding_decision.strategy_1 --sell test_run --threshold 2.0 --auto-sell --algorithm enhanced_facebook_prophet
     python -m src.simulation.bidding_decision.strategy_1 --analyze test_run --debug --algorithm neural_prophet
+    python -m src.simulation.bidding_decision.strategy_1 --stop-loss test_run --dry-run
 """
 
 import argparse
@@ -15,6 +16,7 @@ import sys
 import logging
 from .simulation_bidder import SimulationBidder
 from .simulation_seller import SimulationSeller
+from .stop_loss_manager import StopLossManager
 
 # Configure logging
 logging.basicConfig(
@@ -27,27 +29,31 @@ def main():
         description="Polymarket Simulation Bidding Strategy - Execute bidding/selling decisions on simulated runs"
     )
     
-    # Primary action commands (mutually exclusive)
-    action_group = parser.add_mutually_exclusive_group(required=True)
-    action_group.add_argument(
+    # Primary action commands (now optional to allow combinations)
+    parser.add_argument(
         '--run', 
         metavar='RUN_NAME',
         help='Execute bidding strategy on the specified simulation run'
     )
-    action_group.add_argument(
+    parser.add_argument(
         '--sell', 
         metavar='RUN_NAME',
         help='Analyze and show selling opportunities for the specified simulation run'
     )
-    action_group.add_argument(
+    parser.add_argument(
         '--analyze', 
         metavar='RUN_NAME',
         help='Analyze opportunities and positions without executing any trades'
     )
-    action_group.add_argument(
+    parser.add_argument(
         '--analyze-opportunities',
         action='store_true',
         help='Analyze current market opportunities without any simulation run'
+    )
+    parser.add_argument(
+        '--stop-loss', 
+        metavar='RUN_NAME',
+        help='Execute stop loss orders for positions that have triggered thresholds'
     )
     
     # Algorithm parameters
@@ -64,6 +70,117 @@ def main():
         type=int, 
         default=42,
         help='Random seed for reproducible results (default: 42)'
+    )
+    
+    # Stop Loss parameters
+    parser.add_argument(
+        '--loss-threshold-1', 
+        type=float, 
+        default=-40.0,
+        metavar='PERCENT',
+        help='First loss threshold percentage (default: -40.0%%)'
+    )
+    parser.add_argument(
+        '--loss-sell-1', 
+        type=float, 
+        default=50.0,
+        metavar='PERCENT',
+        help='Percentage to sell at first loss threshold (default: 50.0%%)'
+    )
+    parser.add_argument(
+        '--loss-threshold-2', 
+        type=float, 
+        default=-60.0,
+        metavar='PERCENT',
+        help='Second loss threshold percentage (default: -60.0%%)'
+    )
+    parser.add_argument(
+        '--loss-sell-2', 
+        type=float, 
+        default=100.0,
+        metavar='PERCENT',
+        help='Percentage to sell at second loss threshold (default: 100.0%%)'
+    )
+    parser.add_argument(
+        '--gain-threshold-1', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='First gain threshold percentage (default: 40.0%%)'
+    )
+    parser.add_argument(
+        '--gain-sell-1', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='Percentage to sell at first gain threshold (default: 40.0%%)'
+    )
+    parser.add_argument(
+        '--gain-threshold-2', 
+        type=float, 
+        default=80.0,
+        metavar='PERCENT',
+        help='Second gain threshold percentage (default: 80.0%%)'
+    )
+    parser.add_argument(
+        '--gain-sell-2', 
+        type=float, 
+        default=40.0,
+        metavar='PERCENT',
+        help='Percentage to sell at second gain threshold (default: 40.0%%)'
+    )
+    
+    # Scheduler-compatible parameters (newly added)
+    parser.add_argument(
+        '--use-csv-getter',
+        action='store_true',
+        help='Use CSV getter functionality (compatibility parameter)'
+    )
+    parser.add_argument(
+        '--get-tweet-count-first',
+        action='store_true',
+        help='Get tweet count first (compatibility parameter)'
+    )
+    parser.add_argument(
+        '--tweet-interval',
+        type=int,
+        default=110,
+        help='Tweet interval in minutes (compatibility parameter, default: 110)'
+    )
+    parser.add_argument(
+        '--buy-interval',
+        type=int,
+        default=60,
+        help='Buy interval in minutes (compatibility parameter, default: 60)'
+    )
+    parser.add_argument(
+        '--sell-interval',
+        type=int,
+        default=5,
+        help='Sell interval in minutes (compatibility parameter, default: 5)'
+    )
+    parser.add_argument(
+        '--simulate',
+        type=str,
+        help='Simulation run name (compatibility parameter)'
+    )
+    parser.add_argument(
+        '--sim-balance',
+        type=float,
+        default=144.0,
+        help='Simulation balance (compatibility parameter, default: 144.0)'
+    )
+    parser.add_argument(
+        '--buy-threshold',
+        type=float,
+        default=1.0,
+        help='Buy threshold percentage (compatibility parameter, default: 1.0)'
+    )
+    parser.add_argument(
+        '--sell-threshold',
+        type=float,
+        default=0.5,
+        help='Sell threshold percentage (compatibility parameter, default: 0.5)'
     )
     
     # Bidding/opportunity parameters
@@ -154,7 +271,7 @@ def main():
         help='Reduce output to essential information only'
     )
     parser.add_argument(
-        '--show-eachalgo-distribution', 
+        '--show-eachalgo-distribution',
         action='store_true',
         help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)'
     )
@@ -167,10 +284,63 @@ def main():
     elif args.verbose or args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     
+    # Handle scheduler-compatible parameters
+    if args.simulate and not args.run:
+        args.run = args.simulate
+    if args.buy_threshold:
+        args.threshold = args.buy_threshold
+    
+    # Show compatibility parameter usage if debug enabled
+    if args.debug:
+        print("🔧 Scheduler compatibility mode enabled:")
+        if args.use_csv_getter:
+            print("  📊 CSV getter: enabled")
+        if args.get_tweet_count_first:
+            print("  🐦 Tweet count first: enabled")
+        print(f"  ⏱️ Intervals: tweet={args.tweet_interval}min, buy={args.buy_interval}min, sell={args.sell_interval}min")
+        if args.simulate:
+            print(f"  🎲 Simulation run: {args.simulate}")
+        print(f"  💰 Simulation balance: ${args.sim_balance}")
+        print(f"  📈 Thresholds: buy={args.buy_threshold}%, sell={args.sell_threshold}%")
+    
     try:
         # Handle different action types
-        if args.run:
-            # Execute bidding strategy
+        if args.stop_loss:
+            # Execute stop loss functionality
+            stop_loss_manager = StopLossManager(
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2,
+                debug=args.debug
+            )
+            
+            print(f"🛑 Executing stop loss analysis on simulation run: {args.stop_loss}")
+            if args.dry_run:
+                print("🔍 DRY RUN MODE - No actual trades will be executed")
+            
+            print(f"Stop Loss Thresholds:")
+            print(f"  Loss: {args.loss_threshold_1}% -> sell {args.loss_sell_1}%")
+            print(f"  Loss: {args.loss_threshold_2}% -> sell {args.loss_sell_2}%")
+            print(f"  Gain: {args.gain_threshold_1}% -> sell {args.gain_sell_1}%")
+            print(f"  Gain: {args.gain_threshold_2}% -> sell {args.gain_sell_2}%")
+            
+            executed_orders = stop_loss_manager.execute_stop_loss_orders(
+                run_name=args.stop_loss,
+                dry_run=args.dry_run
+            )
+            
+            # Show stop loss history
+            stop_loss_manager.print_stop_loss_summary(args.stop_loss)
+            
+            sys.exit(0 if executed_orders is not None else 1)
+            
+        elif args.run or args.analyze_opportunities:
+            # Execute bidding strategy or analyze opportunities
             bidder = SimulationBidder(
                 threshold=args.threshold,
                 order_amount=args.amount,
@@ -179,8 +349,39 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable automatic stop loss checking after bidding
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
+            
+            if args.analyze_opportunities:
+                # Analyze opportunities without a specific run
+                print("📊 Analyzing current market opportunities (scheduler compatibility mode)")
+                if args.run:
+                    print(f"🎯 Also considering simulation run: {args.run}")
+                
+                print(f"Parameters: threshold={args.threshold}%, min_prediction={args.min_prediction}%")
+                
+                opportunity = bidder.find_best_opportunity(
+                    update_markets=not args.no_update,
+                    show_stats=not args.no_stats
+                )
+                
+                if opportunity:
+                    print(f"✅ Found opportunity: {opportunity['range']} with {opportunity['opportunity']:.1f}% edge")
+                    if args.dry_run:
+                        print("🔍 DRY RUN MODE - Would place order if this was a real run")
+                else:
+                    print("❌ No opportunities found above threshold")
+                
+                sys.exit(0)
             
             if args.update_only:
                 # Only update markets, don't place orders
@@ -222,7 +423,16 @@ def main():
                 random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             if args.update_only:
@@ -273,7 +483,16 @@ def main():
                 algorithm=args.algorithm,
                 random_seed=args.random_seed,
                 debug=args.debug,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             seller = SimulationSeller(
@@ -283,7 +502,16 @@ def main():
                 random_seed=args.random_seed,
                 debug=args.debug,
                 active_market_only=args.active_market_only,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
+                show_eachalgo_distribution=args.show_eachalgo_distribution,
+                enable_stop_loss=True,  # Enable stop loss for analysis
+                loss_threshold_1=args.loss_threshold_1,
+                loss_sell_percentage_1=args.loss_sell_1,
+                loss_threshold_2=args.loss_threshold_2,
+                loss_sell_percentage_2=args.loss_sell_2,
+                gain_threshold_1=args.gain_threshold_1,
+                gain_sell_percentage_1=args.gain_sell_1,
+                gain_threshold_2=args.gain_threshold_2,
+                gain_sell_percentage_2=args.gain_sell_2
             )
             
             # Show opportunities analysis
@@ -302,33 +530,6 @@ def main():
             success = seller.analyze_positions(args.analyze, update_markets=False)  # Already updated above
             
             sys.exit(0 if success else 1)
-            
-        elif args.analyze_opportunities:
-            # Analyze market opportunities without any simulation run
-            bidder = SimulationBidder(
-                threshold=args.threshold,
-                order_amount=args.amount,
-                use_weighted_selection=args.weighted_selection,
-                min_prediction=args.min_prediction,
-                algorithm=args.algorithm,
-                random_seed=args.random_seed,
-                debug=args.debug,
-                show_eachalgo_distribution=args.show_eachalgo_distribution
-            )
-            
-            print("📊 Analyzing current market opportunities")
-            print(f"Parameters: threshold={args.threshold}%, min_prediction={args.min_prediction}%")
-            
-            update_markets = not args.no_update
-            show_stats = not args.no_stats
-            
-            df = bidder.analyze_opportunities(update_markets=update_markets, show_stats=show_stats)
-            
-            if df is not None:
-                print("✅ Opportunity analysis completed")
-            else:
-                print("❌ No opportunities found or analysis failed")
-                sys.exit(1)
     
     except KeyboardInterrupt:
         print("\n⏹️ Operation cancelled by user")

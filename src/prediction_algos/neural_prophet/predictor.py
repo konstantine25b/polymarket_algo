@@ -157,14 +157,27 @@ class NeuralTweetPredictor:
         print(f"Time remaining: {time_remaining}")
         
         # Calculate days remaining (Neural Prophet works with daily forecasts)
-        days_remaining = max(1, int(np.ceil(time_remaining.total_seconds() / (24 * 3600))))
+        total_hours_remaining = time_remaining.total_seconds() / 3600
+        
+        # If less than 1 hour remaining, use fractional day calculation
+        if total_hours_remaining < 1:
+            # Use fractional day for very short time periods
+            days_remaining_exact = time_remaining.total_seconds() / (24 * 3600)
+            days_remaining = max(0.01, days_remaining_exact)  # Minimum 0.01 days (14.4 minutes)
+            print(f"Time remaining: {total_hours_remaining:.2f} hours ({days_remaining:.3f} days)")
+        else:
+            # Use the original calculation for longer periods
+            days_remaining = max(1, int(np.ceil(time_remaining.total_seconds() / (24 * 3600))))
+            print(f"Time remaining: {total_hours_remaining:.2f} hours")
         
         print(f"Days to forecast: {days_remaining}")
         
         # Make future dataframe
+        # Neural Prophet requires integer periods, so we forecast at least 1 day
+        forecast_periods = max(1, int(np.ceil(days_remaining)))
         future = self.model.make_future_dataframe(
             self.data_processor.get_neural_prophet_data(),
-            periods=days_remaining,
+            periods=forecast_periods,
             n_historic_predictions=True
         )
         
@@ -172,20 +185,38 @@ class NeuralTweetPredictor:
         forecast = self.model.predict(future)
         
         # Extract predictions for remaining days
-        future_forecast = forecast.tail(days_remaining)
+        future_forecast = forecast.tail(forecast_periods)
         
-        # Calculate total remaining tweets
-        remaining_tweets = future_forecast['yhat1'].sum()
-        
-        # Calculate confidence intervals
-        if 'yhat1 10.0%-ile' in future_forecast.columns:
-            lower_bound = future_forecast['yhat1 10.0%-ile'].sum()
-            upper_bound = future_forecast['yhat1 90.0%-ile'].sum()
+        # Calculate total remaining tweets, handling fractional days
+        if days_remaining < 1:
+            # For fractional days, take the first day's forecast and scale it
+            remaining_tweets = future_forecast['yhat1'].iloc[0] * days_remaining
+            
+            # Scale confidence intervals too
+            if 'yhat1 10.0%-ile' in future_forecast.columns and 'yhat1 90.0%-ile' in future_forecast.columns:
+                lower_bound = future_forecast['yhat1 10.0%-ile'].iloc[0] * days_remaining
+                upper_bound = future_forecast['yhat1 90.0%-ile'].iloc[0] * days_remaining
+            else:
+                # Fallback: use historical variance for confidence estimation
+                historical_data = self.data_processor.get_neural_prophet_data()
+                historical_std = historical_data['y'].std()
+                # Scale the confidence interval by the fraction of day and uncertainty
+                confidence_width = 1.645 * historical_std * np.sqrt(days_remaining) * 0.5  # 50% of historical std
+                lower_bound = max(0, remaining_tweets - confidence_width)
+                upper_bound = remaining_tweets + confidence_width
         else:
-            # Fallback: estimate confidence interval from prediction variance
-            std_prediction = future_forecast['yhat1'].std()
-            lower_bound = remaining_tweets - 1.645 * std_prediction * np.sqrt(days_remaining)
-            upper_bound = remaining_tweets + 1.645 * std_prediction * np.sqrt(days_remaining)
+            # Handle full days as before
+            remaining_tweets = future_forecast['yhat1'].sum()
+            
+            # Calculate confidence intervals
+            if 'yhat1 10.0%-ile' in future_forecast.columns:
+                lower_bound = future_forecast['yhat1 10.0%-ile'].sum()
+                upper_bound = future_forecast['yhat1 90.0%-ile'].sum()
+            else:
+                # Fallback: estimate confidence interval from prediction variance
+                std_prediction = future_forecast['yhat1'].std()
+                lower_bound = remaining_tweets - 1.645 * std_prediction * np.sqrt(days_remaining)
+                upper_bound = remaining_tweets + 1.645 * std_prediction * np.sqrt(days_remaining)
         
         total_predicted = current_tweets + remaining_tweets
         total_lower = current_tweets + lower_bound
@@ -216,6 +247,7 @@ class NeuralTweetPredictor:
             dict: Probabilities for each range defined in TWEET_COUNT_FRAMES
         """
         total_predicted = prediction_results['total_predicted']
+        current_tweets = prediction_results['current_tweets']
         ci_lower = prediction_results['confidence_interval']['lower']
         ci_upper = prediction_results['confidence_interval']['upper']
         
@@ -232,14 +264,21 @@ class NeuralTweetPredictor:
             min_tweets = frame['min']
             max_tweets = frame['max']
             
-            if max_tweets == float('inf'):  # "X or more" case
+            # If the frame's maximum is less than current tweets, it's impossible
+            if max_tweets != float('inf') and max_tweets < current_tweets:
+                prob = 0.0
+            elif max_tweets == float('inf'):  # "X or more" case
                 prob = 1 - stats.norm.cdf(min_tweets, loc=total_predicted, scale=std_estimate)
             else:
                 prob_lower = stats.norm.cdf(min_tweets, loc=total_predicted, scale=std_estimate)
                 prob_upper = stats.norm.cdf(max_tweets + 1, loc=total_predicted, scale=std_estimate)
                 prob = prob_upper - prob_lower
             
-            probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability
+            # Only apply minimum probability for non-impossible frames
+            if max_tweets == float('inf') or max_tweets >= current_tweets:
+                probabilities[frame_name] = max(0.001, prob)  # Minimum 0.1% probability for possible frames
+            else:
+                probabilities[frame_name] = 0.0  # 0% for impossible frames
         
         # Normalize probabilities to sum to 1
         total_prob = sum(probabilities.values())
@@ -339,7 +378,8 @@ class NeuralTweetPredictor:
         ax1.plot(train_data['ds'], train_data['y'], 'o-', alpha=0.7, label='Historical', markersize=3)
         
         # Plot forecast
-        future_data = forecast_data.tail(results['days_remaining'])
+        forecast_periods = max(1, int(np.ceil(results['days_remaining'])))
+        future_data = forecast_data.tail(forecast_periods)
         ax1.plot(future_data['ds'], future_data['yhat1'], 'r-', linewidth=2, label='Forecast')
         
         # Add confidence intervals if available

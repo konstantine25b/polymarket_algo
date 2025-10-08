@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, Dict, Any
 import random
 import numpy as np
+import time
 
 from src.bidding_decision.stats.comparison import generate_comparison_table
 from src.polymarket.bidding import PolymarketClient
@@ -25,7 +26,7 @@ class AutoBidder:
     Automated bidder that uses statistical opportunities to place market buy orders.
     """
     
-    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0, algorithm: str = "prophet", random_seed: int = 42):
+    def __init__(self, threshold: float = 0.0, order_amount: float = 1.0, use_weighted_selection: bool = False, min_prediction: float = 0.0, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False):
         """
         Initialize the AutoBidder.
         
@@ -37,6 +38,7 @@ class AutoBidder:
             min_prediction: Minimum prediction percentage required to consider an opportunity (%)
             algorithm: Prediction algorithm to use
             random_seed: Random seed for reproducible predictions
+            show_eachalgo_distribution: Whether to show individual algorithm distributions
         """
         self.threshold = threshold
         self.order_amount = order_amount
@@ -44,6 +46,7 @@ class AutoBidder:
         self.min_prediction = min_prediction
         self.algorithm = algorithm
         self.random_seed = random_seed
+        self.show_eachalgo_distribution = show_eachalgo_distribution
         self.client = None
         
     def connect(self, private_key: Optional[str] = None):
@@ -61,9 +64,12 @@ class AutoBidder:
             logger.error(f"Failed to connect to Polymarket: {e}")
             return False
     
-    def find_best_opportunity(self) -> Optional[Dict[str, Any]]:
+    def find_best_opportunity(self, comparison_df: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
         """
         Find the best buy opportunity based on statistical analysis.
+        
+        Args:
+            comparison_df: Pre-generated comparison DataFrame (optional, will generate if not provided)
         
         Returns:
             Dict containing opportunity details or None if no opportunity found
@@ -73,14 +79,19 @@ class AutoBidder:
             return None
             
         try:
-            # Generate comparison table with the specified threshold
-            df = generate_comparison_table(
-                refresh=True,
-                use_prophet=True,
-                threshold=self.threshold,
-                algorithm=self.algorithm,
-                random_seed=self.random_seed
-            )
+            # Use provided DataFrame or generate a new one
+            if comparison_df is not None:
+                df = comparison_df
+            else:
+                # Generate comparison table with the specified threshold
+                df = generate_comparison_table(
+                    refresh=True,
+                    use_prophet=True,
+                    threshold=self.threshold,
+                    algorithm=self.algorithm,
+                    random_seed=self.random_seed,
+                    show_eachalgo_distribution=self.show_eachalgo_distribution
+                )
             
             if df.empty:
                 logger.info("No opportunities found in comparison table.")
@@ -118,27 +129,37 @@ class AutoBidder:
                     return None
                 
             best_row = None
+            selected_probability = None
+            selection_method_used = None
             
             # Use weighted selection if enabled and there are multiple positive opportunities
             if self.use_weighted_selection and len(positive_opps) > 1:
+                # Use separate random generator for weighted choice to avoid interference from prediction algorithms
+                # Create a new random generator instance with current time as seed for true randomness
+                selection_rng = np.random.RandomState(int(time.time() * 1000000) % 2**32)
+                
                 # Calculate weights based on opportunity values
                 weights = positive_opps[buy_only_col].values
                 # Normalize weights to probabilities
                 probs = weights / weights.sum()
                 
-                # Select a row using weighted probabilities
-                selected_idx = np.random.choice(positive_opps.index, p=probs)
+                # Select a row using weighted probabilities with separate random generator
+                selected_idx = selection_rng.choice(positive_opps.index, p=probs)
                 best_row = positive_opps.loc[selected_idx]
+                selected_probability = probs[positive_opps.index.get_loc(selected_idx)]
+                selection_method_used = 'weighted'
                 
                 logger.info(f"Using weighted selection from {len(positive_opps)} opportunities")
                 logger.info(f"Selected opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
-                           f"(probability: {probs[positive_opps.index.get_loc(selected_idx)]:.2f})")
+                           f"(prediction: {best_row['Pred (%)']}%, selection probability: {selected_probability:.2f})")
             else:
                 # Find the row with the highest buy-only opportunity (original behavior)
                 best_idx = positive_opps[buy_only_col].idxmax()
                 best_row = positive_opps.loc[best_idx]
+                selection_method_used = 'best'
                 
-                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge")
+                logger.info(f"Selected highest opportunity: {best_row['Range']} with {best_row[buy_only_col]}% edge " +
+                           f"(prediction: {best_row['Pred (%)']}%)")
             
             # Extract information about the opportunity
             opportunity = {
@@ -151,9 +172,13 @@ class AutoBidder:
                 'difference': best_row['Diff (%)'],
                 'threshold': self.threshold,  # Add threshold for reference
                 'min_prediction': self.min_prediction,  # Add min_prediction for reference
-                'selection_method': 'weighted' if self.use_weighted_selection else 'best',
+                'selection_method': selection_method_used,
                 'total_opportunities': len(positive_opps)
             }
+            
+            # Add probability if weighted selection was used
+            if selected_probability is not None:
+                opportunity['probability'] = selected_probability
             
             return opportunity
             

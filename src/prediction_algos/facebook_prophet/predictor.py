@@ -127,8 +127,20 @@ class TweetPredictor:
             
             # Scale prediction based on remaining time
             predicted_remaining_tweets = latest_prediction * remaining_days
-            predicted_remaining_lower = prediction_lower * remaining_days
-            predicted_remaining_upper = prediction_upper * remaining_days
+            
+            # For confidence intervals, we need to be more careful
+            # The uncertainty doesn't scale linearly with time for tweet counts
+            # Use a more conservative approach for confidence intervals
+            daily_uncertainty = (prediction_upper - prediction_lower) / 2
+            
+            # Scale uncertainty by square root of remaining days (more realistic for count data)
+            scaled_uncertainty = daily_uncertainty * np.sqrt(remaining_days)
+            
+            predicted_remaining_lower = predicted_remaining_tweets - scaled_uncertainty
+            predicted_remaining_upper = predicted_remaining_tweets + scaled_uncertainty
+            
+            # Ensure lower bound is not negative for tweet counts
+            predicted_remaining_lower = max(0, predicted_remaining_lower)
             
         else:
             # No time remaining
@@ -147,18 +159,19 @@ class TweetPredictor:
         # Calculate probabilities for each time frame
         predictions = {}
         
+        # Use a reasonable standard deviation for tweet count predictions
+        # Based on typical tweet count variability (around 15-20% of the prediction)
+        std_dev = max(10, total_predicted * 0.15)  # Minimum 10 tweets std dev, or 15% of prediction
+        
         for frame in TWEET_COUNT_FRAMES:
             frame_name = frame['name']
             min_tweets = frame['min']
             max_tweets = frame['max']
             
-            # Calculate probability using normal distribution approximation
-            # Use the prediction uncertainty as standard deviation
-            std_dev = (total_predicted_upper - total_predicted_lower) / 4  # Approximate 2 std devs
-            
+            # Calculate probability using normal distribution
             if max_tweets == float('inf'):
                 # For "X or more" categories
-                prob = 1 - self._normal_cdf(max_tweets - 0.5, total_predicted, std_dev)
+                prob = 1 - self._normal_cdf(min_tweets - 0.5, total_predicted, std_dev)
             else:
                 # For range categories
                 prob_lower = self._normal_cdf(min_tweets - 0.5, total_predicted, std_dev)

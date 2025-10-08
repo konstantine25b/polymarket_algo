@@ -833,7 +833,7 @@ class EnsembleTweetPredictor:
     
     def calculate_ensemble_probabilities(self, ensemble_result):
         """
-        Calculate probabilities for each tweet count range using ensemble prediction.
+        Calculate probabilities for each tweet count range using weighted combination of individual model probabilities.
         
         Args:
             ensemble_result (dict): Results from predict_remaining_tweets
@@ -841,10 +841,9 @@ class EnsembleTweetPredictor:
         Returns:
             dict: Probabilities for each range defined in TWEET_COUNT_FRAMES
         """
-        # Check if we have individual model probabilities to combine
+        # Extract probabilities from individual models
         model_probabilities = {}
         
-        # Extract probabilities from individual models
         for model_name, result in ensemble_result.get('individual_predictions', {}).items():
             model_weight = self.normalized_weights.get(model_name, 0.0)
             if model_weight > 0:
@@ -864,93 +863,31 @@ class EnsembleTweetPredictor:
                 if probs:
                     model_probabilities[model_name] = probs
         
-        # If we have model probabilities, use weighted combination
-        if model_probabilities:
-            ensemble_probabilities = {}
+        # Initialize ensemble probabilities to 0 for all frames
+        ensemble_probabilities = {}
+        for frame in TWEET_COUNT_FRAMES:
+            ensemble_probabilities[frame['name']] = 0.0
+        
+        # Weight and combine model probabilities
+        total_weight = 0.0
+        for model_name, probs in model_probabilities.items():
+            model_weight = self.normalized_weights.get(model_name, 0.0)
+            total_weight += model_weight
             
-            # Initialize all frame probabilities to 0
-            for frame in TWEET_COUNT_FRAMES:
-                ensemble_probabilities[frame['name']] = 0.0
-            
-            # Weight and combine model probabilities
-            total_weight = 0.0
-            for model_name, probs in model_probabilities.items():
-                model_weight = self.normalized_weights.get(model_name, 0.0)
-                total_weight += model_weight
-                
-                for frame_name, prob in probs.items():
-                    if frame_name in ensemble_probabilities:
-                        ensemble_probabilities[frame_name] += prob * model_weight
-            
-            # Normalize if we have weights
-            if total_weight > 0:
-                for frame_name in ensemble_probabilities:
-                    ensemble_probabilities[frame_name] /= total_weight
-            
-            # If we have some frames covered by model probabilities, 
-            # use normal distribution for remaining weight
-            remaining_weight = 1.0 - sum(self.normalized_weights.get(model, 0.0) 
-                                       for model in model_probabilities.keys())
-            
-            if remaining_weight > 0:
-                # Calculate normal distribution probabilities for remaining weight
-                total_predicted = ensemble_result['total_predicted']
-                ci_lower = ensemble_result['confidence_interval']['lower']
-                ci_upper = ensemble_result['confidence_interval']['upper']
-                
-                # Estimate standard deviation from confidence interval
-                std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
-                if std_estimate < 1.0:
-                    std_estimate = max(1.0, total_predicted * 0.1)
-                
-                normal_probabilities = {}
-                for frame in TWEET_COUNT_FRAMES:
-                    frame_name = frame['name']
-                    min_tweets = frame['min']
-                    max_tweets = frame['max']
-                    
-                    if max_tweets == float('inf'):
-                        prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                    else:
-                        prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                        prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
-                        prob = prob_upper - prob_lower
-                    
-                    normal_probabilities[frame_name] = max(0, min(1, prob))
-                
-                # Normalize normal probabilities
-                total_normal_prob = sum(normal_probabilities.values())
-                if total_normal_prob > 0:
-                    normal_probabilities = {k: v / total_normal_prob for k, v in normal_probabilities.items()}
-                
-                # Add remaining weight contribution
-                for frame_name in ensemble_probabilities:
-                    ensemble_probabilities[frame_name] += normal_probabilities.get(frame_name, 0.0) * remaining_weight
-            
+            for frame_name, prob in probs.items():
+                if frame_name in ensemble_probabilities:
+                    ensemble_probabilities[frame_name] += prob * model_weight
+        
+        # Normalize by total weight if we have any model probabilities
+        if total_weight > 0:
+            for frame_name in ensemble_probabilities:
+                ensemble_probabilities[frame_name] /= total_weight
         else:
-            # Fallback: use normal distribution for all probabilities
-            total_predicted = ensemble_result['total_predicted']
-            ci_lower = ensemble_result['confidence_interval']['lower']
-            ci_upper = ensemble_result['confidence_interval']['upper']
-            
-            std_estimate = (ci_upper - ci_lower) / (2 * 1.28)
-            if std_estimate < 1.0:
-                std_estimate = max(1.0, total_predicted * 0.1)
-            
-            ensemble_probabilities = {}
-            for frame in TWEET_COUNT_FRAMES:
-                frame_name = frame['name']
-                min_tweets = frame['min']
-                max_tweets = frame['max']
-                
-                if max_tweets == float('inf'):
-                    prob = 1 - stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                else:
-                    prob_lower = stats.norm.cdf(min_tweets - 0.5, total_predicted, std_estimate)
-                    prob_upper = stats.norm.cdf(max_tweets + 0.5, total_predicted, std_estimate)
-                    prob = prob_upper - prob_lower
-                
-                ensemble_probabilities[frame_name] = max(0, min(1, prob))
+            # If no model probabilities available, fall back to equal distribution
+            # This should rarely happen in practice
+            num_frames = len(TWEET_COUNT_FRAMES)
+            for frame_name in ensemble_probabilities:
+                ensemble_probabilities[frame_name] = 1.0 / num_frames
         
         # Final normalization to ensure probabilities sum to 1
         total_prob = sum(ensemble_probabilities.values())
@@ -1296,4 +1233,202 @@ class EnsembleTweetPredictor:
         if self.save_plots:
             plt.show()
         else:
-            plt.close() 
+            plt.close()
+    
+    def calculate_individual_algorithm_probabilities(self, prediction_summary):
+        """Calculate probabilities for each individual algorithm in the ensemble."""
+        individual_probabilities = {}
+        
+        # Get individual predictions from the summary
+        individual_predictions = prediction_summary.get('individual_predictions', {})
+        
+        for model_name, result in individual_predictions.items():
+            model_weight = self.normalized_weights.get(model_name, 0.0)
+            if model_weight > 0:
+                probs = None
+                total_predicted = None
+                
+                # Extract total prediction and probabilities based on model format
+                if model_name == 'basic_prophet':
+                    total_predicted = result.get('total_predicted')
+                    if 'frame_probabilities' in result:
+                        # Convert percentages to probabilities (0-1 range)
+                        probs = {frame: prob/100.0 for frame, prob in result['frame_probabilities'].items()}
+                
+                elif 'ensemble_results' in result:  # Enhanced TimesFM format
+                    total_predicted = result['ensemble_results'].get('total_predicted')
+                    # For enhanced models, try to get individual model distributions
+                    if 'individual_predictions' in result['ensemble_results']:
+                        # Get the first individual model's probabilities as representative
+                        individual_models = result['ensemble_results']['individual_predictions']
+                        if individual_models:
+                            first_model = list(individual_models.values())[0]
+                            if 'probabilities' in first_model:
+                                probs = first_model['probabilities']
+                            elif 'predictions_by_frame' in first_model:
+                                probs = {frame: data['probability'] for frame, data in first_model['predictions_by_frame'].items()}
+                    
+                    # Fallback to ensemble probabilities if no individual found
+                    if not probs:
+                        if 'probabilities' in result['ensemble_results']:
+                            probs = result['ensemble_results']['probabilities']
+                        elif 'predictions_by_frame' in result['ensemble_results']:
+                            probs = {frame: data['probability'] for frame, data in result['ensemble_results']['predictions_by_frame'].items()}
+                
+                elif 'prediction_results' in result:  # Neural Prophet format
+                    total_predicted = result['prediction_results'].get('total_predicted')
+                    if 'probabilities' in result['prediction_results']:
+                        probs = result['prediction_results']['probabilities']
+                    elif 'predictions_by_frame' in result['prediction_results']:
+                        probs = {frame: data['probability'] for frame, data in result['prediction_results']['predictions_by_frame'].items()}
+                
+                elif 'total_predicted' in result:  # Facebook Prophet Enhanced format
+                    total_predicted = result.get('total_predicted')
+                    # For enhanced Facebook Prophet, try to get individual model distributions
+                    if 'predictions_breakdown' in result:
+                        # Get individual model probabilities if available
+                        breakdown = result['predictions_breakdown']
+                        if 'individual_probabilities' in breakdown:
+                            # Use the first individual model as representative
+                            individual_models = breakdown['individual_probabilities']
+                            if individual_models:
+                                first_model_probs = list(individual_models.values())[0]
+                                if isinstance(first_model_probs, dict):
+                                    probs = first_model_probs
+                    
+                    # Fallback to main probabilities
+                    if not probs:
+                        if 'probabilities' in result:
+                            probs = result['probabilities']
+                        elif 'predictions_by_frame' in result:
+                            probs = {frame: data['probability'] for frame, data in result['predictions_by_frame'].items()}
+                
+                # If no probabilities found, create a fallback normal distribution
+                if not probs and total_predicted is not None:
+                    probs = self._create_fallback_probabilities(total_predicted, model_name)
+                
+                if probs and total_predicted is not None:
+                    # Ensure all frames are represented
+                    complete_probs = {}
+                    for frame in TWEET_COUNT_FRAMES:
+                        frame_name = frame['name']
+                        complete_probs[frame_name] = probs.get(frame_name, 0.0)
+                    
+                    # Normalize probabilities to ensure they sum to 1
+                    total_prob = sum(complete_probs.values())
+                    if total_prob > 0:
+                        normalized_probs = {frame: prob / total_prob for frame, prob in complete_probs.items()}
+                    else:
+                        # Equal distribution fallback
+                        normalized_probs = {frame: 1.0/len(TWEET_COUNT_FRAMES) for frame in complete_probs.keys()}
+                    
+                    individual_probabilities[model_name] = {
+                        'total_predicted': total_predicted,
+                        'probabilities': normalized_probs,
+                        'weight': model_weight
+                    }
+        
+        return individual_probabilities
+    
+    def _create_fallback_probabilities(self, total_predicted, model_name):
+        """Create fallback probability distribution using normal distribution."""
+        from scipy import stats
+        
+        # Use a reasonable standard deviation (15% of prediction)
+        std_dev = max(10, total_predicted * 0.15)
+        
+        probabilities = {}
+        for frame in TWEET_COUNT_FRAMES:
+            frame_name = frame['name']
+            min_tweets = frame['min']
+            max_tweets = frame['max']
+            
+            if max_tweets == float('inf'):
+                # For the last frame (e.g., "295 or more")
+                prob = 1 - stats.norm.cdf(min_tweets, total_predicted, std_dev)
+            else:
+                # For bounded frames
+                prob = (stats.norm.cdf(max_tweets + 0.5, total_predicted, std_dev) - 
+                       stats.norm.cdf(min_tweets - 0.5, total_predicted, std_dev))
+            
+            probabilities[frame_name] = max(0, prob)  # Ensure non-negative
+        
+        return probabilities
+    
+    def print_individual_algorithm_distributions(self, prediction_summary):
+        """Print probability distributions for each individual algorithm in the ensemble."""
+        individual_probs = self.calculate_individual_algorithm_probabilities(prediction_summary)
+        
+        if not individual_probs:
+            print("\n⚠️  No individual algorithm probability distributions available")
+            return
+        
+        print("\n" + "="*150)
+        print("INDIVIDUAL ALGORITHM PROBABILITY DISTRIBUTIONS (ENSEMBLE)")
+        print("="*150)
+        
+        # Use ALL frames from TWEET_COUNT_FRAMES in order
+        all_frame_names = [frame['name'] for frame in TWEET_COUNT_FRAMES]
+        
+        # Print header
+        print(f"{'Algorithm':<20s} {'Weight':<8s} {'Total':<6s}", end="")
+        for frame_name in all_frame_names:
+            print(f" {frame_name:<10s}", end="")
+        print()
+        print("-" * 150)
+        
+        # Calculate the total weight of algorithms that are actually displayed
+        displayed_total_weight = sum(data['weight'] for data in individual_probs.values())
+        
+        # Print each algorithm's distribution with RENORMALIZED weights
+        renormalized_individual_probs = {}
+        for algo_name, data in individual_probs.items():
+            total_pred = data['total_predicted']
+            original_weight = data['weight']
+            # Renormalize weight so displayed algorithms sum to 1.0
+            renormalized_weight = original_weight / displayed_total_weight if displayed_total_weight > 0 else 0.0
+            probs = data['probabilities']
+            
+            print(f"{algo_name:<20s} {renormalized_weight:<8.3f} {total_pred:<6.1f}", end="")
+            for frame_name in all_frame_names:
+                prob = probs.get(frame_name, 0)
+                print(f" {prob*100:<10.1f}", end="")
+            print()
+            
+            # Store renormalized data for ensemble calculation
+            renormalized_individual_probs[algo_name] = {
+                'total_predicted': total_pred,
+                'probabilities': probs,
+                'weight': renormalized_weight  # Use renormalized weight
+            }
+        
+        # Calculate CORRECTED ensemble probabilities using renormalized weights
+        corrected_ensemble_probs = {}
+        for frame_name in all_frame_names:
+            weighted_sum = 0.0
+            
+            for algo_name, data in renormalized_individual_probs.items():
+                weight = data['weight']  # Already renormalized to sum to 1.0
+                prob = data['probabilities'].get(frame_name, 0.0)
+                weighted_sum += prob * weight
+            
+            corrected_ensemble_probs[frame_name] = weighted_sum
+        
+        # Final normalization to ensure probabilities sum to 1 (should already be close)
+        total_corrected_prob = sum(corrected_ensemble_probs.values())
+        if total_corrected_prob > 0:
+            corrected_ensemble_probs = {frame: prob / total_corrected_prob for frame, prob in corrected_ensemble_probs.items()}
+        
+        # Calculate corrected ensemble total as weighted average using renormalized weights
+        corrected_ensemble_total = sum(data['total_predicted'] * data['weight'] for data in renormalized_individual_probs.values())
+        
+        # Print corrected ensemble
+        print(f"{'Ensemble (Final)':<20s} {'1.000':<8s} {corrected_ensemble_total:<6.1f}", end="")
+        for frame_name in all_frame_names:
+            prob = corrected_ensemble_probs.get(frame_name, 0.0)
+            print(f" {prob*100:<10.1f}", end="")
+        print()
+        
+        print("-" * 150)
+        print("Values show: Algorithm weight, total predicted tweets, then probability percentages for ALL categories")
+        print("="*150) 

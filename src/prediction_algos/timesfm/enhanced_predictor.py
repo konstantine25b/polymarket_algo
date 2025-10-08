@@ -47,27 +47,27 @@ class EnhancedTimesFMTweetPredictor:
         """Prepare multiple TimesFM models with different configurations."""
         print("Preparing Enhanced TimesFM Ensemble...")
         
-        # Model configurations
+        # Model configurations - Updated to use working PyTorch models
         model_configs = {
             'short_context': {
                 'context_len': 32,
                 'num_samples': 80,
-                'model_name': 'timesfm-1.0-200m'
+                'model_name': 'timesfm-1.0-200m-pytorch'
             },
             'medium_context': {
                 'context_len': 64,
                 'num_samples': 100,
-                'model_name': 'timesfm-1.0-200m'
+                'model_name': 'timesfm-1.0-200m-pytorch'
             },
             'long_context': {
                 'context_len': 128,
                 'num_samples': 100,
-                'model_name': 'timesfm-1.0-200m'
+                'model_name': 'timesfm-1.0-200m-pytorch'
             },
             'high_sampling': {
                 'context_len': 64,
                 'num_samples': 200,
-                'model_name': 'timesfm-1.0-200m'
+                'model_name': 'timesfm-1.0-200m-pytorch'
             }
         }
         
@@ -337,15 +337,25 @@ class EnhancedTimesFMTweetPredictor:
         for i, (model_name, pred_data) in enumerate(individual.items()):
             ci = pred_data['prediction_results']['confidence_interval']
             total = pred_data['prediction_results']['total_predicted']
+            
+            # Calculate error bar components properly to avoid negative values
+            lower_err = max(0, total - ci['lower'])  # Distance from mean to lower bound
+            upper_err = max(0, ci['upper'] - total)  # Distance from mean to upper bound
+            
             ax4.errorbar([i], [total], 
-                        yerr=[[total - ci['lower']], [ci['upper'] - total]], 
+                        yerr=[[lower_err], [upper_err]], 
                         fmt='o', capsize=5, capthick=2, alpha=0.7, label=model_name)
         
         # Add ensemble CI
         ensemble_ci = ensemble['confidence_interval']
         ensemble_total = ensemble['total_predicted']
+        
+        # Calculate ensemble error bars properly
+        ensemble_lower_err = max(0, ensemble_total - ensemble_ci['lower'])
+        ensemble_upper_err = max(0, ensemble_ci['upper'] - ensemble_total)
+        
         ax4.errorbar([len(individual)], [ensemble_total], 
-                    yerr=[[ensemble_total - ensemble_ci['lower']], [ensemble_ci['upper'] - ensemble_total]], 
+                    yerr=[[ensemble_lower_err], [ensemble_upper_err]], 
                     fmt='s', capsize=8, capthick=3, color='red', markersize=8, label='Ensemble')
         
         ax4.set_title('Confidence Intervals Comparison')

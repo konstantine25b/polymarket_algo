@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirna
 # Import the analyzer and constants
 from src.polymarket.trade_analysis import PolymarketTradeAnalyzer
 from src.constants import POLYMARKET_START_TIME, POLYMARKET_END_TIME
+import re
 
 
 def get_market_name(market_id):
@@ -348,30 +349,39 @@ def is_active_market(market_name):
     Returns:
         bool: True if the market is active, False otherwise.
     """
-    # Extract the dates from the constants (format: "YYYY-MM-DD HH:MM:SS")
-    active_start_date = POLYMARKET_START_TIME.split(" ")[0]
-    active_end_date = POLYMARKET_END_TIME.split(" ")[0]
-    
-    # Format the date range for pattern matching
-    active_start_month = active_start_date.split('-')[1]
-    active_start_day = active_start_date.split('-')[2]
-    active_end_month = active_end_date.split('-')[1]
-    active_end_day = active_end_date.split('-')[2]
-    
-    # Create patterns to match for active market
-    patterns = [
-        f"May {active_start_day}–{active_end_day}",
-        f"May {int(active_start_day)}–{int(active_end_day)}",
-        f"May {active_start_day}-{active_end_day}",
-        f"May {int(active_start_day)}-{int(active_end_day)}",
-        f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
-    ]
-    
-    # Check if this market matches the active market pattern
-    for pattern in patterns:
-        if pattern in market_name and "Will Elon tweet" in market_name:
-            return True
-            
+    # Parse start/end datetimes
+    try:
+        start_dt = datetime.strptime(POLYMARKET_START_TIME.split(" ")[0], "%Y-%m-%d")
+        end_dt = datetime.strptime(POLYMARKET_END_TIME.split(" ")[0], "%Y-%m-%d")
+    except Exception:
+        return False
+
+    start_month_name = start_dt.strftime("%B")  # e.g., October
+    end_month_name = end_dt.strftime("%B")
+    start_day = start_dt.day
+    end_day = end_dt.day
+
+    name_lower = market_name.lower()
+
+    # Build regex patterns that reflect current event phrasing
+    patterns = []
+    # Pattern like: from October 3 to October 10, 2025
+    patterns.append(rf"from\s+{start_month_name.lower()}\s+{start_day}\s+to\s+{end_month_name.lower()}\s+{end_day}(?:,\s*\d{{4}})?\??")
+    # Same-month short form: October 3–10 or October 3-10
+    if start_month_name == end_month_name:
+        patterns.append(rf"{start_month_name.lower()}\s+{start_day}[–-]{end_day}\b")
+    else:
+        # Cross-month short form: Oct 27–Nov 3
+        patterns.append(rf"{start_month_name.lower()}\s+{start_day}[–-]{end_month_name.lower()}\s+{end_day}\b")
+
+    # Match if any pattern occurs and the market looks like an Elon tweet count market
+    has_elon = ("will elon" in name_lower)
+    is_tweets = ("tweet" in name_lower or "post" in name_lower)
+
+    for pat in patterns:
+        if re.search(pat, name_lower):
+            return has_elon and is_tweets
+
     return False
 
 

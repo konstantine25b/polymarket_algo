@@ -84,6 +84,22 @@ def main():
                         help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                         help='Random seed for reproducible predictions (default: 42)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                        help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
+    
+    # Ensemble model weight arguments
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
+                        help='Weight for Neural Prophet model in ensemble (default: 0.17, set to 0 to exclude)')
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
+                        help='Weight for Facebook Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model in ensemble (default: 0.30, set to 0 to exclude)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.015,
+                        help='Weight for Moving Average in ensemble (default: 0.015, set to 0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.015,
+                        help='Weight for Linear Trend in ensemble (default: 0.015, set to 0 to exclude)')
     
     args = parser.parse_args()
     
@@ -98,7 +114,8 @@ def main():
         use_weighted_selection=args.weighted_selection,
         min_prediction=args.min_prediction,
         algorithm=args.algorithm,
-        random_seed=args.random_seed
+        random_seed=args.random_seed,
+        show_eachalgo_distribution=args.show_eachalgo_distribution
     )
     
     try:
@@ -107,23 +124,33 @@ def main():
             logger.error("Failed to connect to Polymarket. Exiting.")
             sys.exit(1)
         
-        # Generate the comparison table directly for displaying full stats
-        if not args.no_stats:
-            # Pass silent=True to suppress the built-in printing in generate_comparison_table
-            comparison_df = generate_comparison_table(
-                refresh=True,
-                use_prophet=True,
-                algorithm=args.algorithm,
-                threshold=args.threshold,
-                silent=True,  # Add this parameter to suppress output
-                random_seed=args.random_seed
-            )
-            
-            if not comparison_df.empty:
-                print_stats_table(comparison_df)
+        # Generate the comparison table once and reuse it
+        comparison_df = generate_comparison_table(
+            refresh=True,
+            use_prophet=True,
+            algorithm=args.algorithm,
+            threshold=args.threshold,
+            silent=args.no_stats,  # Only suppress output if --no-stats is used
+            random_seed=args.random_seed,
+            show_eachalgo_distribution=args.show_eachalgo_distribution,
+            neural_prophet_weight=args.neural_prophet_weight,
+            facebook_prophet_weight=args.facebook_prophet_weight,
+            timesfm_weight=args.timesfm_weight,
+            basic_prophet_weight=args.basic_prophet_weight,
+            moving_average_weight=args.moving_average_weight,
+            linear_trend_weight=args.linear_trend_weight
+        )
         
-        # Find the best opportunity
-        opportunity = bidder.find_best_opportunity()
+        if comparison_df.empty:
+            logger.info("No comparison data available. Exiting.")
+            sys.exit(0)
+        
+        # Display stats table if requested
+        if not args.no_stats:
+            print_stats_table(comparison_df)
+        
+        # Find the best opportunity using the already-generated comparison table
+        opportunity = bidder.find_best_opportunity(comparison_df=comparison_df)
         
         if not opportunity:
             logger.info("No suitable opportunities found. Exiting.")

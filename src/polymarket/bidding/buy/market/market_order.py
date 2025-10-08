@@ -49,6 +49,13 @@ class MarketBuyOrder:
         Returns:
             dict: The response from the order execution
         """
+        # Add human-like delay before creating order
+        self.client._human_like_delay()
+        
         signed_order = self.create_order(token_id, amount)
+        
+        # Add another small delay before posting order
+        self.client._human_like_delay()
+        
         response = self.client.client.post_order(signed_order, orderType=OrderType.FOK)
         return response 

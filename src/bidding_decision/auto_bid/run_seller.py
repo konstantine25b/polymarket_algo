@@ -83,6 +83,26 @@ def main():
                          help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                          help='Random seed for reproducible predictions (default: 42)')
+    parser.add_argument('--show-eachalgo-distribution', action='store_true',
+                         help='Show probability distribution for each individual algorithm (enhanced_facebook_prophet and ensemble only)')
+    parser.add_argument('--show-positions', action='store_true',
+                         help='Show all current positions before analysis')
+    parser.add_argument('--show-active-positions', action='store_true',
+                         help='Show positions for active market before analysis')
+    
+    # Ensemble model weight arguments
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
+                        help='Weight for Neural Prophet model in ensemble (default: 0.17, set to 0 to exclude)')
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
+                        help='Weight for Facebook Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model in ensemble (default: 0.30, set to 0 to exclude)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.015,
+                        help='Weight for Moving Average in ensemble (default: 0.015, set to 0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.015,
+                        help='Weight for Linear Trend in ensemble (default: 0.015, set to 0 to exclude)')
     
     args = parser.parse_args()
     
@@ -92,13 +112,56 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
+        # Display positions if requested (before model training to avoid interruption)
+        if args.show_positions or args.show_active_positions:
+            from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
+            
+            print("\n" + "=" * 80)
+            print("📊 CURRENT POSITIONS")
+            print("=" * 80)
+            
+            tracker = PolymarketPositionTracker()
+            
+            if args.show_positions:
+                print("All current positions:")
+                positions = tracker.get_simple_positions()
+                if positions:
+                    for market_id, outcomes in positions.items():
+                        market_name = tracker.get_market_name(market_id)
+                        print(f"\n🎯 {market_name}")
+                        for outcome, quantity in outcomes.items():
+                            print(f"   {outcome}: {quantity:.6f} shares")
+                else:
+                    print("No positions found.")
+            
+            if args.show_active_positions:
+                print("\nActive market positions:")
+                active_positions = tracker.get_active_market_positions()
+                if active_positions:
+                    for market_id, outcomes in active_positions.items():
+                        market_name = tracker.get_market_name(market_id)
+                        print(f"\n🎯 {market_name}")
+                        for outcome, quantity in outcomes.items():
+                            print(f"   {outcome}: {quantity:.6f} shares")
+                else:
+                    print("No active market positions found.")
+            
+            print("=" * 80 + "\n")
+        
         # Create the position seller with debug flag and algorithm parameters
         seller = PositionSeller(
             threshold=args.threshold, 
             sell_below=args.sell_below, 
             debug=args.debug,
             algorithm=args.algorithm,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
+            show_eachalgo_distribution=args.show_eachalgo_distribution,
+            neural_prophet_weight=args.neural_prophet_weight,
+            facebook_prophet_weight=args.facebook_prophet_weight,
+            timesfm_weight=args.timesfm_weight,
+            basic_prophet_weight=args.basic_prophet_weight,
+            moving_average_weight=args.moving_average_weight,
+            linear_trend_weight=args.linear_trend_weight
         )
         
         # Generate the comparison table once - this will be displayed by PositionSeller methods
@@ -126,18 +189,49 @@ def main():
             active_end_month = active_end_date.split('-')[1]
             active_end_day = active_end_date.split('-')[2]
             
-            # Different possible formats for the market name
-            format1 = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"  # 05-16–05-23
-            format2 = f"May {active_start_day}–{active_end_day}"  # May 16–23
-            format3 = f"May {active_start_day}-{active_end_day}"  # May 16-23
-            format4 = f"May {int(active_start_day)}–{int(active_end_day)}"  # May 16–23 (no leading zeros)
-            format5 = f"May {int(active_start_day)}-{int(active_end_day)}"  # May 16-23 (no leading zeros)
+            # Get the month name from the month number
+            months = {
+                '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+                '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+                '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+            }
+            start_month_name = months.get(active_start_month, 'Unknown')
+            end_month_name = months.get(active_end_month, 'Unknown')
             
-            possible_formats = [format1, format2, format3, format4, format5]
+            # Different possible formats for the market name
+            # Handle both same-month and cross-month date ranges
+            possible_formats = []
+            
+            if active_start_month == active_end_month:
+                # Same month: "June 27–30", "June 27-30"
+                possible_formats.extend([
+                    f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
+                    f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                    f"{start_month_name} {active_start_day}–{active_end_day}",
+                    f"{start_month_name} {active_start_day}-{active_end_day}"
+                ])
+            else:
+                # Cross-month: "June 27–July 4", "June 27-July 4"
+                possible_formats.extend([
+                    f"{start_month_name} {int(active_start_day)}–{end_month_name} {int(active_end_day)}",
+                    f"{start_month_name} {int(active_start_day)}-{end_month_name} {int(active_end_day)}",
+                    f"{start_month_name} {active_start_day}–{end_month_name} {active_end_day}",
+                    f"{start_month_name} {active_start_day}-{end_month_name} {active_end_day}"
+                ])
+            
+            # Add "from Month Day to Month Day" format (new market phrasing)
+            possible_formats.extend([
+                f"from {start_month_name} {int(active_start_day)} to {end_month_name} {int(active_end_day)}",
+                f"from {start_month_name} {active_start_day} to {end_month_name} {active_end_day}"
+            ])
+            
+            # Also include the numeric format for fallback
+            numeric_format = f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
+            possible_formats.append(numeric_format)
             
             # Log the active market we're filtering for
-            logger.info(f"Filtering for active market only: {format1}")
-            print(f"\nFiltering for active market only: {format1}")
+            logger.info(f"Filtering for active market only: {numeric_format}")
+            print(f"\nFiltering for active market only: {numeric_format}")
             logger.debug(f"Looking for market names containing any of: {possible_formats}")
             
             # Filter positions to only include those from the active market

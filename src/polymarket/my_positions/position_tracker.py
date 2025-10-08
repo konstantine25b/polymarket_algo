@@ -1713,14 +1713,63 @@ class PolymarketPositionTracker:
         active_end_month = active_end_date.split('-')[1]
         active_end_day = active_end_date.split('-')[2]
         
-        # Create patterns to match for active market
-        patterns = [
-            f"May {active_start_day}–{active_end_day}",
-            f"May {int(active_start_day)}–{int(active_end_day)}",
-            f"May {active_start_day}-{active_end_day}",
-            f"May {int(active_start_day)}-{int(active_end_day)}",
-            f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}"
-        ]
+        # Get the month name from the month number
+        months = {
+            '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+            '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+            '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+        }
+        start_month_name = months.get(active_start_month, 'Unknown')
+        end_month_name = months.get(active_end_month, 'Unknown')
+        
+        # Create patterns to match for active market (case-insensitive)
+        patterns = []
+        
+        # Same month patterns
+        if active_start_month == active_end_month:
+            patterns.extend([
+                f"{start_month_name} {active_start_day}–{active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                # Add patterns for repeated month names
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+                # Add patterns for repeated month names (like "August 1–August 8")
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+            ])
+        else:
+            # Cross-month patterns (like "June 27–July 4")
+            patterns.extend([
+                f"{start_month_name} {active_start_day}–{end_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{end_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{end_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{end_month_name} {int(active_end_day)}",
+                # Also include same-month patterns as fallback
+                f"{start_month_name} {active_start_day}–{active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{int(active_end_day)}",
+                # Add patterns for repeated month names
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+                # Add patterns for repeated month names (like "August 1–August 8")
+                f"{start_month_name} {active_start_day}–{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}–{start_month_name} {int(active_end_day)}",
+                f"{start_month_name} {active_start_day}-{start_month_name} {active_end_day}",
+                f"{start_month_name} {int(active_start_day)}-{start_month_name} {int(active_end_day)}",
+            ])
+        
+        # Add numeric date format pattern and "from X to Y" phrasing
+        patterns.append(f"{active_start_month}-{active_start_day}–{active_end_month}-{active_end_day}")
+        patterns.append(f"from {start_month_name} {int(active_start_day)} to {end_month_name} {int(active_end_day)}")
         
         # Filter positions for active market
         active_positions = {}
@@ -1728,11 +1777,12 @@ class PolymarketPositionTracker:
         for market_id, outcomes in all_positions.items():
             # Get market name for pattern matching
             market_name = self.get_market_name(market_id)
+            name_lower = market_name.lower() if isinstance(market_name, str) else ""
             
             # Check if this market matches the active market pattern
             is_active_market = False
             for pattern in patterns:
-                if pattern in market_name and "Will Elon tweet" in market_name:
+                if pattern.lower() in name_lower and ("will elon" in name_lower) and ("tweet" in name_lower or "post" in name_lower):
                     is_active_market = True
                     break
                     
