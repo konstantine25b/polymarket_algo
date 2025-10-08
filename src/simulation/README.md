@@ -62,10 +62,10 @@ The simulation system supports all advanced prediction algorithms available in t
 
 ```bash
 # Complete Scheduler-Based Simulation with Strategy 1
-python -m src.scheduler.scheduler --strategy strategy_1 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate pirvelad092231 --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 --show-eachalgo-distribution
+python -m src.scheduler.scheduler --strategy strategy_1  --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate sim_1_norm_1 --sim-balance 85 --amount 1.0 --buy-threshold 1.0 --min-prediction 8.0 --weighted-selection --sell-threshold 0.5 --sell-below 3.0 --show-eachalgo-distribution --auto-sell
 
 # Complete Scheduler-Based Simulation with Strategy 2
-python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate kkikik --sim-balance 144 --amount 1.0 --buy-threshold 1.0 --min-prediction 5.0 --weighted-selection --sell-threshold 0.5 --sell-below 2.0 --show-eachalgo-distribution --loss-threshold-1 -5.0 --loss-sell-1 30.0 --loss-threshold-2 -10.0 --loss-sell-2 100.0 --gain-threshold-1 0.5 --gain-sell-1 20.0 --gain-threshold-2 3.0 --gain-sell-2 50.0 
+python -m src.scheduler.scheduler --strategy strategy_2 --algorithm ensemble --random-seed 42 --use-csv-getter --get-tweet-count-first --tweet-interval 110 --buy-interval 60 --sell-interval 5 --simulate sim_1_ensemble_2 --sim-balance 85 --amount 1.0 --buy-threshold 1.0 --min-prediction 8.0 --weighted-selection --sell-threshold 0.5 --sell-below 3.0 --show-eachalgo-distribution --loss-threshold-1 -45.0 --loss-sell-1 50.0 --loss-threshold-2 -65.0 --loss-sell-2 100.0 --gain-threshold-1 50.0 --gain-sell-1 40.0 --gain-threshold-2 100.0 --gain-sell-2 40.0 --auto-sell
 
 # Ensemble algorithm (multi-model approach) - Direct Strategy Usage
 python -m src.simulation.bidding_decision.strategy_1 \
