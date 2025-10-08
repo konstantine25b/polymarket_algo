@@ -124,6 +124,21 @@ def setup_argparse():
                         help='Prediction algorithm to use (default: prophet)')
     parser.add_argument('--random-seed', type=int, default=42,
                         help='Random seed for reproducible predictions (default: 42)')
+    
+    # Ensemble model weight arguments
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
+                        help='Weight for Neural Prophet model in ensemble (default: 0.17, set to 0 to exclude)')
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
+                        help='Weight for Facebook Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model in ensemble (default: 0.30, set to 0 to exclude)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.015,
+                        help='Weight for Moving Average in ensemble (default: 0.015, set to 0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.015,
+                        help='Weight for Linear Trend in ensemble (default: 0.015, set to 0 to exclude)')
+    
     parser.add_argument('--no-bidding', action='store_true',
                         help="Don't run the auto-bidder")
     parser.add_argument('--no-selling', action='store_true',
@@ -746,7 +761,7 @@ def display_wallet_balance():
     
     return balance_info
 
-def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False):
+def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_stats=True, weighted_selection=False, min_prediction=0.0, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30, basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015):
     """Run the auto-bidder to place orders based on statistical opportunities.
     
     Args:
@@ -760,6 +775,12 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         algorithm: Prediction algorithm to use
         random_seed: Random seed for reproducible predictions
         show_eachalgo_distribution: Whether to show individual algorithm distributions
+        neural_prophet_weight: Weight for Neural Prophet in ensemble
+        facebook_prophet_weight: Weight for Facebook Prophet in ensemble
+        timesfm_weight: Weight for TimesFM in ensemble
+        basic_prophet_weight: Weight for Basic Prophet in ensemble
+        moving_average_weight: Weight for Moving Average in ensemble
+        linear_trend_weight: Weight for Linear Trend in ensemble
     """
     logger.info(f"Starting auto-bidder at {datetime.datetime.now()}")
     
@@ -773,6 +794,17 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add ensemble weight parameters if algorithm is ensemble
+    if algorithm == "ensemble":
+        cmd.extend([
+            f"--neural-prophet-weight={neural_prophet_weight}",
+            f"--facebook-prophet-weight={facebook_prophet_weight}",
+            f"--timesfm-weight={timesfm_weight}",
+            f"--basic-prophet-weight={basic_prophet_weight}",
+            f"--moving-average-weight={moving_average_weight}",
+            f"--linear-trend-weight={linear_trend_weight}"
+        ])
     
     # Add dry run mode if requested
     if dry_run:
@@ -822,7 +854,7 @@ def run_auto_bidder(quiet=False, threshold=0.0, amount=1.0, dry_run=False, show_
     
     return process.returncode == 0
 
-def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, show_positions=False, show_active_positions=False):
+def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, sell_below=0.0, debug=False, algorithm="prophet", random_seed=42, show_eachalgo_distribution=False, show_positions=False, show_active_positions=False, neural_prophet_weight=0.17, facebook_prophet_weight=0.25, timesfm_weight=0.30, basic_prophet_weight=0.25, moving_average_weight=0.015, linear_trend_weight=0.015):
     """Run the auto-seller to sell positions based on statistical analysis.
     
     Args:
@@ -837,6 +869,12 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         show_eachalgo_distribution: Whether to show individual algorithm distributions
         show_positions: Whether to show all current positions
         show_active_positions: Whether to show active market positions
+        neural_prophet_weight: Weight for Neural Prophet in ensemble
+        facebook_prophet_weight: Weight for Facebook Prophet in ensemble
+        timesfm_weight: Weight for TimesFM in ensemble
+        basic_prophet_weight: Weight for Basic Prophet in ensemble
+        moving_average_weight: Weight for Moving Average in ensemble
+        linear_trend_weight: Weight for Linear Trend in ensemble
     """
     logger.info(f"Starting auto-seller at {datetime.datetime.now()}")
     
@@ -849,6 +887,17 @@ def run_auto_seller(quiet=False, threshold=0.0, dry_run=False, show_stats=True, 
         f"--algorithm={algorithm}",
         f"--random-seed={random_seed}"
     ]
+    
+    # Add ensemble weight parameters if algorithm is ensemble
+    if algorithm == "ensemble":
+        cmd.extend([
+            f"--neural-prophet-weight={neural_prophet_weight}",
+            f"--facebook-prophet-weight={facebook_prophet_weight}",
+            f"--timesfm-weight={timesfm_weight}",
+            f"--basic-prophet-weight={basic_prophet_weight}",
+            f"--moving-average-weight={moving_average_weight}",
+            f"--linear-trend-weight={linear_trend_weight}"
+        ])
     
     # Add dry run mode if requested
     if dry_run:
@@ -1359,7 +1408,13 @@ def run_scheduled_jobs(args):
                             min_prediction=args.min_prediction,
                             algorithm=args.algorithm,
                             random_seed=args.random_seed,
-                            show_eachalgo_distribution=args.show_eachalgo_distribution
+                            show_eachalgo_distribution=args.show_eachalgo_distribution,
+                            neural_prophet_weight=args.neural_prophet_weight,
+                            facebook_prophet_weight=args.facebook_prophet_weight,
+                            timesfm_weight=args.timesfm_weight,
+                            basic_prophet_weight=args.basic_prophet_weight,
+                            moving_average_weight=args.moving_average_weight,
+                            linear_trend_weight=args.linear_trend_weight
                         )
             elif prediction_success and not args.no_bidding:
                 # Run the auto-bidder if we have sufficient balance or we're in dry run mode or no-buy mode
@@ -1381,7 +1436,13 @@ def run_scheduled_jobs(args):
                         min_prediction=args.min_prediction,
                         algorithm=args.algorithm,
                         random_seed=args.random_seed,
-                        show_eachalgo_distribution=args.show_eachalgo_distribution
+                        show_eachalgo_distribution=args.show_eachalgo_distribution,
+                        neural_prophet_weight=args.neural_prophet_weight,
+                        facebook_prophet_weight=args.facebook_prophet_weight,
+                        timesfm_weight=args.timesfm_weight,
+                        basic_prophet_weight=args.basic_prophet_weight,
+                        moving_average_weight=args.moving_average_weight,
+                        linear_trend_weight=args.linear_trend_weight
                     )
             
             # Run the auto-seller if prediction succeeded and selling not disabled
@@ -1405,7 +1466,13 @@ def run_scheduled_jobs(args):
                     random_seed=args.random_seed,
                     show_eachalgo_distribution=args.show_eachalgo_distribution,
                     show_positions=args.show_positions,
-                    show_active_positions=args.show_active_positions
+                    show_active_positions=args.show_active_positions,
+                    neural_prophet_weight=args.neural_prophet_weight,
+                    facebook_prophet_weight=args.facebook_prophet_weight,
+                    timesfm_weight=args.timesfm_weight,
+                    basic_prophet_weight=args.basic_prophet_weight,
+                    moving_average_weight=args.moving_average_weight,
+                    linear_trend_weight=args.linear_trend_weight
                 )
     
     return tweets_success and prediction_success or skip_tweet_fetching

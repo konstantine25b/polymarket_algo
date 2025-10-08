@@ -90,6 +90,20 @@ def main():
     parser.add_argument('--show-active-positions', action='store_true',
                          help='Show positions for active market before analysis')
     
+    # Ensemble model weight arguments
+    parser.add_argument('--neural-prophet-weight', type=float, default=0.17,
+                        help='Weight for Neural Prophet model in ensemble (default: 0.17, set to 0 to exclude)')
+    parser.add_argument('--facebook-prophet-weight', type=float, default=0.25,
+                        help='Weight for Facebook Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--timesfm-weight', type=float, default=0.30,
+                        help='Weight for TimesFM model in ensemble (default: 0.30, set to 0 to exclude)')
+    parser.add_argument('--basic-prophet-weight', type=float, default=0.25,
+                        help='Weight for Basic Prophet model in ensemble (default: 0.25, set to 0 to exclude)')
+    parser.add_argument('--moving-average-weight', type=float, default=0.015,
+                        help='Weight for Moving Average in ensemble (default: 0.015, set to 0 to exclude)')
+    parser.add_argument('--linear-trend-weight', type=float, default=0.015,
+                        help='Weight for Linear Trend in ensemble (default: 0.015, set to 0 to exclude)')
+    
     args = parser.parse_args()
     
     # Set up logging levels based on verbosity
@@ -141,7 +155,13 @@ def main():
             debug=args.debug,
             algorithm=args.algorithm,
             random_seed=args.random_seed,
-            show_eachalgo_distribution=args.show_eachalgo_distribution
+            show_eachalgo_distribution=args.show_eachalgo_distribution,
+            neural_prophet_weight=args.neural_prophet_weight,
+            facebook_prophet_weight=args.facebook_prophet_weight,
+            timesfm_weight=args.timesfm_weight,
+            basic_prophet_weight=args.basic_prophet_weight,
+            moving_average_weight=args.moving_average_weight,
+            linear_trend_weight=args.linear_trend_weight
         )
         
         # Generate the comparison table once - this will be displayed by PositionSeller methods

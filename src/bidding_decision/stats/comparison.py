@@ -71,7 +71,13 @@ def get_prediction_data_from_module(algorithm: str = "prophet", **kwargs) -> Dic
             from src.prediction_algos.ensemble.predictor import EnsembleTweetPredictor
             predictor = EnsembleTweetPredictor(
                 save_plots=False,
-                random_seed=kwargs.get('random_seed', 42)
+                random_seed=kwargs.get('random_seed', 42),
+                neural_prophet_weight=kwargs.get('neural_prophet_weight', 0.17),
+                facebook_prophet_weight=kwargs.get('facebook_prophet_weight', 0.25),
+                timesfm_weight=kwargs.get('timesfm_weight', 0.30),
+                basic_prophet_weight=kwargs.get('basic_prophet_weight', 0.25),
+                moving_average_weight=kwargs.get('moving_average_weight', 0.015),
+                linear_trend_weight=kwargs.get('linear_trend_weight', 0.015)
             )
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
@@ -413,7 +419,7 @@ def get_market_data(refresh: bool = True) -> Dict[str, Any]:
     """
     try:
         # Build the command to run
-        cmd = ["python", "-m", "src.polymarket.order_book.show_market_status", "--json"]
+        cmd = [sys.executable, "-m", "src.polymarket.order_book.show_market_status", "--json"]
         if refresh:
             cmd.append("--refresh")
         

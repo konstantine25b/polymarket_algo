@@ -27,7 +27,7 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False, neural_prophet_weight: float = 0.17, facebook_prophet_weight: float = 0.25, timesfm_weight: float = 0.30, basic_prophet_weight: float = 0.25, moving_average_weight: float = 0.015, linear_trend_weight: float = 0.015):
         """
         Initialize the PositionSeller.
         
@@ -38,6 +38,12 @@ class PositionSeller:
             algorithm: Prediction algorithm to use
             random_seed: Random seed for reproducible predictions
             show_eachalgo_distribution: Whether to show individual algorithm distributions
+            neural_prophet_weight: Weight for Neural Prophet in ensemble
+            facebook_prophet_weight: Weight for Facebook Prophet in ensemble
+            timesfm_weight: Weight for TimesFM in ensemble
+            basic_prophet_weight: Weight for Basic Prophet in ensemble
+            moving_average_weight: Weight for Moving Average in ensemble
+            linear_trend_weight: Weight for Linear Trend in ensemble
         """
         self.threshold = threshold
         self.sell_below = sell_below
@@ -45,6 +51,12 @@ class PositionSeller:
         self.algorithm = algorithm
         self.random_seed = random_seed
         self.show_eachalgo_distribution = show_eachalgo_distribution
+        self.neural_prophet_weight = neural_prophet_weight
+        self.facebook_prophet_weight = facebook_prophet_weight
+        self.timesfm_weight = timesfm_weight
+        self.basic_prophet_weight = basic_prophet_weight
+        self.moving_average_weight = moving_average_weight
+        self.linear_trend_weight = linear_trend_weight
         self.position_tracker = PolymarketPositionTracker()
         
     def get_all_positions_with_stats(self, comparison_df: Optional[pd.DataFrame] = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
@@ -104,7 +116,13 @@ class PositionSeller:
                 threshold=self.threshold,
                 algorithm=self.algorithm,
                 random_seed=self.random_seed,
-                show_eachalgo_distribution=self.show_eachalgo_distribution
+                show_eachalgo_distribution=self.show_eachalgo_distribution,
+                neural_prophet_weight=self.neural_prophet_weight,
+                facebook_prophet_weight=self.facebook_prophet_weight,
+                timesfm_weight=self.timesfm_weight,
+                basic_prophet_weight=self.basic_prophet_weight,
+                moving_average_weight=self.moving_average_weight,
+                linear_trend_weight=self.linear_trend_weight
             )
             
             # Display the comparison table when we generate it (similar to bidder behavior)
