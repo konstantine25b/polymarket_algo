@@ -35,7 +35,7 @@ cp .env.example .env
 python3 -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 3.0 --min-prediction 8.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 5 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --show-eachalgo-distribution --dry-run
 
 
-python3 -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.0 --sell-threshold 0.5 --sell-below 8.0 --min-prediction 12.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 5 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --show-eachalgo-distribution --timesfm-weight 0.40 --basic-prophet-weight 0.40 --neural-prophet-weight 0.085 --facebook-prophet-weight 0.085 --dry-run
+python3 -m src.scheduler.scheduler --algorithm ensemble --random-seed 42 --buy-threshold 1.0 --sell-threshold 0.0 --sell-below 8.0 --min-prediction 12.0 --weighted-selection --tweet-interval 110 --buy-interval 60 --sell-interval 5 --use-csv-getter --get-tweet-count-first --show-positions --show-active-positions --show-eachalgo-distribution --timesfm-weight 0.50 --basic-prophet-weight 0.36 --neural-prophet-weight 0.06 --facebook-prophet-weight 0.06 --dry-run
 # Option explanations:
 # --algorithm ensemble         : Use ensemble method combining all prediction algorithms for maximum accuracy
 # --random-seed 42             : Set random seed for reproducible predictions and consistent trading decisions
