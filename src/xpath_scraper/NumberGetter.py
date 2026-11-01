@@ -14,8 +14,8 @@ logging.basicConfig(
 logger = logging.getLogger('TweetCountGetter')
 
 class TweetCountGetter:
-    def __init__(self):
-        self.url = POLYMARKET_ELON_TWEETS_URL
+    def __init__(self, url=None):
+        self.url = url or POLYMARKET_ELON_TWEETS_URL
         self.xpath = "xpath=//*[text()='TWEET COUNT']/../../*[2]"
         logger.info("Initialized TweetCountGetter with URL: %s", self.url)
 
@@ -43,6 +43,9 @@ class TweetCountGetter:
 
 
 if __name__ == '__main__':
-    tcg = TweetCountGetter()
+    import argparse
+    ap = argparse.ArgumentParser(description='Read the current tweet count from a Polymarket event page')
+    ap.add_argument('--url', default=None, help='Event URL (default: POLYMARKET_ELON_TWEETS_URL from constants)')
+    tcg = TweetCountGetter(ap.parse_args().url)
     count = tcg.getTweetCount()
     print(f"Tweet count: {count}")
