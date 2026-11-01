@@ -9,7 +9,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(script_dir)
+src_dir = os.path.dirname(os.path.dirname(script_dir))  # script lives in src/algos/basic
 filename = os.path.join(src_dir, 'data', 'elonmusk_daily_counts.csv')
 
 class TweetPredictor:

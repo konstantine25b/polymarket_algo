@@ -351,106 +351,108 @@ class EnsembleTweetPredictor:
                 else:
                     self.model_weights[model] = 0.0
     
+    def _complete_daily_history(self, current_time=None):
+        """
+        Daily tweet counts for fully elapsed days before current_time, plus the
+        elapsed fraction of the current day and the days left in the market week.
+
+        Returns:
+            tuple: (daily DataFrame with 'ds'/'y', current_tweets, remaining_days, fraction_of_today_elapsed)
+        """
+        df = self.data_processor.load_and_prepare_data()
+        week_data = self.data_processor.get_current_week_data(current_time)
+        now = week_data['current_time']
+
+        # Only days that are fully over (no look-ahead, no partial current day)
+        today = pd.Timestamp(now.date())
+        df = df[df['ds'] < today].sort_values('ds')
+
+        remaining_days = week_data['time_remaining'].total_seconds() / 86400.0
+        day_fraction = (now.hour * 3600 + now.minute * 60 + now.second) / 86400.0
+        return df, week_data['current_week_tweets'], remaining_days, day_fraction
+
     def calculate_moving_average_prediction(self, current_time=None, window_days=7):
         """
-        Calculate moving average prediction based on historical data.
-        
+        Moving average prediction: mean daily tweets over the last `window_days`
+        complete days, projected over the time remaining in the market week.
+
         Args:
             current_time (datetime): Current time for prediction context
             window_days (int): Number of days to use for moving average
-            
+
         Returns:
             dict: Moving average prediction
         """
-        df = self.data_processor.load_and_prepare_data()
-        
-        # Get current week data
-        week_data = self.data_processor.get_current_week_data(current_time)
-        current_tweets = week_data['current_week_tweets']
-        
-        # Calculate moving average of weekly tweet counts
-        df['week'] = df['ds'].dt.isocalendar().week
-        df['year'] = df['ds'].dt.year
-        weekly_counts = df.groupby(['year', 'week'])['y'].sum().reset_index()
-        
-        # Get last N weeks
-        recent_weeks = weekly_counts.tail(window_days)['y'].values
-        
-        if len(recent_weeks) > 0:
-            ma_prediction = np.mean(recent_weeks)
-        else:
-            ma_prediction = df['y'].mean() * 7  # Fallback to daily average * 7
-        
-        # Adjust for current tweets
-        remaining_prediction = max(0, ma_prediction - current_tweets)
-        
+        df, current_tweets, remaining_days, _ = self._complete_daily_history(current_time)
+        recent = df.tail(window_days)['y'].values.astype(float)
+        if len(recent) == 0:
+            raise ValueError("No complete days of history for moving average")
+
+        daily_rate = float(np.mean(recent))
+        predicted_remaining = daily_rate * remaining_days
+        total = current_tweets + predicted_remaining
+
+        # 80% interval: daily std grows with sqrt(time)
+        std = float(np.std(recent, ddof=1)) * np.sqrt(remaining_days) if len(recent) > 1 else 0.0
         return {
-            'total_predicted': ma_prediction,
+            'total_predicted': total,
             'current_tweets': current_tweets,
-            'predicted_remaining': remaining_prediction,
+            'predicted_remaining': predicted_remaining,
             'confidence_interval': {
-                'lower': ma_prediction * 0.8,
-                'upper': ma_prediction * 1.2
+                'lower': max(current_tweets, total - 1.28 * std),
+                'upper': total + 1.28 * std
             },
+            'daily_rate': daily_rate,
             'method': f'{window_days}d_moving_average'
         }
-    
+
     def calculate_linear_trend_prediction(self, current_time=None, trend_days=14):
         """
-        Calculate linear trend prediction based on recent data.
-        
+        Linear trend prediction: fit a line through the last `trend_days` complete
+        days and integrate it over the time remaining in the market week.
+
         Args:
             current_time (datetime): Current time for prediction context
             trend_days (int): Number of days to use for trend calculation
-            
+
         Returns:
             dict: Linear trend prediction
         """
-        df = self.data_processor.load_and_prepare_data()
-        
-        # Get current week data
-        week_data = self.data_processor.get_current_week_data(current_time)
-        current_tweets = week_data['current_week_tweets']
-        
-        # Get recent data for trend calculation
-        recent_data = df.tail(trend_days).copy()
-        
+        df, current_tweets, remaining_days, day_fraction = self._complete_daily_history(current_time)
+        recent_data = df.tail(trend_days)
+
         if len(recent_data) < 3:
             # Fallback to moving average if insufficient data
             return self.calculate_moving_average_prediction(current_time)
-        
-        # Calculate linear trend
-        x = np.arange(len(recent_data))
-        y = recent_data['y'].values
-        
-        # Fit linear regression
-        coeffs = np.polyfit(x, y, 1)
-        slope, intercept = coeffs
-        
-        # Project trend for remaining days in week
-        days_remaining = week_data['time_remaining'].days + 1
-        trend_prediction = slope * days_remaining + intercept * days_remaining
-        
-        # Total prediction
-        total_prediction = current_tweets + max(0, trend_prediction)
-        
-        # Estimate confidence based on trend variance
+
+        n = len(recent_data)
+        x = np.arange(n)
+        y = recent_data['y'].values.astype(float)
+        slope, intercept = np.polyfit(x, y, 1)
+
+        # Day k covers [k-0.5, k+0.5]; "now" is part-way through day n, and the
+        # horizon runs `remaining_days` ahead, so evaluate the line at its midpoint.
+        horizon_mid = (n + day_fraction - 0.5) + remaining_days / 2.0
+        daily_rate = max(0.0, slope * horizon_mid + intercept)
+        trend_prediction = daily_rate * remaining_days
+        total_prediction = current_tweets + trend_prediction
+
         residuals = y - (slope * x + intercept)
-        trend_std = np.std(residuals) * np.sqrt(days_remaining)
-        
+        trend_std = np.std(residuals) * np.sqrt(remaining_days)
+
         return {
             'total_predicted': total_prediction,
             'current_tweets': current_tweets,
-            'predicted_remaining': max(0, trend_prediction),
+            'predicted_remaining': trend_prediction,
             'confidence_interval': {
-                'lower': max(current_tweets, total_prediction - 1.96 * trend_std),
-                'upper': total_prediction + 1.96 * trend_std
+                'lower': max(current_tweets, total_prediction - 1.28 * trend_std),
+                'upper': total_prediction + 1.28 * trend_std
             },
             'method': f'{trend_days}d_linear_trend',
             'slope': slope,
             'daily_trend': slope
         }
-    
+
     def predict_remaining_tweets(self, current_time=None):
         """
         Generate ensemble predictions by combining individual model predictions and additional methods.
@@ -956,7 +958,7 @@ class EnsembleTweetPredictor:
         
         print(f"Current tweets: {prediction_summary['current_tweets']}")
         print(f"Total predicted: {prediction_summary['total_predicted']:.1f}")
-        print(f"80% Confidence: {prediction_summary['confidence_interval']['lower']:.1f} - {prediction_summary['confidence_interval']['upper']:.1f}")
+        print(f"Confidence range (weighted avg of model intervals): {prediction_summary['confidence_interval']['lower']:.1f} - {prediction_summary['confidence_interval']['upper']:.1f}")
         
         print(f"\n🤖 MODEL CONTRIBUTIONS:")
         for model, contrib in prediction_summary['model_contributions'].items():

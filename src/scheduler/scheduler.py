@@ -75,7 +75,8 @@ import os
 import re
 from pathlib import Path
 
-# Set up logging
+# Set up logging (the logs dir is not in git, so create it before opening the log file)
+(Path(__file__).parent.parent / "logs").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -434,6 +435,12 @@ def run_prediction(quiet=False, use_prophet=True):
         return False
     
     return process.returncode == 0
+
+def _wallet_configured():
+    """True if wallet credentials are available in the environment/.env."""
+    from dotenv import load_dotenv
+    load_dotenv()
+    return bool(os.getenv("WALLET_PRIVATE_KEY"))
 
 def check_wallet_balance():
     """Check the wallet's MATIC and USDC balance.
@@ -1375,7 +1382,11 @@ def run_scheduled_jobs(args):
         else:
             # Normal mode - real bidding and selling
             # Check wallet balance if needed
-            if prediction_success and not args.no_bidding and not args.skip_balance_check:
+            has_sufficient_balance = False
+            wallet_configured = _wallet_configured()
+            if args.dry_run and not wallet_configured:
+                logger.info("Dry run without a wallet configured: skipping balance check (analysis only)")
+            if prediction_success and not args.no_bidding and not args.skip_balance_check and (wallet_configured or not args.dry_run):
                 balance_info = display_wallet_balance()
                 has_sufficient_balance = balance_info.get("success", False) and balance_info.get("usdc_balance", 0) >= args.min_usdc
                 

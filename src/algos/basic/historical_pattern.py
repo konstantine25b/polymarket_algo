@@ -749,7 +749,7 @@ def main():
     file_path = args.file
     if not file_path:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        src_dir = os.path.dirname(script_dir)
+        src_dir = os.path.dirname(os.path.dirname(script_dir))  # script lives in src/algos/basic
         file_path = os.path.join(src_dir, 'data', 'elonmusk_reformatted.csv')
 
     try:

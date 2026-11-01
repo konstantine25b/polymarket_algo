@@ -743,19 +743,9 @@ def main():
                 # Fallback to printing
                 print(json.dumps(market_data, indent=2, ensure_ascii=False))
         else:
-            # Print with settings to avoid truncation and handle Unicode characters
-            try:
-                # Try to import the rich library for better JSON formatting
-                from rich.console import Console
-                from rich.json import JSON
-                
-                console = Console()
-                # Parse and then render to ensure proper formatting
-                json_str = json.dumps(market_data, ensure_ascii=False)
-                console.print(JSON(json_str))
-            except ImportError:
-                # Fallback to standard JSON printing if rich is not available
-                print(json.dumps(market_data, indent=2, ensure_ascii=False))
+            # Plain JSON: this output is parsed by other programs (comparison.py), and rich
+            # would hard-wrap long strings at the console width and corrupt it
+            print(json.dumps(market_data, indent=2, ensure_ascii=False))
     else:
         # Otherwise show the market status in the terminal
         show_market_status(

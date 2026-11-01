@@ -76,18 +76,26 @@ def merge_files(source_file, target_file, output_file=None):
     formatted_lines = [f'"{e[0]}","{e[1]}","{e[2]}"\n' for e in combined]
 
     output_path = output_file if output_file else target_file
-    with open(output_path, 'w', encoding='utf-8') as f:
+    # Never shrink the dataset: a broken download must not wipe existing history
+    if len(combined) < len(target_entries):
+        raise RuntimeError(f"Refusing to write {len(combined)} rows over {len(target_entries)} existing rows")
+
+    # Write to a temp file and swap it in, so an interrupted write cannot truncate the data file
+    tmp_path = output_path + ".tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         # Write header first
         f.write(header)
         # Then write data
         f.writelines(formatted_lines)
+    os.replace(tmp_path, output_path)
 
     logger.info(f"Merged data written to {output_path}")
 
 
 if __name__ == "__main__":
-    source_file = "src/xpath_scraper/temp/elonmusk_reformatted.csv"
-    target_file = "src/data/elonmusk_reformatted.csv"
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    source_file = os.path.join(repo_root, "src/xpath_scraper/temp/elonmusk_reformatted.csv")
+    target_file = os.path.join(repo_root, "src/data/elonmusk_reformatted.csv")
     
     logger.info(f"Starting CSV merge process")
     merge_files(source_file, target_file)

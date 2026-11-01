@@ -24,8 +24,26 @@ error_rows = []
 current_year = 2024
 max_month_seen = 0
 
+TWITTER_EPOCH_MS = 1288834974657
+ET = pytz.timezone('US/Eastern')
+
+
+def year_from_tweet_id(tweet_id):
+    """Year (US/Eastern) encoded in a Twitter snowflake ID, or None if the ID is not numeric."""
+    try:
+        ts_ms = (int(tweet_id) >> 22) + TWITTER_EPOCH_MS
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(ts_ms / 1000, tz=pytz.utc).astimezone(ET).year
+
+
 # Function to determine if we should update the year
-def determine_year(date_str):
+def determine_year(date_str, tweet_id=None):
+    # The export has no year in its timestamps, so read it from the tweet ID when possible
+    id_year = year_from_tweet_id(tweet_id)
+    if id_year is not None:
+        return id_year
+
     # Extract month from the date string
     global current_year, max_month_seen
 
@@ -121,7 +139,7 @@ try:
 
         try:
             # Determine the year based on the month pattern
-            year = determine_year(original_created_at_str)
+            year = determine_year(original_created_at_str, tweet_id)
 
             # Parse the date components
             parts = original_created_at_str.split(',')

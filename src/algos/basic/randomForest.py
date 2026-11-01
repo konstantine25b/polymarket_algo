@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(script_dir)
+src_dir = os.path.dirname(os.path.dirname(script_dir))  # script lives in src/algos/basic
 default_filename = os.path.join(src_dir, 'data', 'elonmusk_reformatted.csv')
 
 class ElonTweetPredictor:
@@ -120,7 +120,8 @@ class ElonTweetPredictor:
             
         # Add moving average features
         for window in [3, 7, 14]:
-            self.daily_features[f'avg_tweets_{window}d'] = self.daily_features['count'].rolling(window).mean().fillna(0)
+            # shift(1): only days BEFORE the target day may be used, otherwise the label leaks into the feature
+            self.daily_features[f'avg_tweets_{window}d'] = self.daily_features['count'].shift(1).rolling(window).mean().fillna(0)
             
         # Add day-of-week features (using sine and cosine for cyclical nature)
         self.daily_features['weekday_sin'] = np.sin(2 * np.pi * self.daily_features['weekday'] / 7)
@@ -140,6 +141,8 @@ class ElonTweetPredictor:
             else:
                 streak = 0
             self.daily_features.iloc[i, self.daily_features.columns.get_loc('streak')] = streak
+        # Streaks as of the previous day (the current day's outcome is the target)
+        self.daily_features['streak'] = self.daily_features['streak'].shift(1).fillna(0)
             
         # Add absence streak features
         self.daily_features['absence_streak'] = 0
@@ -151,6 +154,7 @@ class ElonTweetPredictor:
             else:
                 absence_streak = 0
             self.daily_features.iloc[i, self.daily_features.columns.get_loc('absence_streak')] = absence_streak
+        self.daily_features['absence_streak'] = self.daily_features['absence_streak'].shift(1).fillna(0)
         
         # Drop rows with NaN values from lag features
         self.daily_features = self.daily_features.dropna()
@@ -250,11 +254,13 @@ class ElonTweetPredictor:
                 future_df[f'avg_tweets_{window}d'] = np.mean(last_counts)
                 
         # Add streak features
-        last_streak = self.daily_features.iloc[-1]['streak']
+        # Training streaks are "as of the previous day", so roll the last known day in
+        last_row = self.daily_features.iloc[-1]
+        last_streak = last_row['streak'] + 1 if last_row['tweeted'] == 1 else 0
         future_df['streak'] = last_streak
         
         # Add absence streak features
-        last_absence_streak = self.daily_features.iloc[-1]['absence_streak']
+        last_absence_streak = last_row['absence_streak'] + 1 if last_row['tweeted'] == 0 else 0
         future_df['absence_streak'] = last_absence_streak
         
         # Get the feature columns used in training

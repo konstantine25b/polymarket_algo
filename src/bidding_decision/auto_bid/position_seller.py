@@ -27,7 +27,7 @@ class PositionSeller:
     based on statistical opportunities.
     """
     
-    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False, neural_prophet_weight: float = 0.17, facebook_prophet_weight: float = 0.25, timesfm_weight: float = 0.30, basic_prophet_weight: float = 0.25, moving_average_weight: float = 0.015, linear_trend_weight: float = 0.015):
+    def __init__(self, threshold: float = 0.0, sell_below: float = 0.0, debug: bool = False, algorithm: str = "prophet", random_seed: int = 42, show_eachalgo_distribution: bool = False, neural_prophet_weight: float = 0.17, facebook_prophet_weight: float = 0.25, timesfm_weight: float = 0.30, basic_prophet_weight: float = 0.25, moving_average_weight: float = 0.015, linear_trend_weight: float = 0.015, allow_no_wallet: bool = False):
         """
         Initialize the PositionSeller.
         
@@ -44,6 +44,7 @@ class PositionSeller:
             basic_prophet_weight: Weight for Basic Prophet in ensemble
             moving_average_weight: Weight for Moving Average in ensemble
             linear_trend_weight: Weight for Linear Trend in ensemble
+            allow_no_wallet: If True (dry run), a missing wallet means "no positions" instead of an error
         """
         self.threshold = threshold
         self.sell_below = sell_below
@@ -57,7 +58,13 @@ class PositionSeller:
         self.basic_prophet_weight = basic_prophet_weight
         self.moving_average_weight = moving_average_weight
         self.linear_trend_weight = linear_trend_weight
-        self.position_tracker = PolymarketPositionTracker()
+        try:
+            self.position_tracker = PolymarketPositionTracker()
+        except ValueError as e:
+            if not allow_no_wallet:
+                raise
+            logger.warning(f"{e} - dry run continues with no positions")
+            self.position_tracker = None
         
     def get_all_positions_with_stats(self, comparison_df: Optional[pd.DataFrame] = None) -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
         """
@@ -72,6 +79,9 @@ class PositionSeller:
             - The full comparison DataFrame for reference
         """
         # Get current positions
+        if self.position_tracker is None:
+            logger.info("No wallet configured: no positions to evaluate for selling")
+            return [], pd.DataFrame()
         positions = self.position_tracker.get_simple_positions()
         
         # Debug: Print out the raw positions data

@@ -15,8 +15,8 @@ POLYMARKET_API_HOST = "https://polymarket.com/api"
 POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
 
 # Polymarket Event URLs
-# Current Elon Musk tweets event
-POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-october-24-october-31?tid=1761628859688"
+# Current Elon Musk tweets event (update together with the window below when a new weekly market starts)
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-october-30-november-6-2026"
 
 # Data Paths
 DATA_DIR = Path("src/polymarket/data")
@@ -26,9 +26,9 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
 MARKET_ID = ""  # NOTE: update when new market_id is known
-MARKET_HASH = "elon-musk-of-tweets-october-24-october-31"
-EVENT_HASH = "elon-musk-of-tweets-october-24-october-31"
-FULL_EVENT_HASH = "elon-musk-of-tweets-october-24-october-31"
+MARKET_HASH = "elon-musk-of-tweets-october-30-november-6-2026"
+EVENT_HASH = "elon-musk-of-tweets-october-30-november-6-2026"
+FULL_EVENT_HASH = "elon-musk-of-tweets-october-30-november-6-2026"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
@@ -38,8 +38,8 @@ DEFAULT_DATA_PATH = os.path.join(
 )
 
 # Polymarket event timeframe (Eastern Time)
-POLYMARKET_START_TIME = "2025-10-24 12:00:00"
-POLYMARKET_END_TIME = "2025-10-31 12:00:00"
+POLYMARKET_START_TIME = "2026-10-30 12:00:00"
+POLYMARKET_END_TIME = "2026-11-06 12:00:00"
 POLYMARKET_TIMEZONE = ET_TIMEZONE
 
 # Define standard tweet count frames used by Polymarket
@@ -86,11 +86,15 @@ TWEET_COUNT_FRAMES = [
     {"name": "440–459", "min": 440, "max": 459},
     {"name": "460–479", "min": 460, "max": 479},
     {"name": "480–499", "min": 480, "max": 499},
-    {"name": "500+", "min": 500, "max": float('inf')}
+    {"name": "500–519", "min": 500, "max": 519},
+    {"name": "520–539", "min": 520, "max": 539},
+    {"name": "540–559", "min": 540, "max": 559},
+    {"name": "560–579", "min": 560, "max": 579},
+    {"name": "580+", "min": 580, "max": float('inf')}
 ]
 
 # Apify Constants
-APIFY_TOKEN = "apify_api_e6Vimb3keKr5cNn5Ac6WolYLDJdSYb0DKdym"
+APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")  # set in .env; never commit tokens
 APIFY_TWITTER_ACTOR_TASK_ID = "nfp1fpt5gUlBwPcor"  # Using the known working actor directly 
 
 # Tweet Getter Constants

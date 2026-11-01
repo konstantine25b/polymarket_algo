@@ -462,8 +462,11 @@ class EnhancedTweetPredictor:
         
         # Expand CI based on ensemble variance
         ci_expansion = 1.96 * np.sqrt(ensemble_variance)
-        final_lower = max(0, ensemble_lower - ci_expansion)
-        final_upper = ensemble_upper + ci_expansion
+        final_lower = max(0, ensemble_lower - ci_expansion) * activity_multiplier
+        final_upper = (ensemble_upper + ci_expansion) * activity_multiplier
+        # The interval must contain the point estimate it describes
+        final_lower = min(final_lower, ensemble_pred)
+        final_upper = max(final_upper, ensemble_pred)
         
         predictions['confidence_interval'] = (final_lower, final_upper)
         predictions['time_remaining'] = week_data['time_remaining']  # Add for probability calc
@@ -546,7 +549,7 @@ class EnhancedTweetPredictor:
         print(f"\n=== Final Predictions ===")
         print(f"Ensemble remaining: {remaining_predictions['ensemble']:.1f}")
         print(f"Total predicted: {total_predicted:.1f}")
-        print(f"95% CI: {total_ci[0]:.1f} - {total_ci[1]:.1f}")
+        print(f"Wide CI: {total_ci[0]:.1f} - {total_ci[1]:.1f}")
         
         # Calculate enhanced probabilities
         probabilities = self.calculate_enhanced_probabilities(current_tweets, remaining_predictions)
@@ -611,43 +614,41 @@ class EnhancedTweetPredictor:
                 self.data_processor.parse_timestamp
             )
         
-        # Get tweets from last 6 hours, 24 hours, and 3 days
+        # Count tweets in trailing windows ending at `now` (never look past it)
         now = current_time
-        last_6h = now - timedelta(hours=6)
-        last_24h = now - timedelta(hours=24) 
-        last_3d = now - timedelta(days=3)
-        
-        tweets_6h = len(self.data_processor.raw_data[
-            self.data_processor.raw_data['parsed_timestamp'] >= last_6h
-        ])
-        
-        tweets_24h = len(self.data_processor.raw_data[
-            self.data_processor.raw_data['parsed_timestamp'] >= last_24h
-        ])
-        
-        tweets_3d = len(self.data_processor.raw_data[
-            self.data_processor.raw_data['parsed_timestamp'] >= last_3d
-        ])
-        
-        # Calculate rates
-        rate_6h = tweets_6h / 6.0    # tweets per hour last 6h
-        rate_24h = tweets_24h / 24.0  # tweets per hour last 24h  
-        rate_3d = tweets_3d / 72.0    # tweets per hour last 3d
-        
-        # Determine activity mode
-        if rate_6h > 3.0 or tweets_24h > 50:
+        parsed = self.data_processor.raw_data['parsed_timestamp']
+        up_to_now = parsed <= now
+
+        def count_since(delta):
+            return int(((parsed >= now - delta) & up_to_now).sum())
+
+        tweets_6h = count_since(timedelta(hours=6))
+        tweets_24h = count_since(timedelta(hours=24))
+        tweets_3d = count_since(timedelta(days=3))
+        tweets_14d = count_since(timedelta(days=14))
+
+        # Calculate rates (tweets per hour)
+        rate_6h = tweets_6h / 6.0
+        rate_24h = tweets_24h / 24.0
+        rate_3d = tweets_3d / 72.0
+        baseline = tweets_14d / (14 * 24.0)  # what is "normal" lately
+
+        # Compare against the account's own recent baseline rather than fixed
+        # numbers, so a generally busier period is not permanently "high activity".
+        # The models are already trained on recent data, so multipliers stay modest.
+        if baseline > 0 and rate_6h > 2.0 * baseline and rate_24h > 1.3 * baseline:
             mode = "high_activity"
-            multiplier = 1.3
-        elif rate_6h < 1.0 and tweets_24h < 20:
-            mode = "low_activity" 
-            multiplier = 0.8
-        elif rate_24h > rate_3d * 1.5:
-            mode = "increasing_activity"
             multiplier = 1.15
+        elif baseline > 0 and rate_6h < 0.5 * baseline and rate_24h < 0.7 * baseline:
+            mode = "low_activity"
+            multiplier = 0.85
+        elif rate_3d > 0 and rate_24h > rate_3d * 1.5:
+            mode = "increasing_activity"
+            multiplier = 1.1
         else:
             mode = "normal_activity"
             multiplier = 1.0
-        
+
         return {
             'mode': mode,
             'multiplier': multiplier,
@@ -655,7 +656,8 @@ class EnhancedTweetPredictor:
             'rate_24h': rate_24h,
             'rate_3d': rate_3d,
             'tweets_6h': tweets_6h,
-            'tweets_24h': tweets_24h
+            'tweets_24h': tweets_24h,
+            'baseline_rate': baseline
         }
     
     def calculate_adaptive_weights(self, current_time):

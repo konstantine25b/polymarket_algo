@@ -702,4 +702,12 @@ class TimesFMTweetPredictor:
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             print(f"Plot saved to: {filename}")
         
-        plt.show() 
+        import sys as _sys
+        
+        if _sys.stdout.isatty():
+        
+            plt.show()  # skip the blocking window when run headless (scheduler, pipes)
+        
+        else:
+        
+            plt.close("all")

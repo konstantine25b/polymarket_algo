@@ -7,7 +7,7 @@ from collections import defaultdict
 import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(script_dir)
+src_dir = os.path.dirname(os.path.dirname(script_dir))  # script lives in src/algos/basic
 filename = os.path.join(src_dir, 'data', 'elonmusk_daily_counts.csv')
 
 class TweetPredictor:

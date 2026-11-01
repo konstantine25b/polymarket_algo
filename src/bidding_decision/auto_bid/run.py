@@ -120,7 +120,7 @@ def main():
     
     try:
         # Connect to Polymarket
-        if not bidder.connect(args.key):
+        if not bidder.connect(args.key, dry_run=args.dry_run):
             logger.error("Failed to connect to Polymarket. Exiting.")
             sys.exit(1)
         

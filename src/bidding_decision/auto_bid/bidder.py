@@ -48,19 +48,27 @@ class AutoBidder:
         self.random_seed = random_seed
         self.show_eachalgo_distribution = show_eachalgo_distribution
         self.client = None
+        self.read_only = False  # True for a wallet-less dry run (analysis only, no orders possible)
         
-    def connect(self, private_key: Optional[str] = None):
+    def connect(self, private_key: Optional[str] = None, dry_run: bool = False):
         """
         Connect to Polymarket using the provided private key or from environment.
         
         Args:
             private_key: Wallet private key (optional, will load from .env if not provided)
+            dry_run: If True and no wallet is configured, continue in read-only mode
+                     (market data, predictions and decisions work; no orders can be placed)
         """
         try:
             self.client = PolymarketClient(private_key=private_key)
             logger.info(f"Connected to Polymarket with wallet: {self.client.get_wallet_address()}")
             return True
         except Exception as e:
+            if dry_run:
+                logger.warning(f"No usable wallet ({e}); continuing as a read-only dry run - no orders can be placed")
+                self.client = None
+                self.read_only = True
+                return True
             logger.error(f"Failed to connect to Polymarket: {e}")
             return False
     
@@ -74,7 +82,7 @@ class AutoBidder:
         Returns:
             Dict containing opportunity details or None if no opportunity found
         """
-        if not self.client:
+        if not self.client and not self.read_only:
             logger.error("Not connected to Polymarket. Call connect() first.")
             return None
             

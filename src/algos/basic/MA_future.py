@@ -5,7 +5,7 @@ import argparse
 from collections import deque
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(script_dir)
+src_dir = os.path.dirname(os.path.dirname(script_dir))  # script lives in src/algos/basic
 filename = os.path.join(src_dir, 'data', 'elonmusk_daily_counts.csv')
 
 def predict_future_tweet_counts(file_path, window_size=7, forecast_days=1):

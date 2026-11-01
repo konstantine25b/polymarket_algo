@@ -113,7 +113,7 @@ def main():
     
     try:
         # Display positions if requested (before model training to avoid interruption)
-        if args.show_positions or args.show_active_positions:
+        if (args.show_positions or args.show_active_positions) and not args.dry_run:
             from src.polymarket.my_positions.position_tracker import PolymarketPositionTracker
             
             print("\n" + "=" * 80)
@@ -161,7 +161,8 @@ def main():
             timesfm_weight=args.timesfm_weight,
             basic_prophet_weight=args.basic_prophet_weight,
             moving_average_weight=args.moving_average_weight,
-            linear_trend_weight=args.linear_trend_weight
+            linear_trend_weight=args.linear_trend_weight,
+            allow_no_wallet=args.dry_run
         )
         
         # Generate the comparison table once - this will be displayed by PositionSeller methods
