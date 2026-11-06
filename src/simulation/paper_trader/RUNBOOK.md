@@ -17,18 +17,25 @@ pip install --upgrade pip
 pip install -r requirements.txt          # ~10-15 min (torch, jax, prophet ...)
 playwright install chromium              # headless browser used to read Polymarket's tweet count
 
-python -m pytest src/simulation/paper_trader/tests -q      # expect: 15 passed
+python -m pytest src/simulation/paper_trader/tests -q      # must finish with 0 failures (CI runs it on every push)
 ```
 The first forecast downloads the TimesFM weights (~800 MB, one time), so the very first start can take a few minutes.
 No `.env` / wallet / API keys are needed for paper trading.
 
 ## 2. Run
 
+**macOS** (laptop):
 ```bash
 cd polymarket_algo && source venv/bin/activate
-caffeinate -i python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0
+caffeinate -i python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0 --backup-dir ~/paper_backup
 ```
-* `caffeinate -i` stops macOS from sleeping (the loop pauses while the Mac sleeps).
+**Linux** (no `caffeinate`; run under a supervisor, see `deploy/paper-trader.service` - systemd user unit with restart backoff and a crash-loop limit):
+```bash
+python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0 --backup-dir /mnt/other-disk/paper_backup
+```
+* `caffeinate -i` (macOS only) stops the Mac from sleeping (the loop pauses while it sleeps; the timer is monotonic-safe after resume).
+* `--backup-dir` receives a checksummed checkpoint (state, forecast, full ledger) every tick and the tweet dataset after each refresh. Point it OUTSIDE the checkout. If a run folder is lost, starting again with the same `--run-name` and `--backup-dir` restores from the newest valid checkpoint; if state is lost and nothing can be restored the bot **refuses** to start a same-name account (use `--allow-new-state` to start over on purpose).
+* Do not `tee` the output into `console.log` - the app writes that file itself (tee-ing doubles every line). Send stdout/stderr to the supervisor's journal instead.
 * `--run-name` is the folder `src/simulation/runs/<name>/`. Same name = **resume** (cash, positions, logs are kept; `--bankroll` is then ignored). New name = fresh start.
 * **Never use `--fresh` on a real run**: it deletes that run's logs and state.
 * Stop with Ctrl-C. Run the same command again to resume.
@@ -52,7 +59,7 @@ When the market ends it waits for the resolution, pays winners $1 per share, boo
 
 ## 4. Monitor - is everything alright?
 
-**One command** (exit code 0 healthy, 1 warnings, 2 critical):
+**One command** (exit code 0 healthy, 1 warnings, 2 critical; liveness comes from a kernel lock plus `heartbeat.json`, not from a PID):
 ```bash
 python -m src.simulation.paper_trader.status --run-name live40
 ```
@@ -77,7 +84,8 @@ Files in `src/simulation/runs/live40/` (nothing is ever rotated or deleted):
 | `snapshots.csv` | every bucket every tick: our probability, bid/ask, depth, holdings |
 | `equity.csv`, `data_log.csv`, `forecasts.csv` | equity curve; tweet counts and data health; every ensemble run |
 | `model_logs/` | the ensemble's full training output per run |
-| `config_history.jsonl`, `state.json` | arguments at every start; resume point |
+| `config_history.jsonl`, `state.json`, `forecast_state.json` | arguments at every start; resume points (account / last applied forecast) |
+| `checkpoints/`, `heartbeat.json`, `exit_status.json` | checksummed snapshots; loop liveness; why the process last exited (signal, uncaught exception + traceback) |
 | `charts_archive/` | hourly copies of both charts |
 
 ## 5. Troubleshooting
@@ -88,9 +96,10 @@ Files in `src/simulation/runs/live40/` (nothing is ever rotated or deleted):
 | `last tick ... older than 25 min` while running | Stuck network/browser call. Look at `paper_trader.log`; Ctrl-C and restart. |
 | `tweet count source: local_csv` | Polymarket page could not be read. `playwright install chromium`; check internet. Trading continues on our own data. |
 | `order books 0/25` | Network down, or the market ended (it rolls to the next weekly market by itself). |
-| `last ensemble forecast ... min ago` too old | Model worker failing: grep `model worker` in `paper_trader.log`; see `model_logs/`. The bot keeps using the last forecast. |
+| `last ensemble forecast ... min ago` too old | Refresh or model worker failing (retries back off 5 -> 60 min): grep `forecast attempt failed` in `paper_trader.log`; full worker stderr per attempt is in `model_logs/attempt_*.stderr`. Past `--model-stale-min` (150) **new buys are blocked**; exits keep working on the last valid forecast. |
+| `blocked: tweet data is stale` in decisions.csv | Our tweet database is >30 tweets behind Polymarket (XTracker refresh failing). Buys resume after a successful refresh. |
 | "another paper trader is already running" | Another process uses that run folder. Use `status`; stop it or pick another `--run-name`. |
-| Mac asleep overnight | Use `caffeinate -i`; a sleeping Mac pauses the loop (nothing breaks, ticks are simply missed). |
+| Mac asleep overnight | Use `caffeinate -i` (macOS); a sleeping Mac pauses the loop (nothing breaks, ticks are simply missed). |
 
 ## 6. After the run
 
@@ -103,7 +112,7 @@ One live week is a single sample.
 
 ## 7. Paste-ready instruction for a bot / assistant
 
-> Install and run the paper trader from branch `fix/scraper-year-ensemble-dryrun` of github.com/konstantine25b/polymarket_algo, following `src/simulation/paper_trader/RUNBOOK.md` sections 1-2 (Python 3.11 venv, `pip install -r requirements.txt`, `playwright install chromium`, run the 15 tests).
-> Start it in tmux with: `caffeinate -i python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0` and keep it running.
+> Install and run the paper trader from branch `fix/scraper-year-ensemble-dryrun` of github.com/konstantine25b/polymarket_algo, following `src/simulation/paper_trader/RUNBOOK.md` sections 1-2 (Python 3.11 venv, `pip install -r requirements.txt`, `playwright install chromium`, run the test suite and require 0 failures).
+> Start it under tmux (macOS: prefix with `caffeinate -i`; Linux: use the systemd unit in `deploy/`) with: `python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0` and keep it running.
 > Every 15 minutes run `python -m src.simulation.paper_trader.status --run-name live40`. Exit 0: reply "healthy" with the account line. Exit 1: report the WARN lines. Exit 2: restart with the exact same command (never `--fresh`, never change the run name) and report what `paper_trader.log` shows.
 > Never edit files, never delete the run folder, never send real orders (the bot cannot). When asked for results run `python -m src.simulation.paper_trader.report --run-name live40` and summarise it.

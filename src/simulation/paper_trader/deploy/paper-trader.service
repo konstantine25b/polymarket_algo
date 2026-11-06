@@ -1,0 +1,24 @@
+# systemd *user* service for the paper trader (Linux).  Install:
+#   mkdir -p ~/.config/systemd/user && cp paper-trader.service ~/.config/systemd/user/
+#   edit WorkingDirectory / ExecStart paths, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now paper-trader
+#   loginctl enable-linger $USER          # keep it running after logout / across reboots
+# Logs: journalctl --user -u paper-trader -f      Health: python -m src.simulation.paper_trader.status --run-name live40
+# Do NOT also tee the output into <run>/console.log - the app owns that file.
+[Unit]
+Description=Polymarket paper trader (paper only, no real orders)
+StartLimitIntervalSec=1800
+StartLimitBurst=6
+
+[Service]
+WorkingDirectory=%h/polymarket_algo
+ExecStart=%h/polymarket_algo/venv/bin/python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0
+# Restart on crash / SIGKILL, with backoff; after 6 starts in 30 min systemd gives up and the unit shows "failed"
+# (a crash loop must page someone, not be hidden). A clean `systemctl stop` (SIGTERM) is not restarted.
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=default.target

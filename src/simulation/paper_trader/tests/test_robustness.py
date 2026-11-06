@@ -765,3 +765,52 @@ def test_partial_exit_keeps_accounting_consistent(tmp_path):
     assert pos["shares"] == pytest.approx(shares0 - 5) and pos["cost_usd"] == pytest.approx(cost0 * (shares0 - 5) / shares0)
     sold = t.account.cash - cash0
     assert sold == pytest.approx(5 * 0.95 - taker_fee_(5, 0.95), abs=1e-4)
+
+
+# ================================================================ B14 writer serialisation / B17 docs+CI
+def test_file_lock_serialises_writers(tmp_path):
+    from src.simulation.paper_trader.procutil import file_lock
+    path = str(tmp_path / ".lock")
+    code = ("import sys,time;sys.path.insert(0,%r);from src.simulation.paper_trader.procutil import file_lock;"
+            "l=file_lock(%r);l.__enter__();print('in',flush=True);time.sleep(30)" % (ROOT, path))
+    child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, cwd=ROOT)
+    try:
+        assert child.stdout.readline().strip() == "in"
+        with pytest.raises(TimeoutError):
+            with file_lock(path, timeout=0.6, poll=0.1):
+                pass
+        child.kill()
+        child.wait()
+        with file_lock(path, timeout=2):                    # dead writer's lock is released by the kernel
+            pass
+    finally:
+        child.kill()
+
+
+def test_atomic_state_writes_use_unique_temp_files(tmp_path):
+    a = PaperAccount(str(tmp_path), 30.0)
+    a.save()
+    assert not any(n.endswith(".tmp") for n in os.listdir(tmp_path))
+    assert json.load(open(tmp_path / "state.json"))["cash"] == 30.0
+
+
+def test_worker_stderr_kept_for_failed_attempt(monkeypatch, tmp_path):
+    from src.simulation.paper_trader import feeds
+    ok_refresh = subprocess.CompletedProcess([], 0, 'REFRESH_RESULT {"new_rows": 0, "total_rows": 1, "newest": "x", "sha256": "h"}', "")
+    bad_worker = subprocess.CompletedProcess([], 3, "", "Traceback ... CmdStan interrupted")
+    seq = iter([ok_refresh, bad_worker])
+    monkeypatch.setattr(feeds.subprocess, "run", lambda *a, **k: next(seq))
+    f = feeds.LiveFeed()
+    monkeypatch.setattr(f, "csv_path", str(tmp_path / "data.csv"))
+    (tmp_path / "data.csv").write_text("id,text,created_at\n")
+    assert f.forecast(make_event(), pd.Timestamp("2026-11-03 12:00", tz="UTC"), str(tmp_path)) is None
+    errs = [n for n in os.listdir(tmp_path / "model_logs") if n.endswith(".stderr")]
+    assert len(errs) == 1 and "CmdStan interrupted" in open(tmp_path / "model_logs" / errs[0]).read()
+    assert not [n for n in os.listdir(tmp_path / "model_logs") if n.startswith("data_")]     # snapshot cleaned up
+
+
+def test_runbook_and_ci_are_linux_ready():
+    rb = open(os.path.join(ROOT, "src/simulation/paper_trader/RUNBOOK.md")).read()
+    assert "15 passed" not in rb and "Linux" in rb
+    assert os.path.exists(os.path.join(ROOT, ".github/workflows/tests.yml"))
+    assert "Restart=on-failure" in open(os.path.join(ROOT, "src/simulation/paper_trader/deploy/paper-trader.service")).read()

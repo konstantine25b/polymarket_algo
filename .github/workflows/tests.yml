@@ -1,0 +1,17 @@
+name: paper-trader tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip && pip install -r requirements.txt pytest
+      - run: playwright install --with-deps chromium     # also proves the browser provisioning works on a clean machine
+      - run: python -m pytest src/simulation/paper_trader/tests -q
