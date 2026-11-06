@@ -34,11 +34,11 @@ from .account import PaperAccount, append_csv
 from .console import Console, WIDTH
 from .charts import plot_equity, plot_market, write_summary
 from .feeds import Event, LiveFeed, ReplayFeed
-from .fills import FeeSchedule, buy_with_budget, sell_shares, taker_fee
+from .fills import FeeSchedule, buy_with_budget, fee_per_share, sell_shares, taker_fee
 from .checkpoint import write_checkpoint
 from .procutil import atomic_write_json, write_heartbeat
 from .model import CalibratedModel, ForecastError, NativeEnsembleModel, validate_forecast
-from .strategy import Quote, Rules, buy_candidates, choose_buy, sell_reason
+from .strategy import Quote, Rules, buy_candidates, choose_buy, net_costs, plan_sell, risk_filter, sell_reason
 
 log = logging.getLogger("paper_trader")
 DATA_FIELDS = ["ts", "event", "polymarket_count", "csv_count", "diff", "csv_newest_tweet", "count_used", "count_source",
@@ -46,7 +46,7 @@ DATA_FIELDS = ["ts", "event", "polymarket_count", "csv_count", "diff", "csv_newe
 SNAPSHOT_FIELDS = ["ts", "event", "bucket", "our_prob", "bid", "ask", "bid_size_best", "ask_size_best", "bid_depth_top5",
                    "ask_depth_top5", "held_shares", "tweets", "days_left"]
 DECISION_FIELDS = ["ts", "event", "tweets", "days_left", "cash", "n_candidates", "chosen", "pred", "ask", "edge",
-                   "draw_prob", "result", "candidates"]
+                   "draw_prob", "result", "candidates", "gross_edge", "est_costs", "net_edge", "risk_rejected"]
 
 
 def quotes_to_keys(event, quotes):
@@ -379,13 +379,16 @@ class PaperTrader:
             reason = sell_reason(preds.get(pos["bucket"], 0.0), q.best_bid, rules)
             if not reason:
                 continue
-            fill = sell_shares(q.bids, pos["shares"], b.fees)
-            if fill is None or fill.notional < rules.min_sell_usd:
-                if key not in self._warned_min_order:
-                    log.info("SELL signal for %s (%s) but nothing could be sold (position under 0.01 shares or empty bid side) - holding",
-                             pos["bucket"], reason)
-                    self._warned_min_order.add(key)
+            fill, why = plan_sell(q.bids, pos["shares"], b.fees, preds.get(pos["bucket"], 0.0), reason, rules)
+            if fill is not None and fill.notional < rules.min_sell_usd:
+                fill, why = None, "below the minimum sell value"
+            if fill is None:
+                if (key, why) not in self._warned_min_order:
+                    log.info("SELL signal for %s (%s) but holding: %s", pos["bucket"], reason, why)
+                    self._warned_min_order.add((key, why))
                 continue
+            if fill.shares < pos["shares"] - 0.011:
+                log.info("PARTIAL exit %s: %.2f of %.2f shares fit inside the price limit", pos["bucket"], fill.shares, pos["shares"])
             acct.sell(key, fill, now, reason, {"pred": round(preds.get(pos["bucket"], 0.0), 5), "bid": q.best_bid, "ask": q.best_ask})
             log.info("SELL %s: %.2f sh @ %.3f, fee %.4f (%s)  realised so far %+.2f", pos["bucket"], fill.shares,
                      fill.avg_price, fill.fee, reason, acct.state["realized_pnl"])
@@ -460,7 +463,7 @@ class PaperTrader:
         c, rules = self.con, self.rules
         if not c.enabled:
             return
-        cands = {x["bucket"] for x in buy_candidates(preds, quotes, rules)}
+        cands = {x["bucket"] for x in buy_candidates(preds, quotes, rules, {b.title: b.fees for b in ev.buckets})}
         held = self._held_map(ev)
         c.section(f"MARKET vs OUR MODEL   (tweets so far {self.tweets}, {days_left:.2f} days left, model: {self.model.name})")
         c.say(f"  {'Bucket':>9s} {'Ours':>7s} {'Mkt mid':>8s} {'Bid':>7s} {'Ask':>7s} {'Edge':>8s} {'Held sh':>8s}   Signal")
@@ -569,10 +572,16 @@ class PaperTrader:
 
     def _try_buy(self, ev: Event, now, preds, quotes, blocked: Optional[str] = None):
         acct, rules = self.account, self.rules
-        cands = buy_candidates(preds, quotes, rules)
-        chosen = choose_buy(cands, self.rng)
+        fees_t = {b.title: b.fees for b in ev.buckets}
+        cands = buy_candidates(preds, quotes, rules, fees_t)
+        eq = acct.equity({self._key(ev.slug, t): q for t, q in quotes.items()}, {self._key(ev.slug, t): f for t, f in fees_t.items()}, now.to_pydatetime())
+        held_cost = {p["bucket"]: p["cost_usd"] for p in acct.positions.values() if p["event"] == ev.slug}
+        eligible, rejected = risk_filter(cands, held_cost, [b.title for b in ev.buckets], preds, eq["equity_conservative"],
+                                         acct.state["start_cash"], acct.cash, rules)
+        chosen = choose_buy(eligible, self.rng)
         row = {"ts": now.isoformat(timespec="seconds"), "event": ev.slug, "tweets": self.tweets, "days_left": round(ev.days_left(now), 3),
                "cash": round(acct.cash, 4), "n_candidates": len(cands),
+               "risk_rejected": "; ".join(f"{t}: {w}" for t, w in rejected),
                "candidates": json.dumps([{k: round(v, 4) if isinstance(v, float) else v for k, v in c.items()} for c in cands])}
         self.con.section("BUY DECISION (hourly)")
         self.con.say(f"  rules: our prob >= {rules.min_pred * 100:.0f}%  AND  market ask >= {rules.min_mkt * 100:.0f}%  AND  our prob > ask + {rules.min_edge * 100:.1f}pt"
@@ -583,8 +592,10 @@ class PaperTrader:
             for c in sorted(cands, key=lambda c: -c["edge"]):
                 self.con.say(f"     {c['bucket']:>9s}   ours {c['pred'] * 100:5.1f}%   ask {c['ask'] * 100:5.1f}%   edge {c['edge'] * 100:+5.1f}pt   draw probability {c['edge'] / wsum:.2f}")
         else:
-            self.con.say("  no bucket qualifies. Closest ones and the rule they fail:")
+            self.con.say("  no bucket qualifies (rules incl. positive edge after fees). Closest ones and the rule they fail:")
             self._explain_misses(preds, quotes)
+        for t, w in rejected:
+            self.con.say(f"     risk limit blocks {t}: {w}")
         if blocked:
             row["result"] = f"blocked: {blocked}"
             log.warning("new entries blocked: %s", blocked)
@@ -593,19 +604,29 @@ class PaperTrader:
             row["result"] = "skipped: not enough cash"
             self.con.say(f"  -> skipped: cash ${acct.cash:.2f} is below the ${rules.stake:.2f} stake")
         elif chosen is None:
-            row["result"] = "no candidate"
-            self.con.say("  -> NO BUY this hour")
+            row["result"] = "risk limits block every candidate" if cands else "no candidate"
+            self.con.say("  -> NO BUY this hour" + (" (all candidates blocked by risk limits)" if cands else ""))
         else:
             b = self._bucket(ev, chosen["bucket"])
             q = quotes[chosen["bucket"]]
             fill = buy_with_budget(q.asks, rules.stake, b.fees, max_avg_price=chosen["ask"] + self.max_slippage)
-            if fill is None:
+            net_fill = None
+            if fill is not None:                               # net edge again on the executable fill, not the top of book
+                fill_costs = (fill.fee / fill.shares) + rules.slippage_allowance + (fee_per_share(fill.avg_price, b.fees) if rules.include_exit_fee else 0.0)
+                net_fill = chosen["pred"] - fill.avg_price - fill_costs
+            if fill is not None and net_fill <= rules.min_net_edge + 1e-12:
+                row["result"] = f"rejected: net edge {net_fill * 100:+.2f}pt after executable fill and fees"
+                row["net_edge"] = round(net_fill, 5)
+                self.con.say(f"  -> drew {chosen['bucket']} but the net edge on the real fill is {net_fill * 100:+.2f}pt - no buy")
+            elif fill is None:
                 row["result"] = "order not filled (depth/slippage)"
                 self.con.say(f"  -> drew {chosen['bucket']} but the order could not be filled within {self.max_slippage * 100:.1f}pt of the best ask")
             else:
                 acct.buy(self._key(ev.slug, b.title), ev.slug, b.title, b.token, fill, now,
                          {"pred": round(chosen["pred"], 5), "ask": chosen["ask"], "bid": q.best_bid, "reason": "buy rule",
                           "draw_prob": round(chosen["draw_prob"], 4), "n_candidates": chosen["n_candidates"]})
+                row.update({"gross_edge": round(chosen["pred"] - fill.avg_price, 5), "est_costs": round(fill_costs, 5),
+                            "net_edge": round(net_fill, 5)})
                 row.update({"result": f"BOUGHT {fill.shares:.2f} sh @ {fill.avg_price:.4f} fee {fill.fee:.4f}", "chosen": b.title,
                             "pred": round(chosen["pred"], 4), "ask": chosen["ask"], "edge": round(chosen["edge"], 4),
                             "draw_prob": round(chosen["draw_prob"], 4)})

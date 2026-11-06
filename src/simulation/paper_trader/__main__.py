@@ -39,6 +39,18 @@ def build_parser():
     ap.add_argument("--min-edge", type=float, default=1.0, help="our probability must exceed the ask by more than this, in percentage points")
     ap.add_argument("--sell-below", type=float, default=4.0, help="sell when our probability drops below this, in %%")
     ap.add_argument("--no-bid-sell", action="store_true", help="disable the 'sell when market bid > our probability' rule")
+    rk = ap.add_argument_group("cost / risk / exit controls (experiments - defaults are NOT backtest-validated)")
+    rk.add_argument("--min-net-edge", type=float, default=0.0, help="required edge in points AFTER fees and slippage allowance")
+    rk.add_argument("--slippage-allowance", type=float, default=0.0, help="extra per-share cost assumed in the net edge, in points")
+    rk.add_argument("--no-exit-fee", action="store_true", help="do not count a future exit fee in the net edge")
+    rk.add_argument("--max-bucket-frac", type=float, default=0.25, help="max cost in one bucket, fraction of equity (0 = off)")
+    rk.add_argument("--max-tail-frac", type=float, default=0.40, help="max cost on one side of the most likely bucket, fraction of equity (0 = off)")
+    rk.add_argument("--max-event-frac", type=float, default=0.80, help="max total open cost in the event, fraction of equity (0 = off)")
+    rk.add_argument("--min-cash-reserve", type=float, default=0.0, help="USDC that must stay in cash after a buy")
+    rk.add_argument("--drawdown-stop", type=float, default=0.0, help="no new entries once equity is this fraction below the start (0 = off)")
+    rk.add_argument("--max-sell-slippage", type=float, default=3.0, help="never sell deeper than best bid minus this, in points")
+    rk.add_argument("--sell-hysteresis", type=float, default=0.0, help="'bid > pred' sells only when bid exceeds pred by this, in points")
+    rk.add_argument("--exit-min-ratio", type=float, default=0.0, help="hold a model-driven exit if net proceeds/share < ratio x our probability (0 = off)")
     ap.add_argument("--buy-every", type=int, default=60, help="minutes between buys")
     ap.add_argument("--sell-every", type=int, default=10, help="minutes between ticks / sell checks")
     ap.add_argument("--model-refresh", type=int, default=60, help="minutes between ensemble re-runs")
@@ -87,7 +99,11 @@ def _main(argv=None):
     except AlreadyRunning as ex:
         raise SystemExit(str(ex))
     rules = Rules(stake=a.stake, min_pred=a.min_pred / 100, min_mkt=a.min_mkt / 100, min_edge=a.min_edge / 100,
-                  sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell)
+                  sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell,
+                  min_net_edge=a.min_net_edge / 100, slippage_allowance=a.slippage_allowance / 100, include_exit_fee=not a.no_exit_fee,
+                  max_bucket_frac=a.max_bucket_frac, max_tail_frac=a.max_tail_frac, max_event_frac=a.max_event_frac,
+                  min_cash_reserve=a.min_cash_reserve, drawdown_stop=a.drawdown_stop, max_sell_slippage=a.max_sell_slippage / 100,
+                  sell_hysteresis=a.sell_hysteresis / 100, exit_min_ratio=a.exit_min_ratio)
     try:
         if a.replay:
             feed = ReplayFeed(half_spread=a.half_spread / 100, fee_rate=a.fee_rate, step_min=a.sell_every)

@@ -639,3 +639,129 @@ def test_equity_never_assumes_cost_recovery(tmp_path):
 def taker_fee_(shares, price):
     from src.simulation.paper_trader.fills import taker_fee
     return taker_fee(shares, price, FeeSchedule(0.05, 1.0))
+
+
+# ================================================================ B09 net edge / B10 exposure / B11 exits
+from src.simulation.paper_trader.strategy import buy_candidates, plan_sell, risk_filter, sell_reason
+from src.simulation.paper_trader.fills import sell_shares
+
+HIGH_FEE = FeeSchedule(0.25, 1.0)
+
+
+def test_fees_can_reverse_a_gross_edge():
+    quotes = {"a": Quote([(0.08, 1000)], [(0.09, 1000)])}
+    preds = {"a": 0.1025}                                              # gross 1.25pt > the 1pt rule
+    assert [c["bucket"] for c in buy_candidates(preds, quotes, Rules())] == ["a"]               # no-fee compatibility
+    assert [c["bucket"] for c in buy_candidates(preds, quotes, Rules(), {"a": FeeSchedule(0.05, 1)})] == ["a"]
+    assert buy_candidates(preds, quotes, Rules(), {"a": HIGH_FEE}) == []                        # fees reverse it
+    c = buy_candidates(preds, quotes, Rules(), {"a": FeeSchedule(0.05, 1)})[0]
+    assert c["net_edge"] == pytest.approx(c["edge"] - c["est_costs"]) and c["est_costs"] == pytest.approx(2 * 0.05 * 0.09 * 0.91)
+    assert buy_candidates(preds, quotes, Rules(min_net_edge=0.01), {"a": FeeSchedule(0.05, 1)}) == []   # margin knob
+    assert buy_candidates(preds, quotes, Rules(include_exit_fee=False), {"a": FeeSchedule(0.05, 1)})[0]["est_costs"] == pytest.approx(0.05 * 0.09 * 0.91)
+    cheap = {"a": Quote([(0.04, 1000)], [(0.05, 1000)])}                                       # ~5c contract
+    assert buy_candidates({"a": 0.0625}, cheap, Rules(), {"a": FeeSchedule(0.05, 1)}) == []     # pred < 8% anyway
+    assert len(buy_candidates({"a": 0.10}, cheap, Rules(), {"a": FeeSchedule(0.05, 1)})) == 1
+
+
+def test_buy_rejected_when_the_executable_fill_has_no_net_edge(tmp_path):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    preds = dict(zip([b.title for b in ev.buckets], t.model.probs(ev.ranges, 300, ev.days_left(now)).tolist()))
+    bucket = max(preds, key=preds.get)
+    ask = max(0.0, preds[bucket] - 0.05)
+    t.feed.books = {bucket: Quote([(ask - 0.01, 500)], [(round(ask, 4), 1.0), (round(ask + 0.0095, 4), 500)])}   # 1 share at the touch, rest deeper
+    fees = {b.title: b.fees for b in ev.buckets}
+    top_net = buy_candidates({bucket: preds[bucket]}, t.feed.books, Rules(), fees)[0]["net_edge"]
+    t.rules = Rules(min_net_edge=top_net - 0.004)          # top of book passes, the real (deeper) fill cannot
+    t.tick(now)
+    assert t.account.state["n_buys"] == 0
+    assert "rejected: net edge" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
+
+
+def test_decision_log_records_gross_costs_and_net(tmp_path):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    t.tick(now)
+    r = list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]
+    assert "BOUGHT" in r["result"] and float(r["net_edge"]) == pytest.approx(float(r["gross_edge"]) - float(r["est_costs"]), abs=1e-4)
+
+
+ORDER = ["a", "b", "c", "d", "e"]
+PREDS = {"a": 0.05, "b": 0.20, "c": 0.35, "d": 0.25, "e": 0.15}
+
+
+def cand(t):
+    return {"bucket": t, "pred": PREDS[t], "ask": 0.1, "edge": PREDS[t] - 0.1}
+
+
+def test_risk_limits():
+    r = Rules(stake=1.0, max_bucket_frac=0.2, max_tail_frac=0.3, max_event_frac=0.5, min_cash_reserve=0.0)
+    # bucket cap: 20% of 10 = 2.0 -> a second $1 add fits, a third does not
+    assert risk_filter([cand("d")], {"d": 1.0}, ORDER, PREDS, 10, 10, 9, r)[0]
+    assert not risk_filter([cand("d")], {"d": 2.0}, ORDER, PREDS, 10, 10, 8, r)[0]
+    # tail cap: d and e are both above the modal bucket c; 30% of 10 = 3.0
+    held = {"d": 1.5, "e": 1.5}
+    el, rej = risk_filter([cand("e")], held, ORDER, PREDS, 10, 10, 7, Rules(max_bucket_frac=0.9, max_tail_frac=0.3, max_event_frac=0.9))
+    assert not el and "tail cap" in rej[0][1]
+    assert risk_filter([cand("b")], held, ORDER, PREDS, 10, 10, 7, Rules(max_bucket_frac=0.9, max_tail_frac=0.3, max_event_frac=0.9))[0]   # other side is free
+    # event cap, cash reserve, drawdown stop
+    assert not risk_filter([cand("b")], {"a": 2.5, "c": 2.0}, ORDER, PREDS, 10, 10, 5.5, Rules(max_bucket_frac=0.9, max_tail_frac=0.9, max_event_frac=0.5))[0]
+    assert not risk_filter([cand("b")], {}, ORDER, PREDS, 10, 10, 1.5, Rules(min_cash_reserve=1.0))[0]
+    assert not risk_filter([cand("b")], {}, ORDER, PREDS, 4, 10, 4, Rules(drawdown_stop=0.5))[0]
+    assert risk_filter([cand("b")], {}, ORDER, PREDS, 6, 10, 6, Rules(drawdown_stop=0.5))[0]
+    # a bigger edge does not override a limit
+    big = dict(cand("d"), ask=0.01, edge=0.24)
+    assert not risk_filter([big], {"d": 2.0}, ORDER, PREDS, 10, 10, 8, r)[0]
+
+
+def test_repeated_averaging_down_is_capped_in_the_engine(tmp_path):
+    ev = make_event()
+    feed = FakeFeed()
+    feed.books = {"400-419": Quote([(0.13, 500)], [(0.15, 500)])}       # one attractive bucket, offered every single tick
+    t = PaperTrader(feed, Rules(), str(tmp_path), 12.0, buy_every_min=1, sell_every_min=1, b=1.0, start_after_days=0, chart_every=1000)
+    t.event, t.events["fake"] = ev, ev
+    now = ev.start + pd.Timedelta(days=5)
+    for i in range(30):                                                  # the old code kept buying until cash ran out (~11 buys)
+        t.tick(now + pd.Timedelta(minutes=2 * i))
+    cost = sum(p["cost_usd"] for p in t.account.positions.values())
+    assert 1 <= t.account.state["n_buys"] <= 3 and cost <= 0.25 * 12.0 + 1e-6
+    assert "risk limits" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
+
+
+def test_exit_never_walks_into_disastrous_depth():
+    r = Rules()
+    book = [(0.50, 10), (0.01, 1000)]
+    naive = sell_shares(book, 100, FeeSchedule(0.05, 1))
+    assert naive.shares == 100 and naive.avg_price < 0.1                 # what the old code did: dump at any price
+    fill, why = plan_sell(book, 100, FeeSchedule(0.05, 1), 0.02, "pred 2.0% < 4%", r)
+    assert fill.shares == 10 and fill.avg_price == 0.5                   # partial, only the acceptable level
+    assert plan_sell([], 10, FeeSchedule(), 0.02, "x", r)[0] is None
+    fill, why = plan_sell([(0.004, 5)], 10, FeeSchedule(0.05, 1), 0.039, "pred 3.9% < 4%", Rules(exit_min_ratio=0.5))
+    assert fill is None and "below" in why                               # 0.4c vs 3.9c model value: hold
+    assert plan_sell([(0.004, 5)], 10, FeeSchedule(0.05, 1), 0.039, "pred 3.9% < 4%", Rules())[0] is not None   # default unchanged
+
+
+def test_sell_hysteresis_prevents_borderline_flip():
+    assert sell_reason(0.10, 0.101, Rules(sell_hysteresis=0.01)) is None
+    assert sell_reason(0.10, 0.12, Rules(sell_hysteresis=0.01))
+    assert sell_reason(0.10, 0.101, Rules())                             # default behaviour unchanged
+
+
+def test_partial_exit_keeps_accounting_consistent(tmp_path):
+    ev = make_event()
+    feed = FakeFeed()
+    t = PaperTrader(feed, Rules(), str(tmp_path), 30.0, buy_every_min=60, sell_every_min=10, b=1.0, start_after_days=0, chart_every=1000)
+    t.event, t.events["fake"] = ev, ev
+    f = buy_with_budget([(0.10, 1000)], 3.0, FeeSchedule(0.05, 1.0))
+    t.account.buy("fake|400-419", "fake", "400-419", "tok", f, pd.Timestamp("2026-10-30", tz="UTC"))
+    shares0, cost0, cash0 = f.shares, t.account.positions["fake|400-419"]["cost_usd"], t.account.cash
+    feed.books = {"400-419": Quote([(0.95, 5), (0.01, 1000)], [(0.97, 500)])}
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    t.tick(now)
+    pos = t.account.positions["fake|400-419"]
+    assert pos["shares"] == pytest.approx(shares0 - 5) and pos["cost_usd"] == pytest.approx(cost0 * (shares0 - 5) / shares0)
+    sold = t.account.cash - cash0
+    assert sold == pytest.approx(5 * 0.95 - taker_fee_(5, 0.95), abs=1e-4)

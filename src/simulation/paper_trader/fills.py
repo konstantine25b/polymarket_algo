@@ -33,6 +33,10 @@ def taker_fee(shares: float, price: float, fees: FeeSchedule) -> float:
     return round(shares * fees.rate * (price * (1.0 - price)) ** fees.exponent, 5)
 
 
+def fee_per_share(price: float, fees: FeeSchedule) -> float:
+    return fees.rate * (price * (1.0 - price)) ** fees.exponent
+
+
 def _floor_shares(x: float, decimals: int) -> float:
     k = 10 ** decimals
     return floor(x * k + 1e-9) / k
