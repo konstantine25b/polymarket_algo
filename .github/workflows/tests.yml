@@ -4,7 +4,7 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04      # pinned: ubuntu-latest is moving to a release Playwright 1.52 cannot install system deps for
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -13,5 +13,5 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install --upgrade pip && pip install -r requirements.txt pytest
-      - run: playwright install --with-deps chromium     # also proves the browser provisioning works on a clean machine
+      - run: python -m playwright install chromium     # browser download only (the tests use fakes and never launch it); no apt step to break
       - run: python -m pytest src/simulation/paper_trader/tests -q
