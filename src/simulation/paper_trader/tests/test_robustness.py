@@ -181,3 +181,118 @@ def test_status_log_age_is_timezone_independent(tmp_path, tz, monkeypatch):
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
+
+
+# ================================================================ B04 / B05 tweet download + parser
+GOOD_EXPORT = ('id,text,created_at\n'
+               '1874324392051957998,"HNY LFG 2025!!!","Jan 1, 12:18:52 AM EST"\n'
+               '1874330909589356693,"https://t.co/uON7cFPXnf","Jan 1, 12:44:46 AM EST"\n')
+
+
+def test_validate_export_rejects_bad_downloads(tmp_path):
+    sys.path.insert(0, ROOT)
+    from src.xpath_scraper.TweetCSVGetter import ExportInvalid, validate_export
+    p = tmp_path / "e.csv"
+    with pytest.raises(ExportInvalid):
+        validate_export(str(p))                                         # missing
+    p.write_text("")
+    with pytest.raises(ExportInvalid):
+        validate_export(str(p))                                         # empty
+    p.write_text("<!DOCTYPE html><html><body>Application Error</body></html>")
+    with pytest.raises(ExportInvalid):
+        validate_export(str(p))                                         # Heroku page served with HTTP 200
+    p.write_text("a,b,c\n1,2,3\n")
+    with pytest.raises(ExportInvalid):
+        validate_export(str(p))                                         # wrong schema
+    p.write_text("id,text,created_at\n")
+    with pytest.raises(ExportInvalid):
+        validate_export(str(p))                                         # header only
+    p.write_text(GOOD_EXPORT)
+    assert validate_export(str(p)) == 2
+
+
+def run_formatter(tmp_path):
+    env = dict(os.environ, TWEET_TEMP_DIR=str(tmp_path))
+    return subprocess.run([sys.executable, os.path.join(ROOT, "src/formating_tweet_data/secondFixDates.py")], env=env,
+                          capture_output=True, text=True, cwd=ROOT)
+
+
+def test_formatter_exit_codes(tmp_path):
+    r = run_formatter(tmp_path)                                         # missing input
+    assert r.returncode != 0
+    (tmp_path / "elonmusk.csv").write_text(GOOD_EXPORT)
+    r = run_formatter(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = (tmp_path / "elonmusk_reformatted.csv").read_text()
+    assert "2025:01:01:00:18:52" in out
+    (tmp_path / "elonmusk.csv").write_text(GOOD_EXPORT + '1874341547917140387,"bad date row","not a date"\n')
+    r = run_formatter(tmp_path)                                         # unparseable date -> nonzero, no partial output
+    assert r.returncode != 0 and not (tmp_path / "elonmusk_reformatted.csv").exists()
+    (tmp_path / "elonmusk.csv").write_text("id,text,created_at\n")
+    assert run_formatter(tmp_path).returncode != 0                     # no rows at all
+
+
+def _combiner():
+    sys.path.insert(0, os.path.join(ROOT, "src", "xpath_scraper"))
+    import combiner
+    return combiner
+
+
+T1 = '"1","a","2026:11:01:10:00:00"\n'
+T2 = '"2","b","2026:11:01:11:00:00"\n'
+T3 = '"3","c","2026:11:01:12:00:00"\n'
+HDR = '"id","text","created_at"\n'
+
+
+def test_merge_adds_new_rows_and_reports_result(tmp_path):
+    c = _combiner()
+    (tmp_path / "t.csv").write_text(HDR + T1 + T2)
+    (tmp_path / "s.csv").write_text(HDR + T2 + T3)
+    res = c.merge_files(str(tmp_path / "s.csv"), str(tmp_path / "t.csv"))
+    assert res["new_rows"] == 1 and res["total_rows"] == 3 and res["newest"] == "2026:11:01:12:00:00" and len(res["sha256"]) == 64
+    assert (tmp_path / "t.csv").read_text() == HDR + T1 + T2 + T3
+
+
+@pytest.mark.parametrize("source,target", [
+    (HDR + T3 + 'garbage line\n', HDR + T1 + T2),                       # unparseable line in source
+    (HDR + T3, HDR + T1 + '"2","b","2026-99-99"\n'),                    # target line the rewrite would silently drop
+    (HDR, HDR + T1),                                                    # empty source
+])
+def test_merge_refuses_and_leaves_target_untouched(tmp_path, source, target):
+    c = _combiner()
+    (tmp_path / "t.csv").write_text(target)
+    (tmp_path / "s.csv").write_text(source)
+    with pytest.raises(RuntimeError):
+        c.merge_files(str(tmp_path / "s.csv"), str(tmp_path / "t.csv"))
+    assert (tmp_path / "t.csv").read_text() == target
+    with pytest.raises(RuntimeError):                                   # missing source file
+        c.merge_files(str(tmp_path / "nope.csv"), str(tmp_path / "t.csv"))
+
+
+def _fake_run(stdout="", stderr="", rc=0, calls=None):
+    def run(cmd, **kw):
+        if calls is not None:
+            calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, rc, stdout, stderr)
+    return run
+
+
+def test_refresh_exit0_without_result_is_a_failure(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    f = feeds.LiveFeed()
+    monkeypatch.setattr(feeds.subprocess, "run", _fake_run(stdout="all good\n"))
+    assert f.refresh_tweet_data()["ok"] is False
+    monkeypatch.setattr(feeds.subprocess, "run", _fake_run(stdout='REFRESH_RESULT {"new_rows": 5, "total_rows": 9, "newest": "x", "sha256": "h"}'))
+    r = f.refresh_tweet_data()
+    assert r["ok"] and r["new_tweets"] == 5
+    monkeypatch.setattr(feeds.subprocess, "run", _fake_run(stderr="boom", rc=1))
+    assert f.refresh_tweet_data()["ok"] is False
+
+
+def test_failed_refresh_fails_the_forecast_without_running_the_model(monkeypatch, tmp_path):
+    from src.simulation.paper_trader import feeds
+    calls = []
+    monkeypatch.setattr(feeds.subprocess, "run", _fake_run(stderr="503", rc=1, calls=calls))
+    fc = feeds.LiveFeed().forecast(make_event(), pd.Timestamp("2026-11-03 12:00", tz="UTC"), str(tmp_path))
+    assert fc is None
+    assert len(calls) == 1 and "TweetCSVGetter" in " ".join(calls[0])      # model_worker was never launched

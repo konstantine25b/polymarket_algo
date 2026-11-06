@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -161,43 +162,71 @@ class LiveFeed:
         return int(((t >= lo) & (t <= hi)).sum()), (t.max() if len(t) else None)
 
     def refresh_tweet_data(self) -> dict:
-        """Download the XTracker export and merge it into the CSV (src.xpath_scraper.TweetCSVGetter)."""
+        """Download the XTracker export and merge it into the CSV (src.xpath_scraper.TweetCSVGetter).
+        Success needs exit code 0 AND the pipeline's own REFRESH_RESULT line - exit 0 alone is not proof (B04/B05)."""
         t0 = time.time()
+        info = {"ok": False, "new_tweets": None, "seconds": 0.0}
         try:
             p = subprocess.run([sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"], cwd=ROOT,
                                capture_output=True, text=True, timeout=self.tweet_refresh_timeout)
-            m = re.search(r"Found (\d+) new entries", p.stdout + p.stderr)
-            info = {"ok": p.returncode == 0, "new_tweets": int(m.group(1)) if m else None, "seconds": round(time.time() - t0, 1)}
+            m = re.search(r"REFRESH_RESULT (\{.*\})", p.stdout)
             if p.returncode != 0:
-                info["error"] = (p.stderr or p.stdout)[-300:]
+                info["error"] = f"exit code {p.returncode}: " + (p.stderr or p.stdout)[-300:]
+            elif not m:
+                info["error"] = "refresh exited 0 but reported no REFRESH_RESULT (treated as failure): " + (p.stderr or p.stdout)[-200:]
+            else:
+                res = json.loads(m.group(1))
+                info.update(ok=True, new_tweets=res.get("new_rows"), rows=res.get("total_rows"), newest=res.get("newest"),
+                            sha256=res.get("sha256"))
         except Exception as ex:
-            info = {"ok": False, "new_tweets": None, "seconds": round(time.time() - t0, 1), "error": repr(ex)}
+            info["error"] = repr(ex)
+        info["seconds"] = round(time.time() - t0, 1)
         if info["ok"]:
-            log.info("tweet data refreshed from XTracker: %s new tweets merged (%.0fs)", info["new_tweets"], info["seconds"])
+            log.info("tweet data refreshed from XTracker: %s new tweets merged, %s rows, newest %s (%.0fs)", info["new_tweets"],
+                     info.get("rows"), info.get("newest"), info["seconds"])
         else:
-            log.warning("tweet data refresh FAILED (continuing with the data we have): %s", info.get("error"))
+            log.error("tweet data refresh FAILED: %s", info.get("error"))
         return info
 
     def forecast(self, event: Event, now: pd.Timestamp, out_dir: str, seed: int = 42) -> Optional[dict]:
-        """Refresh tweet data, then run the ensemble in a subprocess. Returns its forecast dict."""
-        self.refresh_tweet_data()
+        """Refresh tweet data, then run the ensemble in a subprocess on an immutable snapshot of the CSV.
+        Any failure (refresh, worker, bad output) returns None - a forecast is never built on data we know is stale."""
+        refresh = self.refresh_tweet_data()
+        if not refresh["ok"]:
+            log.error("forecast aborted: tweet data could not be refreshed, so training data would be stale")
+            return None
         start, end = event.window_et()
         out = os.path.join(out_dir, "forecast.json")
         stamp = now.strftime("%Y%m%d_%H%M")
+        attempt = f"{stamp}_{os.getpid()}_{int(time.time())}"
         log_out = os.path.join(out_dir, "model_logs", f"model_{stamp}.log")
+        err_out = os.path.join(out_dir, "model_logs", f"attempt_{attempt}.stderr")
+        os.makedirs(os.path.dirname(err_out), exist_ok=True)
+        snap = os.path.join(out_dir, "model_logs", f"data_{attempt}.csv")
         try:
+            shutil.copyfile(self.csv_path, snap)                 # the worker reads this snapshot, not the live file
+            if os.path.exists(out):
+                os.remove(out)                                   # never re-read a previous run's result
             p = subprocess.run([sys.executable, "-m", "src.simulation.paper_trader.model_worker", "--start", start,
                                 "--end", end, "--now", now.tz_convert(ET).strftime("%Y-%m-%d %H:%M:%S"),
-                                "--out", out, "--seed", str(seed), "--log-out", log_out], cwd=ROOT, capture_output=True, text=True,
-                               timeout=self.model_timeout)
+                                "--out", out, "--seed", str(seed), "--log-out", log_out, "--data-path", snap,
+                                "--slug", event.slug], cwd=ROOT, capture_output=True, text=True, timeout=self.model_timeout)
+            with open(err_out, "w") as f:                        # keep the worker's full stderr on success AND failure
+                f.write(f"returncode={p.returncode}\n{p.stderr}")
             if p.returncode != 0:
-                log.error("model worker failed: %s", p.stderr[-800:])
+                log.error("model worker failed (rc=%s, full stderr in %s): %s", p.returncode, err_out, p.stderr[-800:])
                 return None
             with open(out) as f:
-                return json.load(f)
+                fc = json.load(f)
+            fc["data_sha256"] = refresh.get("sha256")
+            fc["data_newest"] = refresh.get("newest")
+            return fc
         except Exception as ex:
-            log.error("model worker error: %s", ex)
+            log.error("model worker error: %r", ex)
             return None
+        finally:
+            if os.path.exists(snap):
+                os.remove(snap)
 
     def resolution(self, event: Event) -> Optional[Dict[str, bool]]:
         data = http_get(f"{GAMMA}/events", {"slug": event.slug})

@@ -3,14 +3,17 @@ import os
 from datetime import datetime
 import pytz
 import re
+import sys
 
 # --- Configuration ---
 script_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(script_dir)  # Go up one level from src/formating to src
 
-input_filename = os.path.join(src_dir, 'xpath_scraper', 'temp', 'elonmusk.csv')
-output_filename = os.path.join(src_dir, 'xpath_scraper', 'temp', 'elonmusk_reformatted.csv')
-error_log_filename = os.path.join(src_dir, 'xpath_scraper', 'temp', 'elonmusk_parsing_errors.log')
+# TWEET_TEMP_DIR lets tests (and unusual deployments) point the pipeline somewhere else
+temp_dir = os.environ.get('TWEET_TEMP_DIR') or os.path.join(src_dir, 'xpath_scraper', 'temp')
+input_filename = os.path.join(temp_dir, 'elonmusk.csv')
+output_filename = os.path.join(temp_dir, 'elonmusk_reformatted.csv')
+error_log_filename = os.path.join(temp_dir, 'elonmusk_parsing_errors.log')
 
 print("Starting script...")
 print(f"Input file: {input_filename}")
@@ -124,6 +127,13 @@ try:
             input_data.append([tweet_id, tweet_text, date_str])
 
     print(f"Read {len(input_data)-1} rows from input file.")
+
+    # Integrity gate (B05): every line that starts a record must have been captured by the regex above.
+    expected_records = len(re.findall(r'(?m)^\d+,', content))
+    if len(input_data) - 1 == 0:
+        raise ValueError("input export contains no tweet rows")
+    if expected_records != len(input_data) - 1:
+        raise ValueError(f"parser captured {len(input_data) - 1} records but the file has {expected_records} record starts")
 
     # Process all rows while guaranteeing no data loss
     for i, row in enumerate(input_data[1:], start=1):  # Skip header
@@ -239,6 +249,19 @@ try:
     if not target_found:
         print(f"WARNING: Could not find tweet ID {target_id} in output data!")
 
+    # Zero tolerance (B05): a row we cannot date cannot be placed in the dataset, and the merger would drop it silently.
+    # Fail loudly, leave no partial output, keep the error log for the operator.
+    if error_rows:
+        if os.path.exists(output_filename):
+            os.remove(output_filename)
+        with open(error_log_filename, 'w', encoding='utf-8') as errfile:
+            errfile.write("TWEET PARSING ERROR LOG\n======================\n\n")
+            errfile.write(f"Total errors: {len(error_rows)}\n\n")
+            for err in error_rows:
+                errfile.write(f"{err}\n")
+        print(f"FATAL: {len(error_rows)} row(s) could not be parsed; see {error_log_filename}")
+        sys.exit(1)
+
     # Write output file with proper CSV handling
     with open(output_filename, 'w', newline='', encoding='utf-8') as outfile:
         writer = csv.writer(outfile, quoting=csv.QUOTE_ALL)  # Quote all fields
@@ -277,8 +300,11 @@ try:
     print(f"Note: Dates have been reformatted to YYYY:MM:DD:HH:MM:SS format")
     print("-" * 30)
 
+except SystemExit:
+    raise
 except FileNotFoundError:
     print(f"Error: Input file not found at '{input_filename}'.")
+    sys.exit(1)
 except Exception as e:
     print(f"An unexpected error occurred: {e}")
     import traceback
@@ -291,3 +317,4 @@ except Exception as e:
             errfile.write(f"Global error: {e}\n\n")
             for err in error_rows:
                 errfile.write(f"{err}\n")
+    sys.exit(1)

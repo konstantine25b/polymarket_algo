@@ -14,7 +14,7 @@ import io
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 os.environ.setdefault("MPLBACKEND", "Agg")
@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--end", required=True)
     ap.add_argument("--now", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--slug", default=None, help="event slug this forecast is for (echoed into the output)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--data-path", default=None)
     ap.add_argument("--log-out", default=None, help="file that receives the ensemble's full (very chatty) output")
@@ -67,7 +68,10 @@ def main():
                   f"time left {summary['time_remaining'].total_seconds() / 86400:.2f} days"]
     report = "\n".join(lines) + "\n\n" + dist_buf.getvalue().strip("\n")
     out = {
+        "event_slug": args.slug,
         "generated_for": args.now,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "window_start": args.start, "window_end": args.end,
         "total_predicted": float(summary["total_predicted"]),
         "current_tweets": int(summary["current_tweets"]),
         "time_remaining_days": summary["time_remaining"].total_seconds() / 86400.0,
