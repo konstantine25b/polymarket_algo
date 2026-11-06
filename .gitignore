@@ -179,3 +179,4 @@ neuralprophet_cache/
 .neuralprophet/
 
 src/data/.tweet_refresh.lock
+src/simulation/backtest/cache/
