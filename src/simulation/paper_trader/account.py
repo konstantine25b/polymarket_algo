@@ -25,7 +25,7 @@ log = logging.getLogger("paper_trader")
 TRADE_FIELDS = ["ts", "action", "event", "bucket", "shares", "avg_price", "notional", "fee", "cash_after",
                 "pred", "ask", "bid", "reason", "realized_pnl", "draw_prob", "n_candidates"]
 EQUITY_FIELDS = ["ts", "event", "tweets", "cash", "positions_bid_value", "positions_mid_value",
-                 "equity_conservative", "equity_mid", "open_positions", "fees_paid", "realized_pnl"]
+                 "equity_conservative", "equity_mid", "open_positions", "fees_paid", "realized_pnl", "unquoted_positions", "stale_mark_value"]
 
 
 def _now_iso(ts=None):
@@ -171,26 +171,49 @@ class PaperAccount:
         return realized
 
     # ---- reporting
-    def equity(self, quotes_by_key: Dict[str, "object"], fees: Dict[str, FeeSchedule]) -> dict:
+    def equity(self, quotes_by_key: Dict[str, "object"], fees: Dict[str, FeeSchedule], now=None,
+               mark_max_age_min: float = 60.0) -> dict:
         """
-        Mark open positions: conservative = sell everything at the best bid net of the taker fee
-        (what you'd actually get), mid = at the midpoint (for the chart). Positions without a
-        quote are carried at cost.
+        Mark open positions. conservative = what selling everything at the best bid, net of the taker fee, would give;
+        mid = midpoint (chart only).  A position is NEVER carried at cost (B12):
+          * quoted with a bid          -> bid value (and remembered as the position's last mark)
+          * book present but no bid    -> 0: nothing can be sold
+          * no quote at all (fetch failed / book gone) -> the last mark if it is younger than `mark_max_age_min`
+            (flagged as stale), otherwise 0.
+        The result says how many positions were not fresh-quoted so callers can flag uncertainty.
         """
-        bid_val = mid_val = 0.0
+        now = now or datetime.now(timezone.utc)
+        bid_val = mid_val = stale_val = 0.0
+        unquoted = 0
         for key, pos in self.positions.items():
             q = quotes_by_key.get(key)
-            if q is None or q.best_bid is None:
-                bid_val += pos["cost_usd"]
-                mid_val += pos["cost_usd"]
+            if q is not None and q.best_bid is not None:
+                bid = q.best_bid
+                fs = fees.get(key, FeeSchedule())
+                v_bid = pos["shares"] * bid - taker_fee(pos["shares"], bid, fs)
+                ask = q.best_ask if q.best_ask is not None else bid
+                v_mid = pos["shares"] * (bid + ask) / 2.0
+                pos["last_mark"] = {"ts": _now_iso(now), "bid_value": v_bid, "mid_value": v_mid}
+                bid_val += v_bid
+                mid_val += v_mid
                 continue
-            bid = q.best_bid
-            fs = fees.get(key, FeeSchedule())
-            bid_val += pos["shares"] * bid - taker_fee(pos["shares"], bid, fs)
-            ask = q.best_ask if q.best_ask is not None else bid
-            mid_val += pos["shares"] * (bid + ask) / 2.0
+            unquoted += 1
+            mark = pos.get("last_mark")
+            if q is None and mark:
+                try:
+                    age = (now - datetime.fromisoformat(mark["ts"])).total_seconds() / 60
+                except Exception:
+                    age = float("inf")
+                if age <= mark_max_age_min:
+                    bid_val += mark["bid_value"]
+                    mid_val += mark["mid_value"]
+                    stale_val += mark["bid_value"]
+            # empty bid side, or no usable mark: worth 0 until a bid exists
+        n = len(self.positions)
         return {"cash": self.cash, "positions_bid_value": bid_val, "positions_mid_value": mid_val,
-                "equity_conservative": self.cash + bid_val, "equity_mid": self.cash + mid_val}
+                "equity_conservative": self.cash + bid_val, "equity_mid": self.cash + mid_val,
+                "unquoted_positions": unquoted, "stale_mark_value": stale_val,
+                "held_coverage": 1.0 if n == 0 else (n - unquoted) / n}
 
     def log_equity(self, ts, event: str, tweets, eq: dict):
         append_csv(self.equity_path, EQUITY_FIELDS, {
@@ -199,4 +222,5 @@ class PaperAccount:
             "positions_mid_value": round(eq["positions_mid_value"], 5),
             "equity_conservative": round(eq["equity_conservative"], 5), "equity_mid": round(eq["equity_mid"], 5),
             "open_positions": len(self.positions), "fees_paid": round(self.state["fees_paid"], 5),
-            "realized_pnl": round(self.state["realized_pnl"], 5)})
+            "realized_pnl": round(self.state["realized_pnl"], 5),
+            "unquoted_positions": eq.get("unquoted_positions", ""), "stale_mark_value": round(eq.get("stale_mark_value", 0.0), 5)})

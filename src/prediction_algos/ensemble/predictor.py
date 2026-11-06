@@ -665,6 +665,8 @@ class EnsembleTweetPredictor:
         
         return ensemble_prediction
     
+    MIN_VALID_WEIGHT_FRACTION = 0.5
+
     def _combine_predictions(self, individual_results, additional_predictions, current_time):
         """
         Combine individual model predictions using the normalized weight system.
@@ -680,6 +682,7 @@ class EnsembleTweetPredictor:
         predictions = []
         weights = []
         confidence_intervals = []
+        names = []          # parallel to predictions/weights: (name, kind) recorded ONLY at successful extraction
         
         # Extract predictions and weights from main models using normalized weights
         for model_name, result in individual_results.items():
@@ -738,6 +741,7 @@ class EnsembleTweetPredictor:
                 
                 predictions.append(total_predicted)
                 weights.append(model_weight)
+                names.append((model_name, 'main_model'))
                 
                 # Handle confidence intervals
                 if confidence_interval is None:
@@ -758,6 +762,7 @@ class EnsembleTweetPredictor:
                 if total_predicted is not None:
                     predictions.append(total_predicted)
                     weights.append(method_weight)
+                    names.append((method_name, 'additional_method'))
                     
                     if isinstance(confidence_interval, dict):
                         ci = (confidence_interval.get('lower', total_predicted * 0.9), 
@@ -768,6 +773,14 @@ class EnsembleTweetPredictor:
         
         if not predictions:
             raise ValueError("No valid predictions to combine!")
+        
+        # Minimum-quality policy: if the models that failed carried more than half of the configured weight, the
+        # 're-normalised' result would really be a different (and weaker) ensemble - refuse instead of hiding it.
+        configured = sum(w for w in self.normalized_weights.values() if w > 0)
+        valid_fraction = sum(weights) / configured if configured > 0 else 1.0
+        if valid_fraction < self.MIN_VALID_WEIGHT_FRACTION:
+            raise ValueError(f"only {valid_fraction:.0%} of the ensemble weight produced a prediction "
+                             f"(need {self.MIN_VALID_WEIGHT_FRACTION:.0%}); refusing to forecast")
         
         # Use weights as-is since they're already normalized
         total_weight = sum(weights)
@@ -792,27 +805,10 @@ class EnsembleTweetPredictor:
         # Build model contributions
         model_contributions = {}
         
-        # Add main model contributions
-        main_model_names = list(individual_results.keys())
-        for i, model in enumerate(main_model_names):
-            if i < len(predictions) and model in individual_results:
-                model_contributions[model] = {
-                    'prediction': predictions[i], 
-                    'weight': weights[i],
-                    'type': 'main_model'
-                }
-        
-        # Add additional method contributions  
-        additional_names = list(additional_predictions.keys())
-        main_count = len([m for m in main_model_names if m in individual_results])
-        for i, method in enumerate(additional_names):
-            pred_index = main_count + i
-            if pred_index < len(predictions):
-                model_contributions[method] = {
-                    'prediction': predictions[pred_index], 
-                    'weight': weights[pred_index],
-                    'type': 'additional_method'
-                }
+        # Contributions come from the same records that fed the weighted average, so a skipped model can never
+        # shift another model's prediction/weight onto the wrong name.
+        for (name, kind), pred, w in zip(names, predictions, weights):
+            model_contributions[name] = {'prediction': pred, 'weight': w, 'type': kind}
         
         # Build ensemble result
         ensemble_result = {

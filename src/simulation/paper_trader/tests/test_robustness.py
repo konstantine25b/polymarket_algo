@@ -548,3 +548,94 @@ def test_checkpoint_contains_no_secrets_and_runner_writes_one_per_tick(tmp_path)
     payload, _ = load_latest_valid(str(tmp_path / "checkpoints"))
     assert set(payload) == {"schema", "run", "seq", "ts_utc", "git_commit", "state", "forecast_state", "trades_csv"}
     assert payload["forecast_state"]["event_slug"] == "fake"
+
+
+# ================================================================ B13 ensemble attribution
+class _DP:
+    def get_current_week_data(self, t):
+        return {"current_week_tweets": 100, "time_remaining": pd.Timedelta(days=1)}
+
+
+def _predictor(weights):
+    sys.path.insert(0, os.path.join(ROOT, "src"))
+    from prediction_algos.ensemble.predictor import EnsembleTweetPredictor
+    p = EnsembleTweetPredictor.__new__(EnsembleTweetPredictor)
+    p.normalized_weights = weights
+    p.data_processor = _DP()
+    return p
+
+
+W = {"neural_prophet": 0.4, "facebook_prophet": 0.3, "timesfm": 0.2, "moving_average": 0.1}
+
+
+def _results(skip=None):
+    r = {"neural_prophet": {"prediction_results": {"total_predicted": 100.0}},
+         "facebook_prophet": {"total_predicted": 200.0},
+         "timesfm": {"ensemble_results": {"total_predicted": 300.0}}}
+    if skip:
+        r[skip] = {"error": "model blew up"}              # present but unusable
+    return r
+
+
+@pytest.mark.parametrize("skip", [None, "neural_prophet", "facebook_prophet", "timesfm"])
+def test_contributions_map_each_name_to_its_own_prediction(skip):
+    pred = _predictor(W)
+    out = pred._combine_predictions(_results(skip), {"moving_average": {"total_predicted": 400.0}}, None)
+    c = out["model_contributions"]
+    truth = {"neural_prophet": 100.0, "facebook_prophet": 200.0, "timesfm": 300.0, "moving_average": 400.0}
+    expected = {k: v for k, v in truth.items() if k != skip}
+    assert {k: v["prediction"] for k, v in c.items()} == expected
+    assert sum(v["weight"] for v in c.values()) == pytest.approx(1.0)
+    assert c["moving_average"]["type"] == "additional_method"
+    assert out["total_predicted"] == pytest.approx(sum(expected[k] * c[k]["weight"] for k in expected))
+
+
+def test_too_many_failed_models_is_refused():
+    pred = _predictor(W)
+    bad = {k: {"error": "x"} for k in ("neural_prophet", "facebook_prophet")}
+    bad["timesfm"] = {"ensemble_results": {"total_predicted": 300.0}}
+    with pytest.raises(ValueError):
+        pred._combine_predictions(bad, {}, None)          # only 20% of the weight survived
+
+
+# ================================================================ B12 quote-less equity
+def _held(tmp_path):
+    a = PaperAccount(str(tmp_path), 30.0)
+    f = buy_with_budget([(0.05, 1000)], 1.0, FeeSchedule(0.05, 1.0))
+    a.buy("e|b", "e", "b", "tok", f, pd.Timestamp("2026-11-01 12:00", tz="UTC"))
+    return a, f
+
+
+NOW = pd.Timestamp("2026-11-02 12:00", tz="UTC").to_pydatetime()
+
+
+def test_equity_never_assumes_cost_recovery(tmp_path):
+    a, f = _held(tmp_path)
+    cost = a.positions["e|b"]["cost_usd"]
+    fees = {"e|b": FeeSchedule(0.05, 1.0)}
+    # 1) no quote at all and no prior mark -> 0, flagged (old code returned the cost)
+    eq = a.equity({}, fees, NOW)
+    assert eq["positions_bid_value"] == 0.0 and eq["unquoted_positions"] == 1 and eq["held_coverage"] == 0.0
+    # 2) book with asks but an empty bid side -> nothing is sellable
+    eq = a.equity({"e|b": Quote([], [(0.9, 10)])}, fees, NOW)
+    assert eq["positions_bid_value"] == 0.0 and eq["equity_conservative"] == pytest.approx(a.cash)
+    # 3) quoted -> bid value net of fee, remembered
+    eq = a.equity({"e|b": Quote([(0.02, 1000)], [(0.03, 1000)])}, fees, NOW)
+    assert eq["positions_bid_value"] == pytest.approx(f.shares * 0.02 - taker_fee_(f.shares, 0.02)) and eq["unquoted_positions"] == 0
+    assert eq["positions_bid_value"] < cost
+    # 4) transient failure shortly after: last mark, flagged stale; long after: 0
+    soon = a.equity({}, fees, NOW + pd.Timedelta(minutes=10))
+    assert soon["stale_mark_value"] == pytest.approx(eq["positions_bid_value"]) and soon["unquoted_positions"] == 1
+    late = a.equity({}, fees, NOW + pd.Timedelta(hours=3))
+    assert late["positions_bid_value"] == 0.0
+    # 5) partial coverage
+    a2 = PaperAccount(str(tmp_path / "two"), 30.0)
+    for k in ("x", "y"):
+        a2.buy(f"e|{k}", "e", k, "t", f, pd.Timestamp("2026-11-01", tz="UTC"))
+    eq = a2.equity({"e|x": Quote([(0.05, 100)], [(0.06, 100)])}, {}, NOW)
+    assert eq["held_coverage"] == 0.5
+
+
+def taker_fee_(shares, price):
+    from src.simulation.paper_trader.fills import taker_fee
+    return taker_fee(shares, price, FeeSchedule(0.05, 1.0))

@@ -49,6 +49,10 @@ DECISION_FIELDS = ["ts", "event", "tweets", "days_left", "cash", "n_candidates",
                    "draw_prob", "result", "candidates"]
 
 
+def quotes_to_keys(event, quotes):
+    return {f"{event.slug}|{t}": q for t, q in (quotes or {}).items()} if event is not None else {}
+
+
 class PaperTrader:
     def __init__(self, feed, rules: Rules, run_dir: str, bankroll: float = 30.0, pred_source: str = "calibrated",
                  buy_every_min: int = 60, sell_every_min: int = 10, model_refresh_min: int = 60, seed: int = 42,
@@ -408,8 +412,12 @@ class PaperTrader:
         # ---- equity, charts
         qk = {self._key(ev.slug, t): q for t, q in quotes.items()}
         fees = {self._key(ev.slug, b.title): b.fees for b in ev.buckets}
-        eq = acct.equity(qk, fees)
+        eq = acct.equity(qk, fees, now.to_pydatetime())
+        if eq["unquoted_positions"]:
+            log.warning("%d of %d open position(s) have no live bid - valued at last mark (%.2f stale) or 0, not at cost",
+                        eq["unquoted_positions"], len(acct.positions), eq["stale_mark_value"])
         acct.log_equity(now, ev.slug, self.tweets, eq)
+        acct.save()          # persists the refreshed marks
         held = {p["bucket"] for p in acct.positions.values() if p["event"] == ev.slug}
         if self.ticks % self.chart_every == 0:
             plot_market(self.run_dir, f"{ev.title}  |  {now.tz_convert('US/Eastern'):%a %b %d %H:%M} ET  |  {days_left:.2f} days left",
@@ -481,7 +489,7 @@ class PaperTrader:
                 q = quotes.get(t)
                 bid = q.best_bid if q else None
                 b = self._bucket(ev, t)
-                val = (pos["shares"] * bid - taker_fee(pos["shares"], bid, b.fees)) if bid is not None and b else pos["cost_usd"]
+                val = (pos["shares"] * bid - taker_fee(pos["shares"], bid, b.fees)) if bid is not None and b else 0.0
                 c.say(f"  {t:>9s} {pos['shares']:8.2f} {pos['cost_usd']:8.2f} {pos['cost_usd'] / pos['shares'] * 100:8.1f}% "
                       f"{(bid * 100 if bid is not None else float('nan')):6.1f}% {val:10.2f} {val - pos['cost_usd']:+12.2f} {preds.get(t, 0) * 100:6.1f}%")
             c.say("  (value = shares x best bid minus the taker fee for selling them)")
@@ -612,7 +620,7 @@ class PaperTrader:
         append_csv(os.path.join(self.run_dir, "decisions.csv"), DECISION_FIELDS, row)
 
     def _log_equity_only(self, now, quotes=None):
-        eq = self.account.equity({}, {})
+        eq = self.account.equity(quotes_to_keys(self.event, quotes), {}, now.to_pydatetime())
         self.account.log_equity(now, self.event.slug if self.event else "", self.tweets, eq)
         plot_equity(self.run_dir, self.account.state["start_cash"])
 
@@ -667,7 +675,7 @@ class PaperTrader:
         # market over -> settle
         end = ev.end + pd.Timedelta(minutes=1)
         self._settle_finished(end)
-        self.account.log_equity(end, slug, self.tweets, self.account.equity({}, {}))   # final point, after settlement
+        self.account.log_equity(end, slug, self.tweets, self.account.equity({}, {}, end.to_pydatetime()))   # final point, after settlement
         plot_equity(self.run_dir, self.account.state["start_cash"])
         write_summary(self.run_dir, self.account.state, {"event": slug, "mode": "replay"})
         return self.account.state
