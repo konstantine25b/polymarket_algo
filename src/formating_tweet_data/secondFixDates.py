@@ -129,7 +129,8 @@ try:
     print(f"Read {len(input_data)-1} rows from input file.")
 
     # Integrity gate (B05): every line that starts a record must have been captured by the regex above.
-    expected_records = len(re.findall(r'(?m)^\d+,', content))
+    # real tweet ids are 15+ digit snowflakes followed by a quoted text field; tweet text can contain lines like '100,000 humans'
+    expected_records = len(re.findall(r'(?m)^\d{15,20},"', content))
     if len(input_data) - 1 == 0:
         raise ValueError("input export contains no tweet rows")
     if expected_records != len(input_data) - 1:

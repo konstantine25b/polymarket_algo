@@ -178,3 +178,4 @@ model_weights/
 neuralprophet_cache/
 .neuralprophet/
 
+src/data/.tweet_refresh.lock

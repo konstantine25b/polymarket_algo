@@ -37,7 +37,7 @@ def validate_export(path: str, min_rows: int = 1):
     if tuple(first[:3]) != EXPECTED_HEADER:
         raise ExportInvalid(f"unexpected CSV header: {first[:5]}")
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        rows = sum(1 for line in f if re.match(r"\d+,", line))
+        rows = sum(1 for line in f if re.match(r'\d{15,20},"', line))
     if rows < min_rows:
         raise ExportInvalid(f"export has {rows} tweet rows (need >= {min_rows})")
     return rows
