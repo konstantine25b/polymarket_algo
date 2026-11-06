@@ -7,15 +7,40 @@ the light rules were chosen on the TRAIN markets with the 2 h-lag table only.
 
 | rules / data | markets | mean $/wk | median | worst | weeks > 0 | weeks losing > 50% | buys |
 |---|---|---|---|---|---|---|---|
-| light, zero lag (perfect real-time count), train | 64 | +2.44 | +1.01 | -7.0 | 61% | 0% | 226 |
-| light, zero lag (perfect real-time count), TEST | 33 | +1.70 | +1.82 | -4.0 | 64% | 0% | 106 |
-| light, count 1 h behind, lag-corrected, train | 64 | +0.80 | -0.58 | -5.0 | 42% | 0% | 203 |
-| light, count 1 h behind, lag-corrected, TEST | 33 | +1.09 | +0.78 | -4.0 | 58% | 0% | 97 |
-| light, count 2 h behind, lag-corrected, train | 64 | +0.81 | -0.38 | -5.3 | 45% | 0% | 222 |
-| light, count 2 h behind, lag-corrected, TEST | 33 | +0.86 | +0.96 | -4.0 | 55% | 0% | 109 |
-| light, count 3 h behind, lag-corrected, train | 64 | +0.77 | -0.49 | -5.8 | 47% | 0% | 237 |
-| light, count 3 h behind, lag-corrected, TEST | 33 | +0.88 | +0.64 | -4.2 | 55% | 0% | 115 |
-| OLD rules, zero lag, train | 64 | +43.94 | -15.16 | -39.7 | 36% | 44% | 3134 |
-| OLD rules, zero lag, TEST | 33 | -12.52 | -34.17 | -39.8 | 15% | 70% | 1486 |
-| OLD rules, 2 h lag, train | 64 | +11.64 | -39.03 | -39.9 | 20% | 67% | 2745 |
-| OLD rules, 2 h lag, TEST | 33 | -28.30 | -39.24 | -40.0 | 6% | 94% | 1371 |
+| light, zero lag (perfect real-time count), train | 64 | +2.56 | +1.36 | -7.0 | 69% | 0% | 226 |
+| light, zero lag (perfect real-time count), TEST | 33 | +1.74 | +2.03 | -4.4 | 64% | 0% | 106 |
+| light, count 1 h behind, lag-corrected, train | 64 | +0.80 | +0.29 | -6.2 | 53% | 0% | 203 |
+| light, count 1 h behind, lag-corrected, TEST | 33 | +0.71 | +0.74 | -8.5 | 55% | 0% | 97 |
+| light, count 2 h behind, lag-corrected, train | 64 | +0.79 | +0.23 | -5.3 | 52% | 0% | 222 |
+| light, count 2 h behind, lag-corrected, TEST | 33 | +0.49 | +0.63 | -5.4 | 55% | 0% | 109 |
+| light, count 3 h behind, lag-corrected, train | 64 | +0.81 | +0.14 | -5.9 | 52% | 0% | 237 |
+| light, count 3 h behind, lag-corrected, TEST | 33 | +0.51 | +0.20 | -6.9 | 52% | 0% | 115 |
+| OLD rules, zero lag, train | 64 | +44.85 | -14.02 | -39.7 | 38% | 44% | 3093 |
+| OLD rules, zero lag, TEST | 33 | -12.26 | -34.37 | -39.8 | 15% | 67% | 1471 |
+| OLD rules, 2 h lag, train | 64 | +11.71 | -39.05 | -39.9 | 20% | 69% | 2715 |
+| OLD rules, 2 h lag, TEST | 33 | -28.08 | -39.24 | -40.0 | 6% | 91% | 1361 |
+
+## One $40 account, never topped up, winnings reinvested (chain of non-overlapping markets, like the live bot)
+
+Stake/caps follow CURRENT equity. Each step = one market segment (~3.5 days). First 2/3 of markets = train, last 1/3 = TEST; each starts from $40.
+
+| count freshness | sizing | selling | train: end $ (max drawdown) | TEST: end $ (max drawdown, lowest equity) |
+|---|---|---|---|---|
+| zero lag (perfect real-time count) | fixed $1 | hold | $204 (14%) | $98 (11%, low $38) |
+| zero lag (perfect real-time count) | fixed $1 | sell if bid > prob + 5pt | $379 (6%) | $196 (6%, low $40) |
+| zero lag (perfect real-time count) | Kelly 0.25, $1-$3 | hold | $497 (21%) | $136 (21%, low $38) |
+| zero lag (perfect real-time count) | Kelly 0.25, $1-$3 | sell if bid > prob + 5pt | $869 (10%) | $387 (9%, low $40) |
+| zero lag (perfect real-time count) | Kelly 0.15, $1-$3 | hold | $463 (23%) | $99 (15%, low $39) |
+| zero lag (perfect real-time count) | Kelly 0.15, $1-$3 | sell if bid > prob + 5pt | $835 (11%) | $343 (9%, low $40) |
+| count 2 h behind, lag-corrected | fixed $1 | hold | $90 (28%) | $56 (34%, low $34) |
+| count 2 h behind, lag-corrected | fixed $1 | sell if bid > prob + 5pt | $60 (44%) | $50 (52%, low $19) |
+| count 2 h behind, lag-corrected | Kelly 0.25, $1-$3 | hold | $164 (34%) | $43 (58%, low $21) |
+| count 2 h behind, lag-corrected | Kelly 0.25, $1-$3 | sell if bid > prob + 5pt | $82 (54%) | $43 (68%, low $13) |
+| count 2 h behind, lag-corrected | Kelly 0.15, $1-$3 | hold | $141 (32%) | $51 (44%, low $29) |
+| count 2 h behind, lag-corrected | Kelly 0.15, $1-$3 | sell if bid > prob + 5pt | $79 (44%) | $49 (54%, low $18) |
+| count 3 h behind, lag-corrected | fixed $1 | hold | $92 (28%) | $57 (33%, low $37) |
+| count 3 h behind, lag-corrected | fixed $1 | sell if bid > prob + 5pt | $45 (46%) | $36 (48%, low $23) |
+| count 3 h behind, lag-corrected | Kelly 0.25, $1-$3 | hold | $144 (52%) | $65 (53%, low $26) |
+| count 3 h behind, lag-corrected | Kelly 0.25, $1-$3 | sell if bid > prob + 5pt | $51 (59%) | $27 (69%, low $14) |
+| count 3 h behind, lag-corrected | Kelly 0.15, $1-$3 | hold | $155 (39%) | $54 (40%, low $32) |
+| count 3 h behind, lag-corrected | Kelly 0.15, $1-$3 | sell if bid > prob + 5pt | $58 (46%) | $34 (53%, low $20) |

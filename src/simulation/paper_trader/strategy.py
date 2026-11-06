@@ -47,6 +47,11 @@ class Rules:
     top_k: int = 0                  # only buckets ranked in the model's top K by probability may be bought (0 = any)
     max_adds: int = -1              # extra buys allowed in a bucket already held (0 = never average down, -1 = unlimited)
     pick_best: bool = False         # buy the candidate with the best net edge instead of a random draw weighted by edge
+    # --- sizing: stake is the minimum order ($1). kelly > 0 sizes each buy as kelly * equity * (p - ask) / (1 - ask), at least
+    # `stake`, at most `max_stake`. Whatever the rule, an order must be >= `min_shares` shares (Polymarket CLOB min_order_size).
+    kelly: float = 0.0
+    max_stake: float = 3.0
+    min_shares: float = 5.0
 
     def as_dict(self):
         return asdict(self)
@@ -89,6 +94,15 @@ def buy_candidates(preds: Dict[str, float], quotes: Dict[str, Quote], rules: Rul
     return out
 
 
+def size_stake(rules: Rules, pred: float, ask: float, fees: FeeSchedule, equity: float) -> float:
+    """Dollars (fee included) to spend on one buy. Rounded UP to the cent so the 5-share minimum is really met."""
+    stake = rules.stake
+    if rules.kelly > 0 and ask < 1.0:
+        stake = min(max(rules.kelly * equity * max(pred - ask, 0.0) / (1.0 - ask), rules.stake), rules.max_stake)
+    stake = max(stake, rules.min_shares * (ask + fee_per_share(ask, fees)))
+    return float(np.ceil(stake * 100 - 1e-9) / 100)
+
+
 def net_costs(price: float, fees: FeeSchedule, rules: Rules) -> float:
     """Per-share cost of getting in (taker fee at `price`) and, conservatively, back out again, plus the slippage allowance."""
     c = fee_per_share(price, fees) + rules.slippage_allowance
@@ -105,7 +119,6 @@ def risk_filter(cands: Sequence[dict], held_cost: Dict[str, float], order: Seque
     group: they are mutually exclusive outcomes driven by the same forecast error, so they are capped together.
     Returns (eligible, [(bucket, reason)]). A lower ask or a bigger edge never overrides a limit.
     """
-    stake = rules.stake
     rejected: List[Tuple[str, str]] = []
     modal = max(order, key=lambda t: preds.get(t, 0.0)) if order else None
     idx = {t: i for i, t in enumerate(order)}
@@ -120,6 +133,7 @@ def risk_filter(cands: Sequence[dict], held_cost: Dict[str, float], order: Seque
     eligible = []
     for c in cands:
         t = c["bucket"]
+        stake = c.get("stake", rules.stake)
         why = None
         if rules.max_adds >= 0 and buys_in_bucket and buys_in_bucket.get(t, 0) > rules.max_adds:
             why = f"no averaging down: already bought {buys_in_bucket[t]}x (max adds {rules.max_adds})"

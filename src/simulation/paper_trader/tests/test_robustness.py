@@ -676,7 +676,7 @@ def test_buy_rejected_when_the_executable_fill_has_no_net_edge(tmp_path):
     t.feed.books = {bucket: Quote([(ask - 0.01, 500)], [(round(ask, 4), 1.0), (round(ask + 0.0095, 4), 500)])}   # 1 share at the touch, rest deeper
     fees = {b.title: b.fees for b in ev.buckets}
     top_net = buy_candidates({bucket: preds[bucket]}, t.feed.books, Rules(), fees)[0]["net_edge"]
-    t.rules = Rules(min_net_edge=top_net - 0.004)          # top of book passes, the real (deeper) fill cannot
+    t.rules = Rules(min_net_edge=top_net - 0.004, min_shares=0.0)          # top of book passes, the real (deeper) fill cannot
     t.tick(now)
     assert t.account.state["n_buys"] == 0
     assert "rejected: net edge" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
@@ -973,3 +973,43 @@ def test_bid_sell_margin_opt_in():
     r = Rules(sell_if_bid_above_pred=True, sell_hysteresis=0.05, sell_below=0.0)
     assert sell_reason(0.60, 0.80, r)                                                  # market pays 80% for what we value at 60%
     assert sell_reason(0.60, 0.63, r) is None
+
+
+# ================================================================ order sizing (kelly option, 5-share minimum)
+from src.simulation.paper_trader.strategy import size_stake
+
+F05 = FeeSchedule(0.05, 1.0)
+
+
+def test_min_five_shares_raises_the_order_above_one_dollar():
+    r = Rules()                                                   # fixed $1 stake
+    assert size_stake(r, 0.30, 0.10, F05, 40) == 1.0              # 1 dollar buys ~9.9 shares: fine
+    s = size_stake(r, 0.45, 0.30, F05, 40)                        # at 30c, $1 buys only 3 shares -> must be 5 shares' cost
+    assert s == pytest.approx(5 * (0.30 + 0.05 * 0.3 * 0.7), abs=0.011) and s > 1.0
+    assert buy_with_budget([(0.30, 1000)], s, F05).shares >= 5.0
+
+
+def test_kelly_sizing_scales_with_edge_and_equity_and_is_bounded():
+    r = Rules(kelly=0.25, max_stake=3.0)
+    small = size_stake(r, 0.15, 0.12, F05, 40)                    # tiny edge -> the $1 minimum
+    big = size_stake(r, 0.45, 0.20, F05, 40)                      # big edge -> more, but never above max_stake
+    assert small == 1.0 and 1.0 < big <= 3.0
+    assert size_stake(r, 0.45, 0.20, F05, 400) == 3.0             # a bigger account hits the cap
+    assert size_stake(r, 0.45, 0.20, F05, 10) < big               # a shrunken account bets less (winnings are reinvested, losses shrink it)
+    assert size_stake(Rules(kelly=0.0), 0.45, 0.10, F05, 400) == 1.0   # off by default
+
+
+def test_engine_never_places_an_order_below_5_shares_or_1_dollar(tmp_path):
+    ev, feed = light_event(), LightFeed()
+    rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, include_exit_fee=False, sell_below=0.0,
+                  sell_if_bid_above_pred=False, top_k=2, max_adds=0, pick_best=True, kelly=0.25, max_stake=3.0)
+    feed.mult = 0.5
+    t = PaperTrader(feed, rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    for h in range(96, 7 * 24):
+        t.tick(ev.start + pd.Timedelta(hours=h))
+    buys = [x for x in csv.DictReader(open(tmp_path / "trades.csv")) if x["action"] == "BUY"]
+    assert buys
+    for x in buys:
+        assert float(x["shares"]) >= 5.0 - 1e-9 and float(x["notional"]) + float(x["fee"]) >= 0.99
+        assert float(x["notional"]) + float(x["fee"]) <= 3.0 + 0.5

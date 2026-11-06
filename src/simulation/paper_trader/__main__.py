@@ -43,6 +43,11 @@ def build_parser():
                          "legacy = the original rules + Prophet/TimesFM ensemble. Any explicit flag overrides the preset.")
     ap.add_argument("--top-k", type=int, default=None, help="only buy buckets ranked in the model's top K (0 = any)")
     ap.add_argument("--max-adds", type=int, default=None, help="extra buys allowed in a bucket already held (0 = never average down, -1 = unlimited)")
+    ap.add_argument("--kelly", type=float, default=0.0,
+                    help="size buys as KELLY x equity x (p-ask)/(1-ask), between --stake and --max-stake (0 = always --stake). Bigger orders when the edge is big; "
+                         "backtest: helps with a real-time tweet count, adds drawdown without clear gain when the count lags")
+    ap.add_argument("--max-stake", type=float, default=3.0, help="largest single order in USDC when --kelly is on")
+    ap.add_argument("--min-shares", type=float, default=5.0, help="Polymarket CLOB minimum order size in shares (orders are raised to this)")
     ap.add_argument("--pick-random", action="store_true", help="draw the bucket at random (weight = edge) instead of taking the best net edge")
     ap.add_argument("--max-data-age-h", type=float, default=36.0, help="light model: no new buys if the newest tweet in our history is older than this")
     ap.add_argument("--count-lag-h", type=float, default=0.0, help="light model: hours the tweet count lags reality; the expected unseen tweets are added")
@@ -132,6 +137,7 @@ def _main(argv=None):
         raise SystemExit(str(ex))
     rules = Rules(stake=a.stake, min_pred=a.min_pred / 100, min_mkt=a.min_mkt / 100, min_edge=a.min_edge / 100,
                   sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell, top_k=a.top_k, max_adds=a.max_adds, pick_best=a.pick_best,
+                  kelly=a.kelly, max_stake=a.max_stake, min_shares=a.min_shares,
                   min_net_edge=a.min_net_edge / 100, slippage_allowance=a.slippage_allowance / 100, include_exit_fee=not a.no_exit_fee,
                   max_bucket_frac=a.max_bucket_frac, max_tail_frac=a.max_tail_frac, max_event_frac=a.max_event_frac,
                   min_cash_reserve=a.min_cash_reserve, drawdown_stop=a.drawdown_stop, max_sell_slippage=a.max_sell_slippage / 100,

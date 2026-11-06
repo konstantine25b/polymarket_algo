@@ -38,6 +38,12 @@ class Strat:
     fee_rate: float = 0.05
     half_spread: float = 0.01
     bankroll: float = 40.0
+    # --- sizing. stake_tiers = ((min net edge, stake $), ...) ascending; kelly > 0 sizes by fractional Kelly instead.
+    stake_tiers: tuple = ()
+    kelly: float = 0.0
+    max_stake: float = 5.0
+    min_stake: float = 1.0          # Polymarket minimum market order
+    min_shares: float = 5.0         # CLOB min_order_size for these markets
 
 
 def prep(df: pd.DataFrame):
@@ -50,7 +56,7 @@ def prep(df: pd.DataFrame):
         mk = np.nan_to_num(mid, nan=0.0)
         s = mk.sum(axis=1, keepdims=True)
         mk = np.where(s > 0, mk / np.where(s > 0, s, 1), 1.0 / mid.shape[1])
-        evs.append({"slug": slug, "end": g.t.iloc[-1], "mid": mid, "model": model, "mk": mk, "into": g.hours_into.values,
+        evs.append({"slug": slug, "end": g.t.iloc[-1], "t": g.t.values, "mid": mid, "model": model, "mk": mk, "into": g.hours_into.values,
                     "left": g.hours_left.values, "winner": int(g.winner.iloc[0])})
     evs.sort(key=lambda e: e["end"])
     return evs
@@ -93,17 +99,28 @@ def run_event(e, S: Strat):
         if not cand.any():
             continue
         b = int(np.argmax(np.where(cand, net, -9)))
-        sh = S.stake / (ask[b] + fee_ps[b])
+        stake = S.stake
+        if S.kelly > 0:
+            stake = S.kelly * S.bankroll * max(p[b] - ask[b], 0.0) / (1.0 - ask[b])
+        else:
+            for thr, st in S.stake_tiers:
+                if net[b] >= thr:
+                    stake = st
+        stake = min(max(stake, S.min_stake, S.min_shares * (ask[b] + fee_ps[b])), S.max_stake if S.kelly > 0 or S.stake_tiers else 1e9)
+        stake = np.ceil(stake * 100) / 100
+        if cash < stake or cost[b] + stake > S.max_bucket_frac * S.bankroll + 1e-9 or cost.sum() + stake > S.max_event_frac * S.bankroll + 1e-9:
+            continue
+        sh = stake / (ask[b] + fee_ps[b])
         f = sh * fee_ps[b]
-        cash -= S.stake
+        cash -= stake
         fees_paid += f
         if shares[b] > 0:
             adds[b] += 1
         shares[b] += sh
-        cost[b] += S.stake
+        cost[b] += stake
         buys += 1
     cash += shares[e["winner"]]                                             # settlement: winner pays $1
-    return {"pnl": cash - S.bankroll, "buys": buys, "sells": sells, "fees": fees_paid, "spent": float(cost.sum()) + 0.0}
+    return {"final_cash": cash, "pnl": cash - S.bankroll, "buys": buys, "sells": sells, "fees": fees_paid, "spent": float(cost.sum()) + 0.0}
 
 
 def evaluate(evs: List[dict], S: Strat):
@@ -113,3 +130,38 @@ def evaluate(evs: List[dict], S: Strat):
     return {"n": len(evs), "total": pnl.sum(), "mean": pnl.mean(), "median": float(np.median(pnl)), "std": pnl.std(),
             "worst": pnl.min(), "best": pnl.max(), "win_rate": float((pnl > 0).mean()), "buys": buys,
             "bad_weeks": float((pnl < -0.5 * S.bankroll).mean()), "fees": sum(r["fees"] for r in rows)}
+
+
+def _slice(e, mask):
+    return {**e, **{k: e[k][mask] for k in ("t", "mid", "model", "mk", "into", "left")}}
+
+
+def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: bool = True):
+    """
+    ONE account, never topped up, trading the way the live bot does: one weekly market at a time, rolling to the market
+    that ends next once the current one is over. Stakes, tiers and caps follow CURRENT equity (winnings are reinvested,
+    losses shrink the account). Returns the equity path (one point per market) and per-market results.
+    """
+    evs = sorted(evs, key=lambda e: e["end"])
+    cash, cur_end, path, rows = start_cash, None, [start_cash], []
+    for e in evs:
+        if cur_end is not None and e["end"] <= cur_end + pd.Timedelta(hours=1):
+            continue
+        mask = np.ones(len(e["t"]), bool) if cur_end is None else (e["t"] >= np.datetime64(cur_end.tz_convert("UTC").tz_localize(None)))
+        if mask.sum() < 24:
+            continue
+        sc = cash / start_cash
+        S2 = replace(S, bankroll=cash, stake_tiers=tuple((th, st * sc) for th, st in S.stake_tiers) if scale_tiers else S.stake_tiers)
+        r = run_event(_slice(e, mask), S2)
+        cash = r["final_cash"]
+        cur_end = e["end"]
+        path.append(cash)
+        rows.append({"slug": e["slug"], **r})
+        if cash < 1.0:
+            break                                                     # cannot place the minimum order any more
+    path = np.array(path)
+    peak = np.maximum.accumulate(path)
+    wk = np.diff(path) / path[:-1]
+    return {"weeks": len(path) - 1, "final": path[-1], "ret_pct": (path[-1] / start_cash - 1) * 100, "max_dd_pct": float(((peak - path) / peak).max() * 100),
+            "weeks_up": float((wk > 0).mean()) if len(wk) else 0.0, "worst_week_pct": float(wk.min() * 100) if len(wk) else 0.0,
+            "min_equity": float(path.min()), "buys": sum(r["buys"] for r in rows)}

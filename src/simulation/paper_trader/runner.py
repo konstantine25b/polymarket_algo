@@ -39,7 +39,7 @@ from .checkpoint import write_checkpoint
 from .procutil import atomic_write_json, write_heartbeat
 from .light_model import LightPredictor
 from .model import CalibratedModel, ForecastError, NativeEnsembleModel, validate_forecast
-from .strategy import Quote, Rules, buy_candidates, choose_buy, net_costs, plan_sell, risk_filter, sell_reason
+from .strategy import Quote, Rules, buy_candidates, choose_buy, net_costs, plan_sell, risk_filter, sell_reason, size_stake
 
 log = logging.getLogger("paper_trader")
 DATA_FIELDS = ["ts", "event", "polymarket_count", "csv_count", "diff", "csv_newest_tweet", "count_used", "count_source",
@@ -635,6 +635,8 @@ class PaperTrader:
         fees_t = {b.title: b.fees for b in ev.buckets}
         cands = buy_candidates(preds, quotes, rules, fees_t)
         eq = acct.equity({self._key(ev.slug, t): q for t, q in quotes.items()}, {self._key(ev.slug, t): f for t, f in fees_t.items()}, now.to_pydatetime())
+        for c in cands:                                         # per-candidate order size (Kelly option + 5-share minimum)
+            c["stake"] = size_stake(rules, c["pred"], c["ask"], fees_t[c["bucket"]], eq["equity_conservative"])
         held_cost = {p["bucket"]: p["cost_usd"] for p in acct.positions.values() if p["event"] == ev.slug}
         eligible, rejected = risk_filter(cands, held_cost, [b.title for b in ev.buckets], preds, eq["equity_conservative"],
                                          acct.state["start_cash"], acct.cash, rules,
@@ -657,20 +659,23 @@ class PaperTrader:
             self._explain_misses(preds, quotes)
         for t, w in rejected:
             self.con.say(f"     risk limit blocks {t}: {w}")
+        stake = chosen["stake"] if chosen else rules.stake
         if blocked:
             row["result"] = f"blocked: {blocked}"
             log.warning("new entries blocked: %s", blocked)
             self.con.say(f"  -> NO BUY: {blocked}")
-        elif acct.cash < rules.stake - 1e-9:
+        elif acct.cash < stake - 1e-9:
             row["result"] = "skipped: not enough cash"
-            self.con.say(f"  -> skipped: cash ${acct.cash:.2f} is below the ${rules.stake:.2f} stake")
+            self.con.say(f"  -> skipped: cash ${acct.cash:.2f} is below the ${stake:.2f} order")
         elif chosen is None:
             row["result"] = "risk limits block every candidate" if cands else "no candidate"
             self.con.say("  -> NO BUY this hour" + (" (all candidates blocked by risk limits)" if cands else ""))
         else:
             b = self._bucket(ev, chosen["bucket"])
             q = quotes[chosen["bucket"]]
-            fill = buy_with_budget(q.asks, rules.stake, b.fees, max_avg_price=chosen["ask"] + self.max_slippage)
+            fill = buy_with_budget(q.asks, stake, b.fees, max_avg_price=chosen["ask"] + self.max_slippage)
+            if fill is not None and fill.shares + 1e-9 < rules.min_shares:
+                fill = None                                   # would be below Polymarket's 5-share minimum order
             net_fill = None
             if fill is not None:                               # net edge again on the executable fill, not the top of book
                 fill_costs = (fill.fee / fill.shares) + rules.slippage_allowance + (fee_per_share(fill.avg_price, b.fees) if rules.include_exit_fee else 0.0)

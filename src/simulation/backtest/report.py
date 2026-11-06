@@ -8,7 +8,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from src.simulation.backtest.data import CACHE                  # noqa: E402
-from src.simulation.backtest.sim import Strat, evaluate, prep   # noqa: E402
+from dataclasses import replace                                   # noqa: E402
+from src.simulation.backtest.sim import Strat, evaluate, prep, run_chain   # noqa: E402
 
 LIGHT = Strat(w=1.0, top_k=2, min_p=0.10, min_edge=0.02, min_ask=0.02, max_adds=0, start_after_h=96, sell_below=None)
 OLD = Strat(w=1.0, top_k=99, min_p=0.08, min_edge=0.01, min_ask=0.03, max_adds=999, sell_below=0.04, max_bucket_frac=9, max_event_frac=9)
@@ -39,6 +40,17 @@ def main():
     evs = prep(pd.read_pickle(CACHE / "table_lag2_stale6_corr.pkl"))
     for part, ev in (("train", evs[:cut]), ("TEST", evs[cut:])):
         out.append(line(f"OLD rules, 2 h lag, {part}", evaluate(ev, OLD)))
+    out += ["", "## One $40 account, never topped up, winnings reinvested (chain of non-overlapping markets, like the live bot)", "",
+            "Stake/caps follow CURRENT equity. Each step = one market segment (~3.5 days). First 2/3 of markets = train, last 1/3 = TEST; each starts from $40.", "",
+            "| count freshness | sizing | selling | train: end $ (max drawdown) | TEST: end $ (max drawdown, lowest equity) |", "|---|---|---|---|---|"]
+    sizing = {"fixed $1": LIGHT, "Kelly 0.25, $1-$3": replace(LIGHT, kelly=0.25, max_stake=3.0), "Kelly 0.15, $1-$3": replace(LIGHT, kelly=0.15, max_stake=3.0)}
+    for tname, f in (TABLES[0], TABLES[2], TABLES[3]):
+        evs = prep(pd.read_pickle(CACHE / f))
+        cut = len(evs) * 2 // 3
+        for sk, S in sizing.items():
+            for sb, sl in ((None, "hold"), (0.05, "sell if bid > prob + 5pt")):
+                a, b = (run_chain(ev, replace(S, sell_bid_margin=sb)) for ev in (evs[:cut], evs[cut:]))
+                out.append(f"| {tname} | {sk} | {sl} | ${a['final']:.0f} ({a['max_dd_pct']:.0f}%) | ${b['final']:.0f} ({b['max_dd_pct']:.0f}%, low ${b['min_equity']:.0f}) |")
     open(Path(__file__).parent / "RESULTS.md", "w").write("\n".join(out) + "\n")
     print("\n".join(out))
 
