@@ -484,3 +484,67 @@ def test_forecast_for_old_event_is_discarded_after_roll(tmp_path):
     other.slug = "next-week"
     t._refresh_model(other, now + pd.Timedelta(minutes=1))     # result arrives while trading another event
     assert not t.model.ready
+
+
+# ================================================================ B03 durable state
+from src.simulation.paper_trader.account import PaperAccount
+from src.simulation.paper_trader.checkpoint import StateMissingError, load_latest_valid, write_checkpoint
+from src.simulation.paper_trader.fills import buy_with_budget, FeeSchedule
+
+
+def _traded_account(run_dir):
+    a = PaperAccount(str(run_dir), 30.0)
+    f = buy_with_budget([(0.05, 1000)], 1.0, FeeSchedule(0.05, 1.0))
+    a.buy("e|b", "e", "b", "tok", f, pd.Timestamp("2026-11-01 12:00", tz="UTC"))
+    return a
+
+
+def test_restore_from_backup_after_run_folder_is_destroyed(tmp_path):
+    run, backup = tmp_path / "runs" / "live", tmp_path / "backup"
+    a = _traded_account(run)
+    write_checkpoint(str(run), str(backup))
+    ledger = (run / "trades.csv").read_text()
+    import shutil
+    shutil.rmtree(run)                                      # the shared-computer reset
+    b = PaperAccount(str(run), 999, backup_dir=str(backup))
+    assert b.state == a.state and b.state["last_buy_ts"] and list(b.positions) == ["e|b"]
+    assert (run / "trades.csv").read_text() == ledger
+
+
+def test_corrupt_newest_checkpoint_falls_back_to_older(tmp_path):
+    run = tmp_path / "live"
+    a = _traded_account(run)
+    p1 = write_checkpoint(str(run))
+    cash1 = a.cash
+    a.state["cash"] -= 1
+    a.save()
+    p2 = write_checkpoint(str(run))
+    open(p2, "w").write(open(p2).read()[:-30])              # truncate newest
+    payload, bad = load_latest_valid(str(run / "checkpoints"))
+    assert payload["state"]["cash"] == cash1 and bad == [p2]
+    os.remove(run / "state.json")
+    assert PaperAccount(str(run), 5).cash == cash1
+
+
+def test_missing_state_with_prior_run_is_refused_unless_authorised(tmp_path):
+    run = tmp_path / "live"
+    _traded_account(run)
+    os.remove(run / "state.json")                           # state lost, ledger and logs still there, no checkpoint
+    with pytest.raises(StateMissingError):
+        PaperAccount(str(run), 40)
+    fresh = PaperAccount(str(run), 40, allow_new_state=True)
+    assert fresh.cash == 40
+    PaperAccount(str(tmp_path / "brand-new"), 40)           # a genuinely new folder is fine
+
+
+def test_checkpoint_contains_no_secrets_and_runner_writes_one_per_tick(tmp_path):
+    t, ev = make_trader(tmp_path)
+    t.feed.mode = "live"
+    t.feed.local_count = lambda e, n: (300, None)
+    t.feed.next_event = lambda *a: None
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    t.tick(now)
+    payload, _ = load_latest_valid(str(tmp_path / "checkpoints"))
+    assert set(payload) == {"schema", "run", "seq", "ts_utc", "git_commit", "state", "forecast_state", "trades_csv"}
+    assert payload["forecast_state"]["event_slug"] == "fake"

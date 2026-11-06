@@ -35,6 +35,7 @@ from .console import Console, WIDTH
 from .charts import plot_equity, plot_market, write_summary
 from .feeds import Event, LiveFeed, ReplayFeed
 from .fills import FeeSchedule, buy_with_budget, sell_shares, taker_fee
+from .checkpoint import write_checkpoint
 from .procutil import atomic_write_json, write_heartbeat
 from .model import CalibratedModel, ForecastError, NativeEnsembleModel, validate_forecast
 from .strategy import Quote, Rules, buy_candidates, choose_buy, sell_reason
@@ -52,13 +53,15 @@ class PaperTrader:
     def __init__(self, feed, rules: Rules, run_dir: str, bankroll: float = 30.0, pred_source: str = "calibrated",
                  buy_every_min: int = 60, sell_every_min: int = 10, model_refresh_min: int = 60, seed: int = 42,
                  b: float = 1.15, auto_roll: bool = True, start_after_days: float = 2.0, max_slippage: float = 0.01,
-                 chart_every: int = 1, verbose: bool = False, model_stale_min: int = 150, max_count_gap: int = 30):
+                 chart_every: int = 1, verbose: bool = False, model_stale_min: int = 150, max_count_gap: int = 30,
+                 backup_dir: Optional[str] = None, allow_new_state: bool = False):
         self.con = Console(run_dir, verbose)
         self.feed, self.rules, self.run_dir = feed, rules, run_dir
         self.pred_source, self.buy_every, self.sell_every = pred_source, buy_every_min, sell_every_min
         self.model_refresh, self.auto_roll = model_refresh_min, auto_roll
         self.start_after_days, self.max_slippage, self.chart_every = start_after_days, max_slippage, chart_every
-        self.account = PaperAccount(run_dir, bankroll)
+        self.backup_dir = backup_dir
+        self.account = PaperAccount(run_dir, bankroll, backup_dir, allow_new_state)
         self.rng = np.random.default_rng(seed)
         self.seed = seed
         self.model = CalibratedModel(b) if pred_source == "calibrated" else NativeEnsembleModel()
@@ -420,6 +423,15 @@ class PaperTrader:
                  len(acct.positions), self.tweets, days_left)
         self._show_account(eq, now)
         self.ticks += 1
+        self._checkpoint()
+
+    def _checkpoint(self):
+        if self.feed.mode != "live":
+            return                                    # replays are throw-away
+        try:
+            write_checkpoint(self.run_dir, self.backup_dir)
+        except Exception:
+            log.error("checkpoint failed:\n%s", traceback.format_exc())
 
     # ------------------------------------------------------------------ console blocks
     def _show_tweet_check(self, poly, local, newest, n_quotes, n_buckets):

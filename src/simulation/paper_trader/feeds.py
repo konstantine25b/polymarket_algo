@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+from .checkpoint import backup_tweet_csv
 from .fills import FeeSchedule
 from .model import parse_range
 from .strategy import Quote
@@ -116,7 +117,8 @@ def resolution_from_gamma(e: dict) -> Optional[Dict[str, bool]]:
 class LiveFeed:
     mode = "live"
 
-    def __init__(self, tweet_refresh_timeout=240, model_timeout=1500):
+    def __init__(self, tweet_refresh_timeout=240, model_timeout=1500, backup_dir=None):
+        self.backup_dir = backup_dir
         self.tweet_refresh_timeout = tweet_refresh_timeout
         self.model_timeout = model_timeout
 
@@ -181,6 +183,11 @@ class LiveFeed:
         except Exception as ex:
             info["error"] = repr(ex)
         info["seconds"] = round(time.time() - t0, 1)
+        if info["ok"] and self.backup_dir:
+            try:
+                backup_tweet_csv(self.csv_path, self.backup_dir, info.get("sha256"))
+            except Exception as ex:
+                log.error("tweet dataset backup failed: %r", ex)
         if info["ok"]:
             log.info("tweet data refreshed from XTracker: %s new tweets merged, %s rows, newest %s (%.0fs)", info["new_tweets"],
                      info.get("rows"), info.get("newest"), info["seconds"])

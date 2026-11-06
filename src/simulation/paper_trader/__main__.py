@@ -10,6 +10,7 @@ REPLAY a finished weekly market through the same engine in seconds (for testing/
 import argparse
 import logging
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -48,6 +49,8 @@ def build_parser():
     ap.add_argument("--max-slippage", type=float, default=1.0, help="reject a buy if the average fill is worse than the best ask by this many points")
     ap.add_argument("--model-stale-min", type=int, default=150, help="no NEW entries when the applied forecast is older than this (exits still run)")
     ap.add_argument("--max-count-gap", type=int, default=30, help="no NEW entries when our tweet database is more than this many tweets behind Polymarket")
+    ap.add_argument("--backup-dir", default=None, help="durable location (other disk / synced folder) that also receives every checkpoint and the tweet dataset")
+    ap.add_argument("--allow-new-state", action="store_true", help="deliberately start a NEW account in a run folder whose old state is gone (otherwise refused)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-auto-roll", action="store_true", help="stop trading when the current market ends instead of moving to the next")
     ap.add_argument("--chart-every", type=int, default=1, help="rewrite charts every N ticks")
@@ -67,6 +70,7 @@ def _main(argv=None):
         for f in os.listdir(run_dir):
             if f.endswith((".json", ".csv", ".png", ".txt", ".log", ".lock")):
                 os.remove(os.path.join(run_dir, f))
+        shutil.rmtree(os.path.join(run_dir, "checkpoints"), ignore_errors=True)     # --fresh really means fresh
     configure_logging(run_dir, mirror_console=not a.replay)
     import json, subprocess, datetime as _dt
     try:
@@ -92,10 +96,11 @@ def _main(argv=None):
             st = trader.run_replay(a.replay)
             print(open(os.path.join(run_dir, "summary.txt")).read())
             return 0
-        feed = LiveFeed()
+        feed = LiveFeed(backup_dir=a.backup_dir)
         trader = PaperTrader(feed, rules, run_dir, a.bankroll, a.pred_source, a.buy_every, a.sell_every, a.model_refresh,
                              a.seed, a.b, not a.no_auto_roll, a.start_after_days, a.max_slippage / 100, a.chart_every, verbose=True,
-                             model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap)
+                             model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap,
+                             backup_dir=a.backup_dir, allow_new_state=a.allow_new_state)
         from constants import EVENT_HASH
         slug = a.slug or trader.account.state.get("current_slug") or EVENT_HASH
         trader.event = feed.load_event(slug)

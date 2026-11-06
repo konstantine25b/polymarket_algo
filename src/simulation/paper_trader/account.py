@@ -11,12 +11,16 @@ verified in the tests.
 """
 import csv
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from .checkpoint import StateMissingError, has_prior_run_evidence, load_latest_valid, restore_into
 from .procutil import atomic_write_json, atomic_write_text
 from .fills import Fill, FeeSchedule, taker_fee
+
+log = logging.getLogger("paper_trader")
 
 TRADE_FIELDS = ["ts", "action", "event", "bucket", "shares", "avg_price", "notional", "fee", "cash_after",
                 "pred", "ask", "bid", "reason", "realized_pnl", "draw_prob", "n_candidates"]
@@ -56,20 +60,44 @@ def append_csv(path: str, fields, row: dict):
 
 
 class PaperAccount:
-    def __init__(self, run_dir: str, bankroll: float = 30.0):
+    def __init__(self, run_dir: str, bankroll: float = 30.0, backup_dir: Optional[str] = None, allow_new_state: bool = False):
         self.run_dir = run_dir
+        self.backup_dir = backup_dir
         os.makedirs(run_dir, exist_ok=True)
         self.state_path = os.path.join(run_dir, "state.json")
         self.trades_path = os.path.join(run_dir, "trades.csv")
         self.equity_path = os.path.join(run_dir, "equity.csv")
+        self.state = None
         if os.path.exists(self.state_path):
-            with open(self.state_path) as f:
-                self.state = json.load(f)
-        else:
-            self.state = {"start_cash": bankroll, "cash": bankroll, "positions": {}, "realized_pnl": 0.0,
-                          "fees_paid": 0.0, "n_buys": 0, "n_sells": 0, "n_settled": 0, "last_buy_ts": None,
-                          "created": _now_iso()}
-            self.save()
+            try:
+                with open(self.state_path) as f:
+                    self.state = json.load(f)
+            except ValueError as ex:
+                log.error("state.json is corrupt (%s) - trying the checkpoints", ex)
+        if self.state is None:
+            self.state = self._recover_or_init(bankroll, allow_new_state)
+
+    def _recover_or_init(self, bankroll, allow_new_state):
+        dirs = [os.path.join(self.run_dir, "checkpoints")]
+        if self.backup_dir:
+            dirs.append(os.path.join(self.backup_dir, os.path.basename(os.path.abspath(self.run_dir))))
+        payload, bad = load_latest_valid(*dirs)
+        if payload is not None:
+            restore_into(self.run_dir, payload)
+            log.error("STATE RESTORED from checkpoint #%s of %s (cash %.2f) - %d corrupt checkpoint(s) skipped",
+                      payload["seq"], payload["ts_utc"], payload["state"]["cash"], len(bad))
+            return payload["state"]
+        if has_prior_run_evidence(self.run_dir) and not allow_new_state:
+            raise StateMissingError(
+                f"{self.run_dir} has logs/ledger from an earlier run but no state.json and no valid checkpoint. "
+                "Refusing to silently start a fresh account under the same name. Restore the folder, or pass "
+                "--allow-new-state to deliberately start over.")
+        state = {"start_cash": bankroll, "cash": bankroll, "positions": {}, "realized_pnl": 0.0,
+                 "fees_paid": 0.0, "n_buys": 0, "n_sells": 0, "n_settled": 0, "last_buy_ts": None,
+                 "created": _now_iso()}
+        self.state = state
+        self.save()
+        return state
 
     # ---- convenience
     @property
@@ -81,10 +109,7 @@ class PaperAccount:
         return self.state["positions"]
 
     def save(self):
-        tmp = self.state_path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.state, f, indent=2)
-        os.replace(tmp, self.state_path)
+        atomic_write_json(self.state_path, self.state)       # unique temp file per writer, fsync, rename
 
     # ---- trading
     def buy(self, key: str, event: str, bucket: str, token: str, fill: Fill, ts, ctx: Optional[dict] = None):
