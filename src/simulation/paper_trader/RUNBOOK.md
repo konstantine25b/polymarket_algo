@@ -156,8 +156,14 @@ TASK: install, run and monitor a PAPER-trading bot (fake money, no wallet, no re
    python -m src.simulation.paper_trader.status --run-name week_nov3
    Exit code 0 = healthy: reply "healthy" plus the ACCOUNT line (cash, equity, open positions).
    Exit code 1 = warnings: report the WARN lines word for word.
-   Exit code 2 = critical (process not running / no tick for 25 min): restart with the EXACT same command from step 2 (it resumes),
-                 wait 2 minutes, run status again, and report what src/simulation/runs/week_nov3/paper_trader.log says (tail -50).
+   Exit code 2 = critical. First look at the first status line:
+                 - "process running" but "last tick ... min ago" > 25: the process is alive. First check whether the computer/VM was
+                   suspended (the monitor itself missing checks is a sign). Wait 10 minutes and run status again - after a pause it
+                   resumes by itself. If it is STILL stale: find the pid (cat src/simulation/runs/week_nov3/run.lock), kill that pid
+                   (kill <pid>; only kill -9 if it ignores a normal kill after 30 s), then start it again with the exact command from step 2.
+                   (Starting a second copy while the first is alive just prints "another paper trader owns ..." and exits - that is correct.)
+                 - "no run.lock" / "no process holds it": the process is dead. Restart with the EXACT same command from step 2 (it resumes).
+                 Either way wait 2 minutes, run status again, and report what tail -50 src/simulation/runs/week_nov3/paper_trader.log says.
    Healthy looks like: "process running", last tick < 25 min ago, order books 25/25 (or all of them), tweet count source polymarket,
    0 errors in the last 60 min, heartbeat < 15 min.
 

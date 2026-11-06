@@ -45,6 +45,8 @@ def http_get(url, params=None, tries=4, timeout=25):
             if r.status_code == 200:
                 return r.json()
             last = f"HTTP {r.status_code}"
+            if r.status_code in (400, 404):          # permanent (e.g. a delisted bucket's book): retrying only slows every tick down
+                break
         except Exception as e:  # network hiccup: retry with backoff
             last = repr(e)
         time.sleep(1.5 * (i + 1))

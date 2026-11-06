@@ -713,10 +713,14 @@ class PaperTrader:
         plot_equity(self.run_dir, self.account.state["start_cash"])
 
     # ------------------------------------------------------------------ live loop
-    def _sleep_until(self, deadline: float):
-        """Sleep in <=5 s slices until the monotonic `deadline`. The remaining time is recomputed at the call, so a
-        wall-clock jump or a machine suspend can never hand time.sleep() a negative number (B01)."""
+    def _sleep_until(self, deadline: float, wall_deadline: Optional[float] = None):
+        """Sleep in <=5 s slices until the monotonic `deadline`, or until the wall clock reaches `wall_deadline`, whichever comes
+        first. The remaining time is recomputed at the call, so a clock jump can never hand time.sleep() a negative number (B01).
+        The wall-clock exit matters after a machine/VM suspend: the monotonic clock does not advance while suspended, so waiting
+        on it alone would add the whole suspend time on top of the sleep (a 61-minute gap was seen in live use)."""
         while not self._stop:
+            if wall_deadline is not None and self._wall() >= wall_deadline:
+                return
             remaining = deadline - self._mono()
             if remaining <= 0:
                 return
@@ -744,7 +748,7 @@ class PaperTrader:
             sleep_for = max(0.0, step - (self._wall() % step))          # align to the 10-minute clock
             if self._fails >= 3:
                 sleep_for = max(sleep_for, 120)
-            self._sleep_until(self._mono() + sleep_for)
+            self._sleep_until(self._mono() + sleep_for, self._wall() + sleep_for)
         log.info("stopped; state saved")
 
     def stop(self, *_):

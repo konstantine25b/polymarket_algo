@@ -61,7 +61,8 @@ def test_run_live_survives_wall_clock_jump_and_tick_failures(tmp_path, monkeypat
     t, _ = make_trader(tmp_path)
     c = Clock()
     t._mono, t._sleep = c.mono, c.sleep
-    wall = iter([-5e9, 1e12, 7.0, 600.0, 1.23e9])          # backwards / huge jumps
+    import itertools
+    wall = itertools.cycle([-5e9, 1e12, 7.0, 600.0, 1.23e9])          # backwards / huge jumps
     t._wall = lambda: next(wall)
     calls = {"n": 0}
 
@@ -1025,3 +1026,47 @@ def test_fresh_preset_matches_the_backtested_configuration():
     assert a.no_bid_sell is False and a.sell_hysteresis == 5.0 and a.pick_best is True
     z = apply_preset(build_parser().parse_args(["--strategy", "fresh", "--kelly", "0"]))
     assert z.kelly == 0.0                                                             # explicit zero beats the preset
+
+
+# ================================================================ machine suspend (61-minute gap seen in live use) / 404 retries
+def test_tick_resumes_immediately_after_a_suspend(tmp_path):
+    t, _ = make_trader(tmp_path)
+    c = Clock()
+    wall = {"now": 1_000_000.0}
+    t._mono, t._wall = c.mono, lambda: wall["now"]
+
+    def sleep_and_suspend(s):
+        c.sleep(s)                                  # monotonic advances only by what we slept ...
+        wall["now"] += 3000.0                       # ... but the machine was suspended: the wall clock jumped 50 minutes
+    t._sleep = sleep_and_suspend
+    t._sleep_until(c.now + 600, wall["now"] + 600)  # a normal 10 minute wait
+    assert len(c.sleeps) == 1 and c.sleeps[0] <= 5.0   # returned after the first slice, did NOT wait 600 monotonic seconds more
+
+
+def test_wall_clock_going_backwards_still_ends_the_sleep_via_the_monotonic_deadline(tmp_path):
+    t, _ = make_trader(tmp_path)
+    c = Clock()
+    t._mono, t._sleep, t._wall = c.mono, c.sleep, lambda: -1e12
+    t._sleep_until(c.now + 12, 5e12)                # wall deadline unreachable, monotonic one decides
+    assert sum(c.sleeps) == pytest.approx(12.0) and all(x >= 0 for x in c.sleeps)
+
+
+def test_404_is_not_retried(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    calls = []
+
+    class R:
+        status_code = 404
+
+        def json(self):
+            return {}
+    monkeypatch.setattr(feeds.requests, "get", lambda *a, **k: calls.append(1) or R())
+    monkeypatch.setattr(feeds.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError):
+        feeds.http_get("http://x/book")
+    assert len(calls) == 1                           # old code: 4 tries with growing sleeps for a book that will never exist
+    R.status_code = 503
+    calls.clear()
+    with pytest.raises(RuntimeError):
+        feeds.http_get("http://x/book")
+    assert len(calls) == 4                           # transient errors are still retried
