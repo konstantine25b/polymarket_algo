@@ -1070,3 +1070,38 @@ def test_404_is_not_retried(monkeypatch):
     with pytest.raises(RuntimeError):
         feeds.http_get("http://x/book")
     assert len(calls) == 4                           # transient errors are still retried
+
+
+def test_light_strategy_does_not_trade_on_a_fallback_tweet_count(tmp_path):
+    class LiveLight(LightFeed):
+        mode = "live"
+        broken = True
+
+        def tweet_count(self, event, now):
+            return None if self.broken else LightFeed.tweet_count(self, event, now)
+
+        def quotes(self, event, now):                              # price the books from the TRUE count, whatever tweet_count() returns
+            lp = LightPredictor(REAL_CSV)
+            p = lp.probs(event.ranges, LightFeed.tweet_count(self, event, now), None, event=event, now=now)
+            return {b.title: Quote([(max(0.01, x * self.mult - 0.01), 1000)], [(max(0.02, x * self.mult), 1000)]) for b, x in zip(event.buckets, p)}
+
+        def local_count(self, event, now):
+            return LightFeed.tweet_count(self, event, now), None
+
+        def next_event(self, *a):
+            return None
+    ev, feed = light_event(), LiveLight()
+    rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, include_exit_fee=False, top_k=3, max_adds=0, pick_best=True,
+                  sell_if_bid_above_pred=True, sell_hysteresis=0.05)
+    t = PaperTrader(feed, rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    now = ev.start + pd.Timedelta(days=5)
+    t._refresh_light = lambda n: None                           # no background XTracker refresh in this test
+    t.tick(now)
+    assert t._count_source == "local_csv"
+    assert "unavailable from Polymarket" in t.buy_block_reason(now, None, 100)
+    assert t.account.state["n_buys"] == 0
+    assert "blocked" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
+    feed.broken = False                                           # Polymarket's count is back -> trading is allowed again
+    t.tick(now + pd.Timedelta(hours=1))
+    assert t._count_source == "polymarket" and t.buy_block_reason(now, 100, 100) is None

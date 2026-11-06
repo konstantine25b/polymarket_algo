@@ -86,6 +86,7 @@ class PaperTrader:
         self._mono, self._sleep, self._wall = time.monotonic, time.sleep, time.time      # injectable clocks (tests)
         self._last_beat = 0.0
         self._fails = 0
+        self._count_source = "polymarket"
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -298,6 +299,9 @@ class PaperTrader:
         if self.pred_source == "light":
             if not self.model.ready:
                 return "tweet history not loaded"
+            if self.feed.mode == "live" and self._count_source != "polymarket":
+                return (f"live tweet count unavailable from Polymarket (using '{self._count_source}', which can be hours old) - "
+                        "the light strategy only trades on a real-time count")
             newest = self.model.newest_tweet().tz_localize("US/Eastern", ambiguous=True, nonexistent="shift_forward")
             age_h = (now - newest) / pd.Timedelta(hours=1)
             if age_h > self.max_data_age_h:
@@ -399,6 +403,7 @@ class PaperTrader:
             source = "last_known"
             note = "no tweet count available - using the last known value"
             log.warning(note)
+        self._count_source = source
         log.info("data: polymarket count %s | our csv count %s (newest tweet %s) | %d/%d order books",
                  poly, local, newest, len(quotes), len(ev.buckets))
         self._show_tweet_check(poly, local, newest, len(quotes), len(ev.buckets))
@@ -429,9 +434,12 @@ class PaperTrader:
         self._write_snapshot(ev, now, titles, preds, quotes, days_left)
         self._show_market(ev, titles, preds, quotes, days_left)
 
-        # ---- SELL checks
+        # ---- SELL checks (not on a possibly stale count: 'bid above our probability' would then sell winners)
+        stale_count = self.pred_source == "light" and self.feed.mode == "live" and source != "polymarket"
+        if stale_count and acct.positions:
+            log.warning("sell checks skipped: tweet count source is '%s', not Polymarket's live count", source)
         for key, pos in list(acct.positions.items()):
-            if pos["event"] != ev.slug:
+            if stale_count or pos["event"] != ev.slug:
                 continue
             q, b = quotes.get(pos["bucket"]), self._bucket(ev, pos["bucket"])
             if q is None or b is None or q.best_bid is None:
