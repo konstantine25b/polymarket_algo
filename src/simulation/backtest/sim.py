@@ -136,7 +136,7 @@ def _slice(e, mask):
     return {**e, **{k: e[k][mask] for k in ("t", "mid", "model", "mk", "into", "left")}}
 
 
-def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: bool = True):
+def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: bool = True, since=None, detail: bool = False):
     """
     ONE account, never topped up, trading the way the live bot does: one weekly market at a time, rolling to the market
     that ends next once the current one is over. Stakes, tiers and caps follow CURRENT equity (winnings are reinvested,
@@ -147,7 +147,8 @@ def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: 
     for e in evs:
         if cur_end is not None and e["end"] <= cur_end + pd.Timedelta(hours=1):
             continue
-        mask = np.ones(len(e["t"]), bool) if cur_end is None else (e["t"] >= np.datetime64(cur_end.tz_convert("UTC").tz_localize(None)))
+        floor = cur_end if cur_end is not None else since
+        mask = np.ones(len(e["t"]), bool) if floor is None else (e["t"] >= np.datetime64(pd.Timestamp(floor).tz_convert("UTC").tz_localize(None)))
         if mask.sum() < 24:
             continue
         sc = cash / start_cash
@@ -156,7 +157,7 @@ def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: 
         cash = r["final_cash"]
         cur_end = e["end"]
         path.append(cash)
-        rows.append({"slug": e["slug"], **r})
+        rows.append({"slug": e["slug"], "start_cash": sc * start_cash, **r})
         if cash < 1.0:
             break                                                     # cannot place the minimum order any more
     path = np.array(path)
@@ -164,4 +165,4 @@ def run_chain(evs: List[dict], S: Strat, start_cash: float = 40.0, scale_tiers: 
     wk = np.diff(path) / path[:-1]
     return {"weeks": len(path) - 1, "final": path[-1], "ret_pct": (path[-1] / start_cash - 1) * 100, "max_dd_pct": float(((peak - path) / peak).max() * 100),
             "weeks_up": float((wk > 0).mean()) if len(wk) else 0.0, "worst_week_pct": float(wk.min() * 100) if len(wk) else 0.0,
-            "min_equity": float(path.min()), "buys": sum(r["buys"] for r in rows)}
+            "min_equity": float(path.min()), "buys": sum(r["buys"] for r in rows), **({"rows": rows} if detail else {})}

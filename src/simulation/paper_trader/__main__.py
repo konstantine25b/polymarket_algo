@@ -38,15 +38,15 @@ def build_parser():
     ap.add_argument("--min-mkt", type=float, default=None, help="market ask must be at least this, in %%")
     ap.add_argument("--min-edge", type=float, default=None, help="our probability must exceed the ask by more than this, in percentage points")
     ap.add_argument("--sell-below", type=float, default=None, help="sell when our probability drops below this, in %%")
-    ap.add_argument("--strategy", choices=["light", "legacy"], default="light",
+    ap.add_argument("--strategy", choices=["light", "fresh", "legacy"], default="light",
                     help="light = backtested preset (lightweight model, top-2 buckets, no averaging down, hold to settlement); "
                          "legacy = the original rules + Prophet/TimesFM ensemble. Any explicit flag overrides the preset.")
     ap.add_argument("--top-k", type=int, default=None, help="only buy buckets ranked in the model's top K (0 = any)")
     ap.add_argument("--max-adds", type=int, default=None, help="extra buys allowed in a bucket already held (0 = never average down, -1 = unlimited)")
-    ap.add_argument("--kelly", type=float, default=0.0,
+    ap.add_argument("--kelly", type=float, default=None,
                     help="size buys as KELLY x equity x (p-ask)/(1-ask), between --stake and --max-stake (0 = always --stake). Bigger orders when the edge is big; "
                          "backtest: helps with a real-time tweet count, adds drawdown without clear gain when the count lags")
-    ap.add_argument("--max-stake", type=float, default=3.0, help="largest single order in USDC when --kelly is on")
+    ap.add_argument("--max-stake", type=float, default=None, help="largest single order in USDC when --kelly is on")
     ap.add_argument("--min-shares", type=float, default=5.0, help="Polymarket CLOB minimum order size in shares (orders are raised to this)")
     ap.add_argument("--pick-random", action="store_true", help="draw the bucket at random (weight = edge) instead of taking the best net edge")
     ap.add_argument("--max-data-age-h", type=float, default=36.0, help="light model: no new buys if the newest tweet in our history is older than this")
@@ -65,7 +65,7 @@ def build_parser():
     rk.add_argument("--min-cash-reserve", type=float, default=0.0, help="USDC that must stay in cash after a buy")
     rk.add_argument("--drawdown-stop", type=float, default=0.0, help="no new entries once equity is this fraction below the start (0 = off)")
     rk.add_argument("--max-sell-slippage", type=float, default=3.0, help="never sell deeper than best bid minus this, in points")
-    rk.add_argument("--sell-hysteresis", type=float, default=0.0, help="'bid > pred' sells only when bid exceeds pred by this, in points")
+    rk.add_argument("--sell-hysteresis", type=float, default=None, help="'bid > pred' sells only when bid exceeds pred by this, in points")
     rk.add_argument("--exit-min-ratio", type=float, default=0.0, help="hold a model-driven exit if net proceeds/share < ratio x our probability (0 = off)")
     ap.add_argument("--buy-every", type=int, default=60, help="minutes between buys")
     ap.add_argument("--sell-every", type=int, default=10, help="minutes between ticks / sell checks")
@@ -93,9 +93,13 @@ def build_parser():
 
 PRESETS = {      # units as on the command line (percent / percentage points)
     # backtest-selected: src/simulation/backtest/ (train/test split, conservative spread + lagged count)
-    "light": dict(pred_source="light", min_pred=10.0, min_mkt=2.0, min_edge=0.0, min_net_edge=2.0, sell_below=0.0, no_bid_sell=True,
+    "light": dict(kelly=0.0, max_stake=3.0, sell_hysteresis=0.0, pred_source="light", min_pred=10.0, min_mkt=2.0, min_edge=0.0, min_net_edge=2.0, sell_below=0.0, no_bid_sell=True,
                   no_exit_fee=True, start_after_days=4.0, model_refresh=180, top_k=2, max_adds=0, pick_best=True),
-    "legacy": dict(pred_source="calibrated", min_pred=8.0, min_mkt=3.0, min_edge=1.0, min_net_edge=0.0, sell_below=4.0, no_bid_sell=False,
+    # for a tweet count that is always real-time: bigger Kelly-sized orders + take the market's overpayment (sell when bid > prob + 5pt)
+    "fresh": dict(pred_source="light", min_pred=10.0, min_mkt=2.0, min_edge=0.0, min_net_edge=2.0, sell_below=0.0, no_bid_sell=False,
+                  no_exit_fee=False, start_after_days=4.0, model_refresh=180, top_k=3, max_adds=0, pick_best=True,
+                  kelly=0.25, max_stake=5.0, sell_hysteresis=5.0),
+    "legacy": dict(kelly=0.0, max_stake=3.0, sell_hysteresis=0.0, pred_source="calibrated", min_pred=8.0, min_mkt=3.0, min_edge=1.0, min_net_edge=0.0, sell_below=4.0, no_bid_sell=False,
                    no_exit_fee=False, start_after_days=2.0, model_refresh=60, top_k=0, max_adds=-1, pick_best=False),
 }
 

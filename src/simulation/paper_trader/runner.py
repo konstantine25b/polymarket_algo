@@ -476,9 +476,10 @@ class PaperTrader:
         qk = {self._key(ev.slug, t): q for t, q in quotes.items()}
         fees = {self._key(ev.slug, b.title): b.fees for b in ev.buckets}
         eq = acct.equity(qk, fees, now.to_pydatetime())
-        if eq["unquoted_positions"]:
+        if eq["unquoted_positions"] != getattr(self, "_last_unquoted", 0):          # log on change, not every tick
             log.warning("%d of %d open position(s) have no live bid - valued at last mark (%.2f stale) or 0, not at cost",
                         eq["unquoted_positions"], len(acct.positions), eq["stale_mark_value"])
+        self._last_unquoted = eq["unquoted_positions"]
         acct.log_equity(now, ev.slug, self.tweets, eq)
         acct.save()          # persists the refreshed marks
         held = {p["bucket"] for p in acct.positions.values() if p["event"] == ev.slug}

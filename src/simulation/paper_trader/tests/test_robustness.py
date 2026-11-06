@@ -1013,3 +1013,12 @@ def test_engine_never_places_an_order_below_5_shares_or_1_dollar(tmp_path):
     for x in buys:
         assert float(x["shares"]) >= 5.0 - 1e-9 and float(x["notional"]) + float(x["fee"]) >= 0.99
         assert float(x["notional"]) + float(x["fee"]) <= 3.0 + 0.5
+
+
+def test_fresh_preset_matches_the_backtested_configuration():
+    from src.simulation.paper_trader.__main__ import apply_preset, build_parser
+    a = apply_preset(build_parser().parse_args(["--strategy", "fresh"]))
+    assert (a.pred_source, a.top_k, a.max_adds, a.start_after_days, a.kelly, a.max_stake) == ("light", 3, 0, 4.0, 0.25, 5.0)
+    assert a.no_bid_sell is False and a.sell_hysteresis == 5.0 and a.pick_best is True
+    z = apply_preset(build_parser().parse_args(["--strategy", "fresh", "--kelly", "0"]))
+    assert z.kelly == 0.0                                                             # explicit zero beats the preset
