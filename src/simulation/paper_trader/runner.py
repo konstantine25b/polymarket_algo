@@ -37,6 +37,7 @@ from .feeds import Event, LiveFeed, ReplayFeed
 from .fills import FeeSchedule, buy_with_budget, fee_per_share, sell_shares, taker_fee
 from .checkpoint import write_checkpoint
 from .procutil import atomic_write_json, write_heartbeat
+from .light_model import LightPredictor
 from .model import CalibratedModel, ForecastError, NativeEnsembleModel, validate_forecast
 from .strategy import Quote, Rules, buy_candidates, choose_buy, net_costs, plan_sell, risk_filter, sell_reason
 
@@ -58,7 +59,7 @@ class PaperTrader:
                  buy_every_min: int = 60, sell_every_min: int = 10, model_refresh_min: int = 60, seed: int = 42,
                  b: float = 1.15, auto_roll: bool = True, start_after_days: float = 2.0, max_slippage: float = 0.01,
                  chart_every: int = 1, verbose: bool = False, model_stale_min: int = 150, max_count_gap: int = 30,
-                 backup_dir: Optional[str] = None, allow_new_state: bool = False):
+                 max_data_age_h: float = 36.0, count_lag_h: float = 0.0, backup_dir: Optional[str] = None, allow_new_state: bool = False):
         self.con = Console(run_dir, verbose)
         self.feed, self.rules, self.run_dir = feed, rules, run_dir
         self.pred_source, self.buy_every, self.sell_every = pred_source, buy_every_min, sell_every_min
@@ -68,7 +69,8 @@ class PaperTrader:
         self.account = PaperAccount(run_dir, bankroll, backup_dir, allow_new_state)
         self.rng = np.random.default_rng(seed)
         self.seed = seed
-        self.model = CalibratedModel(b) if pred_source == "calibrated" else NativeEnsembleModel()
+        self._b, self.count_lag_h = b, count_lag_h
+        self.model = self._new_model()
         self.event: Optional[Event] = None
         self.events: Dict[str, Event] = {}          # every event we hold (or held) positions in
         self.tweets: Optional[int] = None
@@ -76,6 +78,7 @@ class PaperTrader:
         self._forecast_thread: Optional[threading.Thread] = None
         self._forecast_result = None
         self.model_stale_min, self.max_count_gap = model_stale_min, max_count_gap
+        self.max_data_age_h, self.count_lag_h = max_data_age_h, count_lag_h
         self._jitter = random.Random(seed + 1)          # separate stream: backoff jitter must not perturb the buy draws
         self._reset_forecast_state()
         self._stop = False
@@ -97,8 +100,14 @@ class PaperTrader:
     # just hands back a result or a failure reason. last_attempt / last_success / last_failure are kept separately.
     FORECAST_SCHEMA = 1
 
+    def _new_model(self):
+        if self.pred_source == "light":
+            csv_path = getattr(self.feed, "csv_path", None) or getattr(self.feed, "csv")
+            return LightPredictor(csv_path, count_lag_h=self.count_lag_h)
+        return CalibratedModel(self._b) if self.pred_source == "calibrated" else NativeEnsembleModel()
+
     def _reset_forecast_state(self):
-        self.model = CalibratedModel(self.model.b) if self.pred_source == "calibrated" else NativeEnsembleModel()
+        self.model = self._new_model()
         self._last_forecast_at = None            # generation time of the forecast currently applied (accepted-model age)
         self._last_attempt_at = None
         self._last_failure = None
@@ -193,6 +202,15 @@ class PaperTrader:
             if fc.get("verbose_log"):
                 self.con.say(f"  (the ensemble's full training output is saved in {fc['verbose_log']})")
 
+    def _log_light_forecast(self, ev, now, days_left):
+        hour = now.strftime("%Y%m%d%H")
+        if getattr(self, "_last_light_row", None) == hour or self.model.last_mean_total is None:
+            return
+        self._last_light_row = hour
+        append_csv(os.path.join(self.run_dir, "forecasts.csv"), ["ts", "event", "total_predicted", "current_tweets", "days_left", "models"],
+                   {"ts": now.isoformat(), "event": ev.slug, "total_predicted": round(self.model.last_mean_total, 2),
+                    "current_tweets": self.tweets, "days_left": round(days_left, 3), "models": json.dumps({"light": self.model.last_mean_total})})
+
     def _forecast_failed(self, reason: str, now: pd.Timestamp):
         """Record a failure and schedule the next attempt with exponential backoff + jitter (5, 10, 20, ... max 60 min)."""
         self._fail_count += 1
@@ -204,6 +222,8 @@ class PaperTrader:
 
     def _refresh_model(self, event: Event, now: pd.Timestamp, blocking=False):
         """Run the (slow) forecast in the background; pick the result up on a later tick. At most one job in flight."""
+        if self.pred_source == "light":
+            return self._refresh_light(now)
         if self._restore_tried != event.slug and not self.model.ready:
             self._restore_forecast(event, now)
         if self._forecast_result is not None:
@@ -243,8 +263,46 @@ class PaperTrader:
             self._forecast_thread = threading.Thread(target=work, daemon=True)
             self._forecast_thread.start()
 
+    def _refresh_light(self, now: pd.Timestamp):
+        """The light model needs no forecast job: it is always ready. What can go stale is the tweet history it learns the
+        daily profile from, so refresh that (XTracker export) in the background every `model_refresh` minutes with backoff."""
+        self.model.reload()                                     # picks up a refreshed CSV (cheap: mtime check)
+        if self._forecast_result is not None:
+            kind, payload = self._forecast_result[:2]
+            self._forecast_result = None
+            if kind == "ok":
+                self._last_forecast_at, self._fail_count, self._last_failure, self._next_retry_at = now, 0, None, None
+                self.model.reload()
+            else:
+                self._forecast_failed(payload, now)
+        if self._last_forecast_at is None and self._next_retry_at is None and not hasattr(self.feed, "refresh_tweet_data"):
+            self._last_forecast_at = now                       # replay: nothing to refresh
+        if self.forecast_state == "in_flight" or not hasattr(self.feed, "refresh_tweet_data"):
+            return
+        due = self._last_forecast_at is None or (now - self._last_forecast_at) >= pd.Timedelta(minutes=self.model_refresh)
+        if not (due and (self._next_retry_at is None or now >= self._next_retry_at)):
+            return
+        self._last_attempt_at = now
+
+        def work():
+            try:
+                info = self.feed.refresh_tweet_data()
+                self._forecast_result = ("ok", info) if info.get("ok") else ("fail", info.get("error", "refresh failed"))
+            except Exception as ex:
+                self._forecast_result = ("fail", f"refresh raised {ex!r}")
+        self._forecast_thread = threading.Thread(target=work, daemon=True)
+        self._forecast_thread.start()
+
     def buy_block_reason(self, now: pd.Timestamp, poly, local) -> Optional[str]:
         """Why NEW entries must not happen right now (None = allowed). Exits are never blocked by this."""
+        if self.pred_source == "light":
+            if not self.model.ready:
+                return "tweet history not loaded"
+            newest = self.model.newest_tweet().tz_localize("US/Eastern", ambiguous=True, nonexistent="shift_forward")
+            age_h = (now - newest) / pd.Timedelta(hours=1)
+            if age_h > self.max_data_age_h:
+                return f"tweet history is stale (newest tweet {age_h:.0f} h old, limit {self.max_data_age_h:.0f} h)"
+            return None
         if not self.model.ready or self._last_forecast_at is None:
             return "no valid forecast"
         age = self.model_age_min(now)
@@ -359,13 +417,15 @@ class PaperTrader:
             return
         titles = [b.title for b in ev.buckets]
         try:
-            probs = self.model.probs(ev.ranges, so_far=self.tweets, days_left=days_left)
+            probs = self.model.probs(ev.ranges, so_far=self.tweets, days_left=days_left, event=ev, now=now)
         except ForecastError as ex:
             log.error("cannot compute bucket probabilities (%s) - no decisions this tick", ex)
             self.con.say(f"  probabilities unavailable ({ex}) - no decisions this tick")
             self._log_equity_only(now, quotes)
             return
         preds = dict(zip(titles, probs.tolist()))
+        if self.pred_source == "light":
+            self._log_light_forecast(ev, now, days_left)
         self._write_snapshot(ev, now, titles, preds, quotes, days_left)
         self._show_market(ev, titles, preds, quotes, days_left)
 
@@ -577,8 +637,9 @@ class PaperTrader:
         eq = acct.equity({self._key(ev.slug, t): q for t, q in quotes.items()}, {self._key(ev.slug, t): f for t, f in fees_t.items()}, now.to_pydatetime())
         held_cost = {p["bucket"]: p["cost_usd"] for p in acct.positions.values() if p["event"] == ev.slug}
         eligible, rejected = risk_filter(cands, held_cost, [b.title for b in ev.buckets], preds, eq["equity_conservative"],
-                                         acct.state["start_cash"], acct.cash, rules)
-        chosen = choose_buy(eligible, self.rng)
+                                         acct.state["start_cash"], acct.cash, rules,
+                                         {p["bucket"]: p.get("n_buys", 1) for p in acct.positions.values() if p["event"] == ev.slug})
+        chosen = choose_buy(eligible, self.rng, best=rules.pick_best)
         row = {"ts": now.isoformat(timespec="seconds"), "event": ev.slug, "tweets": self.tweets, "days_left": round(ev.days_left(now), 3),
                "cash": round(acct.cash, 4), "n_candidates": len(cands),
                "risk_rejected": "; ".join(f"{t}: {w}" for t, w in rejected),

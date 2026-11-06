@@ -43,6 +43,10 @@ class Rules:
     max_sell_slippage: float = 0.03 # never sell deeper into the book than best bid - this (absolute price)
     sell_hysteresis: float = 0.0    # 'bid > pred' sells only when bid > pred + this
     exit_min_ratio: float = 0.0     # for 'pred below sell_below' exits: hold if net proceeds/share < ratio * pred (0 = off)
+    # --- selection (backtested 'light' preset)
+    top_k: int = 0                  # only buckets ranked in the model's top K by probability may be bought (0 = any)
+    max_adds: int = -1              # extra buys allowed in a bucket already held (0 = never average down, -1 = unlimited)
+    pick_best: bool = False         # buy the candidate with the best net edge instead of a random draw weighted by edge
 
     def as_dict(self):
         return asdict(self)
@@ -66,10 +70,13 @@ class Quote:
 def buy_candidates(preds: Dict[str, float], quotes: Dict[str, Quote], rules: Rules, fees: Optional[Dict[str, FeeSchedule]] = None) -> List[dict]:
     """Candidates must pass the raw edge rule AND have a positive edge after fees/slippage (`fees` = fee schedule per bucket)."""
     out = []
+    ranked = sorted(preds.values(), reverse=True)
     for bucket, pred in preds.items():
         q = quotes.get(bucket)
         if q is None or q.best_ask is None:
             continue
+        if rules.top_k > 0 and sum(1 for v in ranked if v > pred) >= rules.top_k:
+            continue                                   # not among the model's top-K buckets
         ask = q.best_ask
         if not (pred >= rules.min_pred and ask >= rules.min_mkt and pred - ask > rules.min_edge + 1e-12):
             continue
@@ -91,7 +98,7 @@ def net_costs(price: float, fees: FeeSchedule, rules: Rules) -> float:
 
 
 def risk_filter(cands: Sequence[dict], held_cost: Dict[str, float], order: Sequence[str], preds: Dict[str, float], equity: float,
-                start_cash: float, cash: float, rules: Rules) -> Tuple[List[dict], List[Tuple[str, str]]]:
+                start_cash: float, cash: float, rules: Rules, buys_in_bucket: Optional[Dict[str, int]] = None) -> Tuple[List[dict], List[Tuple[str, str]]]:
     """
     Keep only candidates that fit the exposure limits. `held_cost` = open cost basis per bucket in this event,
     `order` = bucket titles low -> high. Buckets on the same side of the model's most likely bucket form one tail
@@ -114,7 +121,9 @@ def risk_filter(cands: Sequence[dict], held_cost: Dict[str, float], order: Seque
     for c in cands:
         t = c["bucket"]
         why = None
-        if rules.drawdown_stop > 0 and equity < start_cash * (1 - rules.drawdown_stop):
+        if rules.max_adds >= 0 and buys_in_bucket and buys_in_bucket.get(t, 0) > rules.max_adds:
+            why = f"no averaging down: already bought {buys_in_bucket[t]}x (max adds {rules.max_adds})"
+        elif rules.drawdown_stop > 0 and equity < start_cash * (1 - rules.drawdown_stop):
             why = f"drawdown stop: equity {equity:.2f} < {(1 - rules.drawdown_stop) * 100:.0f}% of start {start_cash:.2f}"
         elif cash - stake < rules.min_cash_reserve - 1e-9:
             why = f"cash reserve: {cash - stake:.2f} left < {rules.min_cash_reserve:.2f}"
@@ -131,10 +140,15 @@ def risk_filter(cands: Sequence[dict], held_cost: Dict[str, float], order: Seque
     return eligible, rejected
 
 
-def choose_buy(cands: Sequence[dict], rng: np.random.Generator) -> Optional[dict]:
-    """Weighted random pick; weight = edge. Records the draw probability on the returned dict."""
+def choose_buy(cands: Sequence[dict], rng: np.random.Generator, best: bool = False) -> Optional[dict]:
+    """Weighted random pick (weight = edge), or with best=True the candidate with the largest net edge.
+    Records the draw probability on the returned dict."""
     if not cands:
         return None
+    if best:
+        chosen = dict(max(cands, key=lambda c: c.get("net_edge", c["edge"])))
+        chosen["draw_prob"], chosen["n_candidates"] = 1.0, len(cands)
+        return chosen
     w = np.array([c["edge"] for c in cands], float)
     p = w / w.sum()
     i = int(rng.choice(len(cands), p=p))

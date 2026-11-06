@@ -120,7 +120,8 @@ class PaperAccount:
         s["n_buys"] += 1
         s["last_buy_ts"] = _now_iso(ts)
         pos = s["positions"].setdefault(key, {"event": event, "bucket": bucket, "token": token, "shares": 0.0,
-                                              "cost_usd": 0.0, "fees_paid": 0.0, "opened": _now_iso(ts)})
+                                              "cost_usd": 0.0, "fees_paid": 0.0, "opened": _now_iso(ts), "n_buys": 0})
+        pos["n_buys"] = pos.get("n_buys", 0) + 1
         pos["shares"] = round(pos["shares"] + fill.shares, 8)
         pos["cost_usd"] += fill.notional + fill.fee
         pos["fees_paid"] += fill.fee

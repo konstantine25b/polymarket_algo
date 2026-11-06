@@ -34,13 +34,21 @@ def build_parser():
     ap.add_argument("--slug", default=None, help="event slug to start on (default: the one in src/constants.py)")
     ap.add_argument("--bankroll", type=float, default=30.0)
     ap.add_argument("--stake", type=float, default=1.0, help="USDC per buy, fee included (min 1.0)")
-    ap.add_argument("--min-pred", type=float, default=8.0, help="our probability must be at least this, in %%")
-    ap.add_argument("--min-mkt", type=float, default=3.0, help="market ask must be at least this, in %%")
-    ap.add_argument("--min-edge", type=float, default=1.0, help="our probability must exceed the ask by more than this, in percentage points")
-    ap.add_argument("--sell-below", type=float, default=4.0, help="sell when our probability drops below this, in %%")
+    ap.add_argument("--min-pred", type=float, default=None, help="our probability must be at least this, in %%")
+    ap.add_argument("--min-mkt", type=float, default=None, help="market ask must be at least this, in %%")
+    ap.add_argument("--min-edge", type=float, default=None, help="our probability must exceed the ask by more than this, in percentage points")
+    ap.add_argument("--sell-below", type=float, default=None, help="sell when our probability drops below this, in %%")
+    ap.add_argument("--strategy", choices=["light", "legacy"], default="light",
+                    help="light = backtested preset (lightweight model, top-2 buckets, no averaging down, hold to settlement); "
+                         "legacy = the original rules + Prophet/TimesFM ensemble. Any explicit flag overrides the preset.")
+    ap.add_argument("--top-k", type=int, default=None, help="only buy buckets ranked in the model's top K (0 = any)")
+    ap.add_argument("--max-adds", type=int, default=None, help="extra buys allowed in a bucket already held (0 = never average down, -1 = unlimited)")
+    ap.add_argument("--pick-random", action="store_true", help="draw the bucket at random (weight = edge) instead of taking the best net edge")
+    ap.add_argument("--max-data-age-h", type=float, default=36.0, help="light model: no new buys if the newest tweet in our history is older than this")
+    ap.add_argument("--count-lag-h", type=float, default=0.0, help="light model: hours the tweet count lags reality; the expected unseen tweets are added")
     ap.add_argument("--no-bid-sell", action="store_true", help="disable the 'sell when market bid > our probability' rule")
     rk = ap.add_argument_group("cost / risk / exit controls (experiments - defaults are NOT backtest-validated)")
-    rk.add_argument("--min-net-edge", type=float, default=0.0, help="required edge in points AFTER fees and slippage allowance")
+    rk.add_argument("--min-net-edge", type=float, default=None, help="required edge in points AFTER fees and slippage allowance")
     rk.add_argument("--slippage-allowance", type=float, default=0.0, help="extra per-share cost assumed in the net edge, in points")
     rk.add_argument("--no-exit-fee", action="store_true", help="do not count a future exit fee in the net edge")
     rk.add_argument("--max-bucket-frac", type=float, default=0.25, help="max cost in one bucket, fraction of equity (0 = off)")
@@ -53,11 +61,11 @@ def build_parser():
     rk.add_argument("--exit-min-ratio", type=float, default=0.0, help="hold a model-driven exit if net proceeds/share < ratio x our probability (0 = off)")
     ap.add_argument("--buy-every", type=int, default=60, help="minutes between buys")
     ap.add_argument("--sell-every", type=int, default=10, help="minutes between ticks / sell checks")
-    ap.add_argument("--model-refresh", type=int, default=60, help="minutes between ensemble re-runs")
-    ap.add_argument("--pred-source", choices=["calibrated", "ensemble"], default="calibrated",
+    ap.add_argument("--model-refresh", type=int, default=None, help="minutes between ensemble re-runs")
+    ap.add_argument("--pred-source", choices=["light", "calibrated", "ensemble"], default=None,
                     help="calibrated = ensemble total + recalibrated bucket shape (backtested); ensemble = its native probabilities")
     ap.add_argument("--b", type=float, default=1.15, help="multiplier on the ensemble's remaining-tweets forecast")
-    ap.add_argument("--start-after-days", type=float, default=2.0, help="don't buy until this many days after a market opens")
+    ap.add_argument("--start-after-days", type=float, default=None, help="don't buy until this many days after a market opens")
     ap.add_argument("--max-slippage", type=float, default=1.0, help="reject a buy if the average fill is worse than the best ask by this many points")
     ap.add_argument("--model-stale-min", type=int, default=150, help="no NEW entries when the applied forecast is older than this (exits still run)")
     ap.add_argument("--max-count-gap", type=int, default=30, help="no NEW entries when our tweet database is more than this many tweets behind Polymarket")
@@ -75,8 +83,27 @@ def build_parser():
     return ap
 
 
+PRESETS = {      # units as on the command line (percent / percentage points)
+    # backtest-selected: src/simulation/backtest/ (train/test split, conservative spread + lagged count)
+    "light": dict(pred_source="light", min_pred=10.0, min_mkt=2.0, min_edge=0.0, min_net_edge=2.0, sell_below=0.0, no_bid_sell=True,
+                  no_exit_fee=True, start_after_days=4.0, model_refresh=180, top_k=2, max_adds=0, pick_best=True),
+    "legacy": dict(pred_source="calibrated", min_pred=8.0, min_mkt=3.0, min_edge=1.0, min_net_edge=0.0, sell_below=4.0, no_bid_sell=False,
+                   no_exit_fee=False, start_after_days=2.0, model_refresh=60, top_k=0, max_adds=-1, pick_best=False),
+}
+
+
+def apply_preset(a):
+    for k, v in PRESETS[a.strategy].items():
+        cur = getattr(a, k, None)
+        if cur is None or cur is False:                   # None = not given; False = store_true flag not passed
+            setattr(a, k, v)
+    if a.pick_random:
+        a.pick_best = False
+    return a
+
+
 def _main(argv=None):
-    a = build_parser().parse_args(argv)
+    a = apply_preset(build_parser().parse_args(argv))
     run_dir = os.path.join(a.runs_dir, a.run_name)
     if a.fresh and os.path.isdir(run_dir):
         for f in os.listdir(run_dir):
@@ -99,7 +126,7 @@ def _main(argv=None):
     except AlreadyRunning as ex:
         raise SystemExit(str(ex))
     rules = Rules(stake=a.stake, min_pred=a.min_pred / 100, min_mkt=a.min_mkt / 100, min_edge=a.min_edge / 100,
-                  sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell,
+                  sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell, top_k=a.top_k, max_adds=a.max_adds, pick_best=a.pick_best,
                   min_net_edge=a.min_net_edge / 100, slippage_allowance=a.slippage_allowance / 100, include_exit_fee=not a.no_exit_fee,
                   max_bucket_frac=a.max_bucket_frac, max_tail_frac=a.max_tail_frac, max_event_frac=a.max_event_frac,
                   min_cash_reserve=a.min_cash_reserve, drawdown_stop=a.drawdown_stop, max_sell_slippage=a.max_sell_slippage / 100,
@@ -115,7 +142,7 @@ def _main(argv=None):
         feed = LiveFeed(backup_dir=a.backup_dir)
         trader = PaperTrader(feed, rules, run_dir, a.bankroll, a.pred_source, a.buy_every, a.sell_every, a.model_refresh,
                              a.seed, a.b, not a.no_auto_roll, a.start_after_days, a.max_slippage / 100, a.chart_every, verbose=True,
-                             model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap,
+                             model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap, max_data_age_h=a.max_data_age_h, count_lag_h=a.count_lag_h,
                              backup_dir=a.backup_dir, allow_new_state=a.allow_new_state)
         from constants import EVENT_HASH
         slug = a.slug or trader.account.state.get("current_slug") or EVENT_HASH

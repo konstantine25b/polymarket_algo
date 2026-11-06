@@ -7,9 +7,12 @@ import subprocess
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 
+from src.simulation.paper_trader.feeds import Bucket, Event
+from src.simulation.paper_trader.fills import FeeSchedule as FEES_T
 from src.simulation.paper_trader.procutil import AlreadyRunning, RunLock, lock_state
 from src.simulation.paper_trader.runner import PaperTrader, UtcFormatter, configure_logging
 from src.simulation.paper_trader.strategy import Quote, Rules
@@ -814,3 +817,149 @@ def test_runbook_and_ci_are_linux_ready():
     assert "15 passed" not in rb and "Linux" in rb
     assert os.path.exists(os.path.join(ROOT, ".github/workflows/tests.yml"))
     assert "Restart=on-failure" in open(os.path.join(ROOT, "src/simulation/paper_trader/deploy/paper-trader.service")).read()
+
+
+# ================================================================ light model + backtested strategy preset
+from src.simulation.paper_trader.light_model import LightModel, LightParams, LightPredictor, load_times
+from src.simulation.paper_trader.strategy import choose_buy
+
+REAL_CSV = os.path.join(ROOT, "src", "data", "elonmusk_reformatted.csv")
+
+
+@pytest.fixture(scope="module")
+def times():
+    return load_times(REAL_CSV)
+
+
+RANGES20 = [(i, i + 19) for i in range(0, 700, 20)]
+S0, E0 = pd.Timestamp("2026-10-20 12:00"), pd.Timestamp("2026-10-27 12:00")        # naive ET
+
+
+def _count(times, a, b):
+    return int(np.searchsorted(times, np.datetime64(b), "right") - np.searchsorted(times, np.datetime64(a), "left"))
+
+
+def test_light_probs_are_a_distribution_and_move_with_the_count(times):
+    now = S0 + pd.Timedelta(days=3)
+    m = LightModel(times).fit(now)
+    so = _count(times, S0, now)
+    p = m.bucket_probs(RANGES20, S0, now, E0, so)
+    assert p.sum() == pytest.approx(1.0) and (p >= 0).all()
+    mean = lambda q: sum(q[i] * (RANGES20[i][0] + 10) for i in range(len(q)))
+    assert mean(m.bucket_probs(RANGES20, S0, now, E0, so + 60)) > mean(p) + 40       # more tweets so far -> higher final
+    assert (p[: so // 20] == 0).all()                                                  # buckets already passed are impossible
+    with pytest.raises(ForecastError):
+        m.bucket_probs(RANGES20, S0, now, E0, -3)
+
+
+def test_light_model_is_causal(times):
+    now = S0 + pd.Timedelta(days=3)
+    so = _count(times, S0, now)
+    full = LightModel(times).fit(now).bucket_probs(RANGES20, S0, now, E0, so)
+    cut = times[times <= np.datetime64(now)]
+    only_past = LightModel(cut).fit(now).bucket_probs(RANGES20, S0, now, E0, so)
+    assert np.allclose(full, only_past)                                               # tweets after `now` change nothing
+
+
+def test_stale_history_is_not_read_as_a_quiet_week(times):
+    now = S0 + pd.Timedelta(days=3)
+    stale = times[times <= np.datetime64(now - pd.Timedelta(days=2))]               # CSV stopped 2 days ago
+    m = LightModel(stale).fit(now)
+    fresh = LightModel(times).fit(now)
+    assert m.level > 0.6 * fresh.level                                              # old code-style zero-fill would give ~ 1/3 of it
+
+
+def test_light_predictor_adapter_and_speed(times):
+    import time as _t
+    lp = LightPredictor(REAL_CSV)
+    assert lp.ready
+    ev = make_event()
+    ev.start, ev.end = pd.Timestamp("2026-10-27 16:00", tz="UTC"), pd.Timestamp("2026-11-03 17:00", tz="UTC")
+    now = pd.Timestamp("2026-10-30 16:00", tz="UTC")
+    t0 = _t.time()
+    p = lp.probs([(i, i + 19) for i in range(0, 700, 20)], 120, None, event=ev, now=now)
+    assert _t.time() - t0 < 1.0 and p.sum() == pytest.approx(1.0) and lp.last_mean_total > 120
+    lagged = LightPredictor(REAL_CSV, count_lag_h=3)
+    lagged.probs([(i, i + 19) for i in range(0, 700, 20)], 120, None, event=ev, now=now)
+    assert lagged.last_mean_total > lp.last_mean_total                              # unseen tweets are added back
+
+
+def test_top_k_and_best_pick_and_no_averaging_down():
+    quotes = {t: Quote([(0.01, 100)], [(0.05, 100)]) for t in "abcd"}
+    preds = {"a": 0.40, "b": 0.30, "c": 0.20, "d": 0.10}
+    r = Rules(top_k=2)
+    assert [c["bucket"] for c in buy_candidates(preds, quotes, r)] == ["a", "b"]
+    assert len(buy_candidates(preds, quotes, Rules(top_k=0))) == 4
+    cands = buy_candidates(preds, quotes, r)
+    assert choose_buy(cands, np.random.default_rng(0), best=True)["bucket"] == "a"
+    rules = Rules(max_adds=0)
+    el, rej = risk_filter([cand("c")], {"c": 1.0}, ORDER, PREDS, 10, 10, 9, rules, {"c": 1})
+    assert not el and "averaging down" in rej[0][1]
+    assert risk_filter([cand("c")], {}, ORDER, PREDS, 10, 10, 10, rules, {})[0]
+    assert risk_filter([cand("c")], {"c": 1.0}, ORDER, PREDS, 10, 10, 9, Rules(max_adds=1), {"c": 1})[0]
+    assert not risk_filter([cand("c")], {"c": 2.0}, ORDER, PREDS, 10, 10, 8, Rules(max_adds=1), {"c": 2})[0]
+
+
+def test_presets():
+    from src.simulation.paper_trader.__main__ import apply_preset, build_parser
+    a = apply_preset(build_parser().parse_args([]))
+    assert (a.pred_source, a.top_k, a.max_adds, a.start_after_days, a.no_bid_sell, a.pick_best) == ("light", 2, 0, 4.0, True, True)
+    b = apply_preset(build_parser().parse_args(["--strategy", "legacy"]))
+    assert (b.pred_source, b.top_k, b.max_adds, b.start_after_days, b.no_bid_sell) == ("calibrated", 0, -1, 2.0, False)
+    c = apply_preset(build_parser().parse_args(["--strategy", "legacy", "--max-adds", "0", "--top-k", "3"]))
+    assert c.max_adds == 0 and c.top_k == 3                                           # explicit flags beat the preset, even 0
+
+
+class LightFeed(FakeFeed):
+    """Replays Oct 27 - Nov 3 from the real tweet CSV; books are priced so that every bucket looks cheap vs the model."""
+    mode = "replay"
+    csv_path = REAL_CSV
+
+    def __init__(self):
+        self.t = load_times(REAL_CSV)
+        self.mult = 0.5
+        self.p = None
+
+    def tweet_count(self, event, now):
+        f = lambda x: np.datetime64(x.tz_convert("US/Eastern").tz_localize(None))
+        return int(np.searchsorted(self.t, f(now), "right") - np.searchsorted(self.t, f(event.start), "left"))
+
+    def quotes(self, event, now):
+        lp = LightPredictor(REAL_CSV)
+        p = lp.probs(event.ranges, self.tweet_count(event, now), None, event=event, now=now)
+        return {b.title: Quote([(max(0.01, x * self.mult - 0.01), 1000)], [(max(0.02, x * self.mult), 1000)]) for b, x in zip(event.buckets, p)}
+
+    def resolution(self, event):
+        return None
+
+
+def light_event():
+    start = pd.Timestamp("2026-10-27 16:00", tz="UTC")
+    bks = [Bucket(f"{lo}-{lo + 19}", lo, lo + 19, f"t{lo}", FEES_T(0.05, 1.0)) for lo in range(0, 700, 20)]
+    return Event("light-fake", "Light fake", start, start + pd.Timedelta(days=7, hours=1), bks)
+
+
+def test_runner_in_light_mode_buys_top2_never_averages_down_and_never_sells(tmp_path):
+    ev, feed = light_event(), LightFeed()
+    rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, include_exit_fee=False, sell_below=0.0,
+                  sell_if_bid_above_pred=False, top_k=2, max_adds=0, pick_best=True)
+    t = PaperTrader(feed, rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    for h in range(96, 7 * 24, 1):
+        t.tick(ev.start + pd.Timedelta(hours=h))
+    trades = list(csv.DictReader(open(tmp_path / "trades.csv")))
+    buys = [x for x in trades if x["action"] == "BUY"]
+    assert buys and not [x for x in trades if x["action"] == "SELL"]
+    assert len({x["bucket"] for x in buys}) == len(buys)                                # one buy per bucket: no averaging down
+    for x in buys:                                                                      # every buy was a top-2 model bucket at decision time
+        assert float(x["pred"]) >= 0.10
+    assert t.account.cash >= 0 and not os.path.exists(tmp_path / "forecast_state.json")   # no forecast job / restore machinery needed
+    assert os.path.getsize(tmp_path / "forecasts.csv") > 0
+
+
+def test_light_mode_blocks_buys_on_stale_history(tmp_path):
+    ev, feed = light_event(), LightFeed()
+    t = PaperTrader(feed, Rules(), str(tmp_path), 40.0, "light", chart_every=10 ** 6, max_data_age_h=36.0)
+    newest = t.model.newest_tweet().tz_localize("US/Eastern", ambiguous=True)
+    assert t.buy_block_reason(newest + pd.Timedelta(hours=10), 100, 100) is None
+    assert "stale" in t.buy_block_reason(newest + pd.Timedelta(hours=40), 100, 100)
