@@ -963,3 +963,13 @@ def test_light_mode_blocks_buys_on_stale_history(tmp_path):
     newest = t.model.newest_tweet().tz_localize("US/Eastern", ambiguous=True)
     assert t.buy_block_reason(newest + pd.Timedelta(hours=10), 100, 100) is None
     assert "stale" in t.buy_block_reason(newest + pd.Timedelta(hours=40), 100, 100)
+
+
+def test_bid_sell_margin_opt_in():
+    from src.simulation.paper_trader.__main__ import apply_preset, build_parser
+    a = apply_preset(build_parser().parse_args(["--bid-sell-margin", "5"]))
+    assert a.no_bid_sell is False and a.sell_hysteresis == 5.0
+    assert apply_preset(build_parser().parse_args([])).no_bid_sell is True            # default light preset still holds
+    r = Rules(sell_if_bid_above_pred=True, sell_hysteresis=0.05, sell_below=0.0)
+    assert sell_reason(0.60, 0.80, r)                                                  # market pays 80% for what we value at 60%
+    assert sell_reason(0.60, 0.63, r) is None

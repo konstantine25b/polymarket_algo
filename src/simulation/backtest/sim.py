@@ -32,6 +32,7 @@ class Strat:
     start_after_h: float = 0.0
     stop_before_h: float = 0.0
     sell_below: Optional[float] = None
+    sell_bid_margin: Optional[float] = None   # sell when bid - exit fee per share > our probability + margin (take the market's overpayment)
     max_bucket_frac: float = 0.25
     max_event_frac: float = 0.8
     fee_rate: float = 0.05
@@ -65,8 +66,14 @@ def run_event(e, S: Strat):
         ask = np.where(ok, np.minimum(mid + S.half_spread, 0.99), np.nan)
         bid = np.where(ok, np.maximum(mid - S.half_spread, 0.001), np.nan)
         p = S.w * e["model"][i] + (1 - S.w) * e["mk"][i]
+        sell_mask = np.zeros(nb, bool)
         if S.sell_below is not None:
-            for b in np.nonzero((shares > 0) & ok & (p < S.sell_below))[0]:
+            sell_mask |= (shares > 0) & ok & (p < S.sell_below)
+        if S.sell_bid_margin is not None:
+            net_bid = bid - S.fee_rate * bid * (1 - bid)
+            sell_mask |= (shares > 0) & ok & (net_bid > p + S.sell_bid_margin)
+        if sell_mask.any():
+            for b in np.nonzero(sell_mask)[0]:
                 fee = shares[b] * S.fee_rate * bid[b] * (1 - bid[b])
                 cash += shares[b] * bid[b] - fee
                 fees_paid += fee
@@ -78,7 +85,7 @@ def run_event(e, S: Strat):
             continue
         rank = (-p).argsort().argsort()                                   # 0 = most likely bucket
         fee_ps = S.fee_rate * ask * (1 - ask)
-        exit_fee = fee_ps if S.sell_below is not None else 0.0
+        exit_fee = fee_ps if (S.sell_below is not None or S.sell_bid_margin is not None) else 0.0
         net = p - ask - fee_ps - exit_fee
         cand = ok & (rank < S.top_k) & (p >= S.min_p) & (net > S.min_edge) & (ask >= S.min_ask)
         cand &= (shares == 0) | (adds < S.max_adds)

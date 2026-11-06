@@ -46,6 +46,9 @@ def build_parser():
     ap.add_argument("--pick-random", action="store_true", help="draw the bucket at random (weight = edge) instead of taking the best net edge")
     ap.add_argument("--max-data-age-h", type=float, default=36.0, help="light model: no new buys if the newest tweet in our history is older than this")
     ap.add_argument("--count-lag-h", type=float, default=0.0, help="light model: hours the tweet count lags reality; the expected unseen tweets are added")
+    ap.add_argument("--bid-sell-margin", type=float, default=None,
+                    help="ENABLE selling a held bucket when its best bid exceeds our probability by more than this many points "
+                         "(take the market's overpayment). Backtest: roughly doubles profit if our tweet count is real-time, HURTS if it lags >=2h")
     ap.add_argument("--no-bid-sell", action="store_true", help="disable the 'sell when market bid > our probability' rule")
     rk = ap.add_argument_group("cost / risk / exit controls (experiments - defaults are NOT backtest-validated)")
     rk.add_argument("--min-net-edge", type=float, default=None, help="required edge in points AFTER fees and slippage allowance")
@@ -99,6 +102,8 @@ def apply_preset(a):
             setattr(a, k, v)
     if a.pick_random:
         a.pick_best = False
+    if a.bid_sell_margin is not None:                     # explicit opt-in beats the preset's 'no bid-sell'
+        a.no_bid_sell, a.sell_hysteresis = False, a.bid_sell_margin
     return a
 
 
