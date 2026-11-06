@@ -15,7 +15,23 @@ from pathlib import Path
 
 import pandas as pd
 
+from .procutil import lock_state
+
 ROOT = Path(__file__).resolve().parents[3]
+
+
+LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d)(?:,\d+)?([+-]\d\d:\d\d)? (ERROR|WARNING) (.*)")
+
+
+def parse_log_time(text: str, offset: str = None):
+    """Aware UTC timestamp of a log line. An explicit offset wins; a naive stamp (legacy logs) is read as host-local."""
+    try:
+        if offset:
+            return pd.Timestamp(text.replace(" ", "T") + offset).tz_convert("UTC")
+        local = datetime.fromisoformat(text.replace(" ", "T")).astimezone()      # naive -> host-local, DST-aware
+        return pd.Timestamp(local).tz_convert("UTC")
+    except ValueError:
+        return None
 
 
 def _csv(path, **kw):
@@ -38,19 +54,29 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
     # 1) process
     lock = os.path.join(run_dir, "run.lock")
     running = False
-    if os.path.exists(lock):
-        try:
-            pid = int(open(lock).read().strip())
-            os.kill(pid, 0)
-            running = True
-            add("OK", f"process running (pid {pid})")
-        except (ProcessLookupError, ValueError):
-            add("CRIT", "run.lock exists but the process is dead - the trader crashed or was killed; start it again (it resumes)")
-        except PermissionError:
-            running = True
-            add("OK", "process running (owned by another user)")
+    st_lock, info = lock_state(lock)
+    if st_lock == "held":
+        running = True
+        add("OK", f"process running (pid {info.get('pid', '?')}, holds run.lock)")
+    elif st_lock == "free":
+        add("CRIT", "run.lock exists but no process holds it - the trader crashed or was stopped; start it again (it resumes)")
+        ex = os.path.join(run_dir, "exit_status.json")
+        if os.path.exists(ex):
+            try:
+                e = json.load(open(ex))
+                add("INFO", f"   last exit: {e.get('reason')} (code {e.get('exit_code')}) at {e.get('ts_utc')}")
+            except Exception:
+                pass
     else:
         add("CRIT", "no run.lock - the trader is not running (finished or stopped); start it again to resume")
+    hb = os.path.join(run_dir, "heartbeat.json")
+    if running and os.path.exists(hb):
+        try:
+            h = json.load(open(hb))
+            hb_age = (now - pd.Timestamp(h["ts_utc"])).total_seconds() / 60
+            add("OK" if hb_age <= 15 else "CRIT", f"heartbeat {hb_age:.0f} min ago (ticks {h.get('ticks')}, consecutive tick failures {h.get('fails')})")
+        except Exception:
+            add("WARN", "heartbeat.json unreadable")
 
     # 2) freshness of the last tick
     eq = _csv(os.path.join(run_dir, "equity.csv"), parse_dates=["ts"])
@@ -84,23 +110,22 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
         add("OK" if age <= model_stale_min else "WARN",
             f"last ensemble forecast {age:.0f} min ago (total {fc.total_predicted.iloc[-1]:.0f}, {fc.days_left.iloc[-1]:.2f} days left then)")
 
-    # 5) errors in the log (local-time stamps)
+    # 5) errors in the log (new logs carry an explicit UTC offset; legacy naive lines are read as host-local time)
     log_path = os.path.join(run_dir, "paper_trader.log")
     if os.path.exists(log_path):
         recent_err, recent_warn, last_errs = 0, 0, []
-        cutoff = datetime.now() - pd.Timedelta(minutes=60).to_pytimedelta()
+        cutoff = now - pd.Timedelta(minutes=60)
         for line in open(log_path, errors="replace"):
-            m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ (ERROR|WARNING) (.*)", line)
+            m = LOG_LINE.match(line)
             if not m:
                 continue
-            try:
-                t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-            except ValueError:
+            t = parse_log_time(m.group(1), m.group(2))
+            if t is None:
                 continue
             if t >= cutoff:
-                if m.group(2) == "ERROR":
+                if m.group(3) == "ERROR":
                     recent_err += 1
-                    last_errs.append(m.group(3)[:140])
+                    last_errs.append(m.group(4)[:140])
                 else:
                     recent_warn += 1
         add("OK" if recent_err == 0 else ("CRIT" if recent_err >= 5 else "WARN"), f"last 60 min in paper_trader.log: {recent_err} errors, {recent_warn} warnings")

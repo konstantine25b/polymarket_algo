@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import signal
+import sys
 import threading
 import time
 import traceback
@@ -33,6 +34,7 @@ from .console import Console, WIDTH
 from .charts import plot_equity, plot_market, write_summary
 from .feeds import Event, LiveFeed, ReplayFeed
 from .fills import FeeSchedule, buy_with_budget, sell_shares, taker_fee
+from .procutil import write_heartbeat
 from .model import CalibratedModel, NativeEnsembleModel
 from .strategy import Quote, Rules, buy_candidates, choose_buy, sell_reason
 
@@ -68,6 +70,9 @@ class PaperTrader:
         self._last_forecast_at: Optional[pd.Timestamp] = None
         self._stop = False
         self._warned_min_order = set()
+        self._mono, self._sleep, self._wall = time.monotonic, time.sleep, time.time      # injectable clocks (tests)
+        self._last_beat = 0.0
+        self._fails = 0
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -472,25 +477,38 @@ class PaperTrader:
         plot_equity(self.run_dir, self.account.state["start_cash"])
 
     # ------------------------------------------------------------------ live loop
+    def _sleep_until(self, deadline: float):
+        """Sleep in <=5 s slices until the monotonic `deadline`. The remaining time is recomputed at the call, so a
+        wall-clock jump or a machine suspend can never hand time.sleep() a negative number (B01)."""
+        while not self._stop:
+            remaining = deadline - self._mono()
+            if remaining <= 0:
+                return
+            self._sleep(min(5.0, remaining))
+            if self._mono() - self._last_beat >= 60:
+                self._beat()
+
+    def _beat(self, **extra):
+        self._last_beat = self._mono()
+        write_heartbeat(self.run_dir, ticks=self.ticks, stop=self._stop, fails=self._fails, **extra)
+
     def run_live(self):
         log.info("paper trading LIVE | run dir %s | rules %s", self.run_dir, self.rules.as_dict())
         self.startup_banner()
         step = self.sell_every * 60
-        fails = 0
+        self._fails = 0
         while not self._stop:
-            t0 = time.time()
             try:
                 self.tick(pd.Timestamp.now(tz="UTC"))
-                fails = 0
+                self._fails = 0
             except Exception:
-                fails += 1
-                log.error("tick failed (%d in a row):\n%s", fails, traceback.format_exc())
-            sleep_for = step - (time.time() % step)            # align to the 10-minute clock
-            if fails >= 3:
+                self._fails += 1
+                log.error("tick failed (%d in a row):\n%s", self._fails, traceback.format_exc())
+            self._beat(last_tick_ok=self._fails == 0)
+            sleep_for = max(0.0, step - (self._wall() % step))          # align to the 10-minute clock
+            if self._fails >= 3:
                 sleep_for = max(sleep_for, 120)
-            end = time.time() + sleep_for
-            while time.time() < end and not self._stop:
-                time.sleep(min(5, end - time.time()))
+            self._sleep_until(self._mono() + sleep_for)
         log.info("stopped; state saved")
 
     def stop(self, *_):
@@ -515,9 +533,27 @@ class PaperTrader:
         return self.account.state
 
 
+class UtcFormatter(logging.Formatter):
+    """ISO-8601 UTC with an explicit offset, so log age never depends on the host timezone (B16)."""
+    converter = time.gmtime
+
+    def formatTime(self, record, datefmt=None):
+        return time.strftime("%Y-%m-%dT%H:%M:%S", self.converter(record.created)) + f",{int(record.msecs):03d}+00:00"
+
+
+def _same_file(stream, path) -> bool:
+    try:
+        return os.path.exists(path) and os.path.samestat(os.fstat(stream.fileno()), os.stat(path))
+    except Exception:
+        return False
+
+
 def configure_logging(run_dir: str, mirror_console: bool = False):
+    """Handlers: stderr (the supervisor's journal), paper_trader.log (complete), and with mirror_console the
+    console.log mirror. console.log has ONE writer: this process. Do not also `tee` stdout/stderr into it (B15);
+    if stderr/stdout was redirected straight onto console.log the mirror is skipped so lines are not doubled."""
     os.makedirs(run_dir, exist_ok=True)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    fmt = UtcFormatter("%(asctime)s %(levelname)s %(message)s")
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     for h in list(root.handlers):
@@ -528,8 +564,9 @@ def configure_logging(run_dir: str, mirror_console: bool = False):
     fh.setFormatter(fmt)
     root.addHandler(sh)
     root.addHandler(fh)
-    if mirror_console:                                  # console.log = exactly what was printed on screen
-        ch = logging.FileHandler(os.path.join(run_dir, "console.log"), mode="a")
+    console_path = os.path.join(run_dir, "console.log")
+    if mirror_console and not (_same_file(sys.stderr, console_path) or _same_file(sys.stdout, console_path)):
+        ch = logging.FileHandler(console_path, mode="a")
         ch.setFormatter(fmt)
         root.addHandler(ch)
     logging.getLogger("urllib3").setLevel(logging.WARNING)

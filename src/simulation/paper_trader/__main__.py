@@ -8,6 +8,7 @@ REPLAY a finished weekly market through the same engine in seconds (for testing/
     python -m src.simulation.paper_trader --run-name replay1 --replay elon-musk-of-tweets-october-16-october-23-2026
 """
 import argparse
+import logging
 import os
 import signal
 import sys
@@ -20,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from .feeds import LiveFeed, ReplayFeed
+from .procutil import AlreadyRunning, RunLock, write_exit_status
 from .runner import PaperTrader, configure_logging
 from .strategy import Rules
 
@@ -56,7 +58,7 @@ def build_parser():
     return ap
 
 
-def main(argv=None):
+def _main(argv=None):
     a = build_parser().parse_args(argv)
     run_dir = os.path.join(a.runs_dir, a.run_name)
     if a.fresh and os.path.isdir(run_dir):
@@ -74,14 +76,10 @@ def main(argv=None):
                             "args": vars(a), "git_commit": commit}) + "\n")
     if a.stake < 1.0:
         raise SystemExit("--stake must be at least 1.0 (Polymarket's minimum market order)")
-    lock = os.path.join(run_dir, "run.lock")
-    if os.path.exists(lock):
-        try:
-            os.kill(int(open(lock).read().strip()), 0)
-            raise SystemExit(f"another paper trader is already running on {run_dir}")
-        except (ProcessLookupError, ValueError):
-            pass
-    open(lock, "w").write(str(os.getpid()))
+    try:
+        lock = RunLock(os.path.join(run_dir, "run.lock")).acquire()     # held for the life of the process (B14)
+    except AlreadyRunning as ex:
+        raise SystemExit(str(ex))
     rules = Rules(stake=a.stake, min_pred=a.min_pred / 100, min_mkt=a.min_mkt / 100, min_edge=a.min_edge / 100,
                   sell_below=a.sell_below / 100, sell_if_bid_above_pred=not a.no_bid_sell)
     try:
@@ -102,16 +100,42 @@ def main(argv=None):
         trader.account.state["current_slug"] = slug
         trader.account.state["rules"] = rules.as_dict()
         trader.account.save()
-        signal.signal(signal.SIGINT, trader.stop)
-        signal.signal(signal.SIGTERM, trader.stop)
+        def _on_signal(signum, _frame):
+            logging.getLogger("paper_trader").warning("received signal %s - stopping after the current tick", signal.Signals(signum).name)
+            write_exit_status(run_dir, f"signal {signal.Signals(signum).name}", 0, pending=True)
+            trader.stop()
+        signal.signal(signal.SIGINT, _on_signal)
+        signal.signal(signal.SIGTERM, _on_signal)
         if a.once:
             trader.tick(pd.Timestamp.now(tz="UTC"))
             return 0
         trader.run_live()
         return 0
     finally:
-        if os.path.exists(lock):
-            os.remove(lock)
+        lock.release()
+
+
+def main(argv=None):
+    """Outermost boundary: whatever kills the process leaves a traceback in the log and exit_status.json (B02)."""
+    import logging
+    import traceback
+    a, _ = build_parser().parse_known_args(argv)
+    run_dir = os.path.join(a.runs_dir, a.run_name)
+    try:
+        code = _main(argv)
+        write_exit_status(run_dir, "clean exit", int(code or 0))
+        return code
+    except SystemExit as ex:
+        write_exit_status(run_dir, "SystemExit", ex.code if isinstance(ex.code, int) else 1, detail=str(ex.code))
+        raise
+    except KeyboardInterrupt:
+        logging.getLogger("paper_trader").error("interrupted (KeyboardInterrupt)")
+        write_exit_status(run_dir, "KeyboardInterrupt", 130)
+        return 130
+    except BaseException as ex:
+        logging.getLogger("paper_trader").exception("FATAL: paper trader is exiting on an uncaught exception")
+        write_exit_status(run_dir, "uncaught exception", 1, error=repr(ex), traceback=traceback.format_exc())
+        return 1
 
 
 if __name__ == "__main__":
