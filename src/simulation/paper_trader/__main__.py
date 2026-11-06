@@ -46,6 +46,8 @@ def build_parser():
     ap.add_argument("--b", type=float, default=1.15, help="multiplier on the ensemble's remaining-tweets forecast")
     ap.add_argument("--start-after-days", type=float, default=2.0, help="don't buy until this many days after a market opens")
     ap.add_argument("--max-slippage", type=float, default=1.0, help="reject a buy if the average fill is worse than the best ask by this many points")
+    ap.add_argument("--model-stale-min", type=int, default=150, help="no NEW entries when the applied forecast is older than this (exits still run)")
+    ap.add_argument("--max-count-gap", type=int, default=30, help="no NEW entries when our tweet database is more than this many tweets behind Polymarket")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-auto-roll", action="store_true", help="stop trading when the current market ends instead of moving to the next")
     ap.add_argument("--chart-every", type=int, default=1, help="rewrite charts every N ticks")
@@ -92,7 +94,8 @@ def _main(argv=None):
             return 0
         feed = LiveFeed()
         trader = PaperTrader(feed, rules, run_dir, a.bankroll, a.pred_source, a.buy_every, a.sell_every, a.model_refresh,
-                             a.seed, a.b, not a.no_auto_roll, a.start_after_days, a.max_slippage / 100, a.chart_every, verbose=True)
+                             a.seed, a.b, not a.no_auto_roll, a.start_after_days, a.max_slippage / 100, a.chart_every, verbose=True,
+                             model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap)
         from constants import EVENT_HASH
         slug = a.slug or trader.account.state.get("current_slug") or EVENT_HASH
         trader.event = feed.load_event(slug)

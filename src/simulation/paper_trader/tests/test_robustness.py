@@ -1,4 +1,5 @@
 """Regression tests for the B01-B17 audit (live40, Nov 2-6). Each one reproduces the incident shape."""
+import csv
 import json
 import logging
 import os
@@ -11,7 +12,7 @@ import pytest
 
 from src.simulation.paper_trader.procutil import AlreadyRunning, RunLock, lock_state
 from src.simulation.paper_trader.runner import PaperTrader, UtcFormatter, configure_logging
-from src.simulation.paper_trader.strategy import Rules
+from src.simulation.paper_trader.strategy import Quote, Rules
 from test_paper_trader import FakeFeed, make_event
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -296,3 +297,190 @@ def test_failed_refresh_fails_the_forecast_without_running_the_model(monkeypatch
     fc = feeds.LiveFeed().forecast(make_event(), pd.Timestamp("2026-11-03 12:00", tz="UTC"), str(tmp_path))
     assert fc is None
     assert len(calls) == 1 and "TweetCSVGetter" in " ".join(calls[0])      # model_worker was never launched
+
+
+# ================================================================ B06 / B07 / B08 forecast lifecycle
+from src.simulation.paper_trader.model import (ForecastError, NativeEnsembleModel, gamma_bucket_probs, map_native_frames,
+                                               validate_forecast, CalibratedModel)
+
+GOOD = {"total_predicted": 420.0, "current_tweets": 300, "time_remaining_days": 2.0, "frames": None}
+
+
+@pytest.mark.parametrize("bad", [
+    {**GOOD, "total_predicted": 250.0},                      # total below tweets already counted
+    {**GOOD, "time_remaining_days": 0.0},                    # zero horizon
+    {**GOOD, "time_remaining_days": -1.0},
+    {**GOOD, "total_predicted": float("nan")},
+    {**GOOD, "total_predicted": float("inf")},
+    {**GOOD, "total_predicted": -5.0},
+    {**GOOD, "current_tweets": None},
+    {**GOOD, "event_slug": "some-old-event"},
+    {**GOOD, "generated_at_utc": "2999-01-01T00:00:00+00:00"},   # from the future
+    "not a dict",
+])
+def test_bad_forecasts_rejected_and_never_make_model_ready(tmp_path, bad):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    with pytest.raises(ForecastError):
+        t._apply_forecast(bad, ev, now)
+    assert not t.model.ready and not os.path.exists(tmp_path / "forecast_state.json")
+
+
+def test_bad_forecast_does_not_replace_a_good_one(tmp_path):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    rate = t.model.rate
+    with pytest.raises(ForecastError):
+        t._apply_forecast({**GOOD, "total_predicted": 100.0}, ev, now)
+    assert t.model.ready and t.model.rate == rate
+
+
+def test_probability_functions_fail_closed():
+    rng = [(i, i + 19) for i in range(0, 600, 20)]
+    for kw in (dict(so_far=float("nan")), dict(rate_per_day=-1.0), dict(days_left=float("inf")), dict(days_left=-1)):
+        args = dict(so_far=300, rate_per_day=60, days_left=2.0)
+        args.update(kw)
+        with pytest.raises(ForecastError):
+            gamma_bucket_probs(rng, **args)
+    with pytest.raises(ForecastError):
+        gamma_bucket_probs([(0, 19), (20, 39)], so_far=500, rate_per_day=10, days_left=1)      # count outside every bucket
+    p = gamma_bucket_probs(rng, so_far=305, rate_per_day=60, days_left=0.0)                   # zero horizon: stays put
+    assert p[15] == pytest.approx(1.0)                                                         # bucket 300-319, no invented tweets
+    p0 = gamma_bucket_probs(rng, so_far=305, rate_per_day=0.0, days_left=3.0)
+    assert p0[15] == pytest.approx(1.0)
+    # native frames: impossible outcomes zeroed, zero mass rejected (no uniform fallback)
+    nat = map_native_frames({"0-19": 0.5, "20-39": 0.5}, [(0, 19), (20, 39)], so_far=25)
+    assert nat.tolist() == [0.0, 1.0]
+    with pytest.raises(ForecastError):
+        map_native_frames({"0-19": 1.0}, [(0, 19), (20, 39)], so_far=25)
+    with pytest.raises(ForecastError):
+        map_native_frames({"900-919": 1.0}, [(0, 19), (20, 39)])
+
+
+def test_restart_restores_forecast_and_keeps_selling(tmp_path):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    t.tick(now)
+    held_before = len(t.account.positions)
+    # "restart": brand-new trader on the same run dir, worker will fail from now on
+    class Failing(FakeFeed):
+        def forecast(self, *a, **k):
+            return None
+    t2 = PaperTrader(Failing(), Rules(), str(tmp_path), 30.0, b=1.0, start_after_days=0, chart_every=1000)
+    t2.event, t2.events["fake"] = ev, ev
+    later = now + pd.Timedelta(minutes=10)
+    t2._refresh_model(ev, later, blocking=False)
+    assert t2.model.ready and t2.model_age_min(later) == pytest.approx(10.0)         # true age, not attempt time
+    assert t2.buy_block_reason(later, 300, 300) is None
+    # a held position whose bid exceeds our probability is still sold although the next worker run fails
+    if t2.account.positions:
+        bucket = next(iter(t2.account.positions.values()))["bucket"]
+        t2.feed.books[bucket] = Quote([(0.95, 500)], [(0.97, 500)])
+    n_sells = t2.account.state["n_sells"]
+    t2.tick(later)
+    assert held_before == 0 or t2.account.state["n_sells"] == n_sells + 1
+
+
+@pytest.mark.parametrize("mutate", ["expired", "corrupt", "wrong_event", "wrong_schema", "bad_values"])
+def test_invalid_saved_forecast_never_becomes_ready(tmp_path, mutate):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    path = tmp_path / "forecast_state.json"
+    st = json.loads(path.read_text())
+    later = now + pd.Timedelta(minutes=10)
+    if mutate == "expired":
+        later = now + pd.Timedelta(minutes=151)
+    elif mutate == "corrupt":
+        path.write_text(path.read_text()[:40])
+    elif mutate == "wrong_event":
+        st["event_slug"] = "other"
+    elif mutate == "wrong_schema":
+        st["schema"] = 99
+    elif mutate == "bad_values":
+        st["forecast"]["total_predicted"] = 1.0
+    if mutate not in ("expired", "corrupt"):
+        path.write_text(json.dumps(st))
+    t2 = PaperTrader(FakeFeed(), Rules(), str(tmp_path), 30.0, b=1.0, chart_every=1000)
+    assert t2._restore_forecast(ev, later) is False and not t2.model.ready
+
+
+class CountingFeed(FakeFeed):
+    mode = "live"
+
+    def __init__(self, ok=False):
+        super().__init__()
+        self.calls, self.ok = 0, ok
+        import threading
+        self.release = threading.Event()
+
+    def forecast(self, event, now, out_dir="", seed=42):
+        self.calls += 1
+        self.release.wait(5)
+        return dict(GOOD) if self.ok else None
+
+
+def _join(t):
+    if t._forecast_thread is not None:
+        t._forecast_thread.join(5)
+
+
+def test_one_job_in_flight_and_exponential_backoff(tmp_path):
+    feed = CountingFeed(ok=False)
+    t = PaperTrader(feed, Rules(), str(tmp_path), 30.0, b=1.0, chart_every=1000)
+    ev = make_event()
+    now = ev.start + pd.Timedelta(days=5)
+    t._refresh_model(ev, now)
+    t._refresh_model(ev, now + pd.Timedelta(minutes=1))                 # still running: must not launch a second job
+    assert feed.calls == 1 and t.forecast_state == "in_flight"
+    feed.release.set()
+    _join(t)
+    delays = []
+    clock = now + pd.Timedelta(minutes=2)
+    for _ in range(4):
+        t._refresh_model(ev, clock)                                     # collects the failure
+        assert t._fail_count >= 1 and t.forecast_state == "idle"
+        delays.append((t._next_retry_at - clock) / pd.Timedelta(minutes=1))
+        calls = feed.calls
+        t._refresh_model(ev, clock + pd.Timedelta(minutes=1))           # inside the backoff window: no hammering
+        assert feed.calls == calls
+        clock = t._next_retry_at + pd.Timedelta(seconds=1)
+        t._refresh_model(ev, clock)                                     # window over: exactly one new job
+        _join(t)
+    assert delays[1] > delays[0] * 1.3 and delays[2] > delays[1] * 1.3 and delays[-1] <= 72
+
+
+def test_stale_model_blocks_buys_but_not_status_and_slow_ticks(tmp_path):
+    t, ev = make_trader(tmp_path)
+    now = ev.start + pd.Timedelta(days=5)
+    t._apply_forecast(GOOD, ev, now)
+    assert t.buy_block_reason(now + pd.Timedelta(minutes=149), 300, 300) is None
+    assert "stale" in t.buy_block_reason(now + pd.Timedelta(minutes=151), 300, 300)      # e.g. after 1051 s slow ticks piling up
+    assert "tweet data is stale" in t.buy_block_reason(now, 340, 300)
+    t.tick(now + pd.Timedelta(minutes=200))          # stale forecast + FakeFeed refresh succeeds in replay mode -> refreshed
+    # now make refresh fail: a tick with a stale model records "blocked" and does not buy
+    class Failing(FakeFeed):
+        def forecast(self, *a, **k):
+            return None
+    t.feed = Failing()
+    n = t.account.state["n_buys"]
+    t.tick(now + pd.Timedelta(minutes=400))
+    assert t.account.state["n_buys"] == n
+    rows = list(csv.DictReader(open(tmp_path / "decisions.csv")))
+    assert "blocked" in rows[-1]["result"]
+
+
+def test_forecast_for_old_event_is_discarded_after_roll(tmp_path):
+    feed = CountingFeed(ok=True)
+    feed.release.set()
+    t = PaperTrader(feed, Rules(), str(tmp_path), 30.0, b=1.0, chart_every=1000)
+    ev = make_event()
+    now = ev.start + pd.Timedelta(days=5)
+    t._refresh_model(ev, now)                       # launched for "fake"
+    _join(t)
+    other = make_event()
+    other.slug = "next-week"
+    t._refresh_model(other, now + pd.Timedelta(minutes=1))     # result arrives while trading another event
+    assert not t.model.ready

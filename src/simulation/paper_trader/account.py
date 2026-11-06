@@ -15,6 +15,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from .procutil import atomic_write_json, atomic_write_text
 from .fills import Fill, FeeSchedule, taker_fee
 
 TRADE_FIELDS = ["ts", "action", "event", "bucket", "shares", "avg_price", "notional", "fee", "cash_after",
@@ -28,12 +29,30 @@ def _now_iso(ts=None):
 
 
 def append_csv(path: str, fields, row: dict):
-    new = not os.path.exists(path)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        if new:
+    """Append one row. If the file already has a different header (an older version of this program wrote it) the
+    existing columns are kept and any new columns are added by an atomic rewrite - rows never end up misaligned."""
+    fields = list(fields)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        with open(path, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
-        w.writerow(row)
+            w.writerow(row)
+        return
+    with open(path, newline="") as f:
+        existing = next(csv.reader(f), [])
+    header = existing
+    if not set(fields) <= set(existing):
+        header = existing + [c for c in fields if c not in existing]
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        tmp = path + f".{os.getpid()}.mig"
+        with open(tmp, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=header, extrasaction="ignore", restval="")
+            w.writeheader()
+            w.writerows(rows)
+        os.replace(tmp, path)
+    with open(path, "a", newline="") as f:
+        csv.DictWriter(f, fieldnames=header, extrasaction="ignore", restval="").writerow(row)
 
 
 class PaperAccount:

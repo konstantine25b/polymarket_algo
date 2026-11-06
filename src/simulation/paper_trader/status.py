@@ -153,8 +153,9 @@ def main(argv=None):
     ap.add_argument("--run-name", required=True)
     ap.add_argument("--runs-dir", default=str(ROOT / "src" / "simulation" / "runs"))
     ap.add_argument("--stale-min", type=int, default=25, help="critical if the last tick is older than this")
+    ap.add_argument("--model-stale-min", type=int, default=150, help="warn when the last ensemble forecast is older than this (new entries are blocked at the same age)")
     a = ap.parse_args(argv)
-    level, lines = check(os.path.join(a.runs_dir, a.run_name), a.stale_min)
+    level, lines = check(os.path.join(a.runs_dir, a.run_name), a.stale_min, a.model_stale_min)
     print(f"PAPER TRADER STATUS - {a.run_name}  [{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC]")
     for sev, msg in lines:
         print(f"  {sev:4s} {msg}")
