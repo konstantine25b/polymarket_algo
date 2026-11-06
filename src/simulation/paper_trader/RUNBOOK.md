@@ -14,7 +14,8 @@ git checkout fix/scraper-year-ensemble-dryrun
 python3.11 -m venv venv                  # Python 3.11 is required (3.9 cannot install the pinned dependencies)
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt          # ~10-15 min (torch, jax, prophet ...)
+pip install -r requirements-light.txt    # ~1-2 min: enough for the default 'light'/'fresh' strategies
+# pip install -r requirements.txt        # ~10-15 min (torch, jax, prophet ...): ONLY for --strategy legacy
 playwright install chromium              # headless browser used to read Polymarket's tweet count
 
 python -m pytest src/simulation/paper_trader/tests -q      # must finish with 0 failures (CI runs it on every push)
@@ -126,9 +127,48 @@ Result, drawdown, trades by bucket and sell reason, how often a buy candidate ex
 Keep in mind: backtests of these rules averaged roughly +$8/week per $30 *with* fees but the median week lost, and about 1 week in 4 lost nearly everything.
 One live week is a single sample.
 
-## 7. Paste-ready instruction for a bot / assistant
+## 7. Paste-ready instruction for a bot / assistant (Grok etc.)
 
-> Install and run the paper trader from branch `fix/scraper-year-ensemble-dryrun` of github.com/konstantine25b/polymarket_algo, following `src/simulation/paper_trader/RUNBOOK.md` sections 1-2 (Python 3.11 venv, `pip install -r requirements.txt`, `playwright install chromium`, run the test suite and require 0 failures).
-> Start it under tmux (macOS: prefix with `caffeinate -i`; Linux: use the systemd unit in `deploy/`) with: `python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-after-days 0` and keep it running.
-> Every 15 minutes run `python -m src.simulation.paper_trader.status --run-name live40`. Exit 0: reply "healthy" with the account line. Exit 1: report the WARN lines. Exit 2: restart with the exact same command (never `--fresh`, never change the run name) and report what `paper_trader.log` shows.
-> Never edit files, never delete the run folder, never send real orders (the bot cannot). When asked for results run `python -m src.simulation.paper_trader.report --run-name live40` and summarise it.
+````text
+TASK: install, run and monitor a PAPER-trading bot (fake money, no wallet, no real orders). Do exactly this, nothing else.
+
+1) INSTALL (Linux or macOS, Python 3.11 required)
+   git clone https://github.com/konstantine25b/polymarket_algo.git
+   cd polymarket_algo
+   git checkout feat/light-model-backtest
+   python3.11 -m venv venv && source venv/bin/activate
+   pip install --upgrade pip && pip install -r requirements-light.txt      # ~1-2 min, do NOT use requirements.txt
+   python -m playwright install --with-deps chromium                        # Linux needs sudo/apt for the --with-deps part; macOS: drop --with-deps
+   python -m pytest src/simulation/paper_trader/tests -q                    # must show 0 failed (a few skipped is normal)
+   Quick check (10 s, safe, places nothing):
+   python -m src.simulation.paper_trader --run-name check_now --bankroll 40 --strategy fresh --once
+   It must print "polymarket count N | our csv count N ... 26/26 order books" and "cash $40.00". If it errors, report the full error and stop.
+
+2) RUN (keep it running 24/7; it is a loop that ticks every 10 minutes)
+   tmux new -s paper            # (Linux alternative: the systemd unit in src/simulation/paper_trader/deploy/paper-trader.service)
+   source venv/bin/activate
+   python -m src.simulation.paper_trader --run-name week_nov3 --bankroll 40 --strategy fresh --backup-dir ~/paper_backup
+   (macOS only: put `caffeinate -i` in front.)  Detach: Ctrl-b d.  Re-attach: tmux attach -t paper.
+   It trades the Elon Musk weekly tweet-count market, rolls to the next one by itself, and resumes from saved state if restarted.
+   Rules of the road: NEVER use --fresh, NEVER change --run-name, NEVER delete src/simulation/runs/, NEVER edit any file, never touch a run called live40.
+
+3) MONITOR - every 15 minutes run:
+   python -m src.simulation.paper_trader.status --run-name week_nov3
+   Exit code 0 = healthy: reply "healthy" plus the ACCOUNT line (cash, equity, open positions).
+   Exit code 1 = warnings: report the WARN lines word for word.
+   Exit code 2 = critical (process not running / no tick for 25 min): restart with the EXACT same command from step 2 (it resumes),
+                 wait 2 minutes, run status again, and report what src/simulation/runs/week_nov3/paper_trader.log says (tail -50).
+   Healthy looks like: "process running", last tick < 25 min ago, order books 25/25 (or all of them), tweet count source polymarket,
+   0 errors in the last 60 min, heartbeat < 15 min.
+
+   Also check once a day and report:
+   - tail -5 src/simulation/runs/week_nov3/data_log.csv : the "diff" column (Polymarket count minus our tweet database). It should stay small
+     (|diff| <= 10). If |diff| > 10 for 6 ticks in a row, report it - the strategy assumes a real-time tweet count.
+   - tail -5 src/simulation/runs/week_nov3/decisions.csv : the "result" column says why it bought or did not buy ("no candidate" is normal;
+     "blocked: ..." means data is stale - report it).
+   - src/simulation/runs/week_nov3/trades.csv : list every BUY/SELL since last report (bucket, shares, price, reason).
+   - cat src/simulation/runs/week_nov3/exit_status.json (only if it was restarted) : why it stopped.
+   NOTE: for the first days of each market it will correctly make NO trades - buying only starts on day 4 of a market.
+
+4) WHEN ASKED FOR RESULTS: python -m src.simulation.paper_trader.report --run-name week_nov3  and summarise it (equity vs $40, realised P&L, fees, trades).
+````

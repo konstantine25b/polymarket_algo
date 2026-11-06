@@ -1,0 +1,10 @@
+# Minimal install for the paper trader's default 'light' / 'fresh' strategies (no torch / prophet / timesfm).
+# The legacy ensemble strategy needs the full requirements.txt.
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.15.2
+matplotlib==3.10.1
+requests==2.32.3
+pytz==2025.2
+playwright==1.52.0
+pytest==8.3.5

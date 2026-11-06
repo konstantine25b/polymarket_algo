@@ -561,7 +561,10 @@ class _DP:
 
 def _predictor(weights):
     sys.path.insert(0, os.path.join(ROOT, "src"))
-    from prediction_algos.ensemble.predictor import EnsembleTweetPredictor
+    try:
+        from prediction_algos.ensemble.predictor import EnsembleTweetPredictor
+    except ImportError as ex:                       # light install: the heavy ensemble libraries are not present
+        pytest.skip(f"ensemble libraries not installed: {ex}")
     p = EnsembleTweetPredictor.__new__(EnsembleTweetPredictor)
     p.normalized_weights = weights
     p.data_processor = _DP()
