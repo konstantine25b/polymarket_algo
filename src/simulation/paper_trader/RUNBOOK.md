@@ -41,6 +41,22 @@ python -m src.simulation.paper_trader --run-name live40 --bankroll 40 --start-af
 * Stop with Ctrl-C. Run the same command again to resume.
 * To run unattended: `tmux new -s paper` then the command, detach with Ctrl-b d (re-attach: `tmux attach -t paper`).
 
+## 2b. Strategies (`--strategy`, default `light`)
+
+| | `light` (default, backtested) | `legacy` (original) |
+|---|---|---|
+| Model | `light_model.py`: hour-of-day x day-of-week profile + Gamma-Poisson weekly level, negative-binomial remainder. ~25 ms, ~160 MB, no subprocess, no model downloads | Prophet/NeuralProphet/TimesFM ensemble in a worker process (GBs, minutes) |
+| Buys | only the model's **top-2 buckets**, prob >= 10%, ask >= 2c, edge >= 2pt **after the buy fee**, best net edge first, **never add to a held bucket**, only from day 4 of the market | edge > 1pt over the ask, random pick, unlimited adds, from day 2 |
+| Exits | none - hold to settlement (selling early did not help in the backtest) | sell when prob < 4% or bid > prob |
+| Caps | 25% of equity per bucket, 80% per event | same |
+
+Every preset value can be overridden with its flag (`--top-k`, `--max-adds`, `--min-pred`, `--start-after-days`, `--sell-below`, ...).
+`--stake` is $1 by default; results scale linearly with the stake (the caps are fractions of equity).
+Backtest evidence, assumptions and caveats: `src/simulation/backtest/RESULTS.md` (re-create with `python -m src.simulation.backtest.data`,
+`...table`, `...report`). **The measured edge depends on knowing the tweet count in near real time**: it shrinks from +$2.4 to ~+$0.8 per
+$40-week when the count is 1+ hours behind, and it is small and uncertain either way. `data_log.csv` shows Polymarket's count vs our database each
+tick - use it to measure the real lag, and pass `--count-lag-h N` if the count runs N hours behind.
+
 ## 3. What is happening
 
 The loop wakes every **10 minutes** (:00, :10, :20 ...). On each wake-up it:
@@ -51,7 +67,7 @@ The loop wakes every **10 minutes** (:00, :10, :20 ...). On each wake-up it:
    one is drawn at random (weight = edge) and $1 (fee included) is bought from the real book. No candidate = no buy (this is common);
 5. writes logs/charts and saves state.
 
-About once an hour, in a separate process, it downloads the XTracker tweet export, merges it into `src/data/elonmusk_reformatted.csv`
+(`legacy` strategy) About once an hour, in a separate process, it downloads the XTracker tweet export, merges it into `src/data/elonmusk_reformatted.csv`
 and re-runs the ensemble (Neural Prophet, Facebook Prophet, TimesFM, Basic Prophet, moving average, linear trend). The ensemble's total becomes a
 daily rate; a calibrated Gamma shape (x1.15 bias correction) gives the bucket probabilities.
 Every buy and sell pays Polymarket's taker fee `shares x 0.05 x price x (1 - price)` (read from the market's own `feeSchedule`).
