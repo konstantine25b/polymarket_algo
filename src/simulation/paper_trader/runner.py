@@ -483,8 +483,10 @@ class PaperTrader:
         last = acct.state.get("last_buy_attempt_ts")
         due = last is None or (now - pd.Timestamp(last)) >= pd.Timedelta(minutes=self.buy_every) - pd.Timedelta(seconds=90)
         if due and since_start >= self.start_after_days and days_left > 0.01:
-            acct.state["last_buy_attempt_ts"] = now.isoformat()
-            self._try_buy(ev, now, preds, quotes, self.buy_block_reason(now, poly, local))
+            blocked = self.buy_block_reason(now, poly, local)
+            if not blocked:                           # a BLOCKED attempt must not use up the hour: retry on the next tick
+                acct.state["last_buy_attempt_ts"] = now.isoformat()
+            self._try_buy(ev, now, preds, quotes, blocked)
         elif not due:
             nxt = pd.Timestamp(last) + pd.Timedelta(minutes=self.buy_every)
             self.con.say(f"\n  (next hourly buy decision at ~{nxt.tz_convert('US/Eastern'):%H:%M} ET)")

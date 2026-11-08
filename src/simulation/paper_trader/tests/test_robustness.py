@@ -1136,3 +1136,19 @@ def test_light_start_refreshes_tweet_history_before_the_first_decision(tmp_path)
     n = order.count("refresh")
     t.tick(ev.start + pd.Timedelta(days=5, minutes=10))                 # later ticks do NOT refresh again (3 h interval)
     assert order.count("refresh") == n
+
+
+def test_a_blocked_buy_attempt_does_not_use_up_the_hour(tmp_path):
+    ev, feed = light_event(), LightFeed()
+    rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, top_k=3, max_adds=0, pick_best=True, include_exit_fee=False)
+    t = PaperTrader(feed, rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=10, start_after_days=4.0,
+                    chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    now = ev.start + pd.Timedelta(days=5)
+    t.buy_block_reason = lambda *a, **k: "tweet history is stale (test)"
+    t.tick(now)
+    assert t.account.state.get("last_buy_attempt_ts") is None                    # blocked -> hour not consumed
+    assert "blocked" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
+    t.buy_block_reason = lambda *a, **k: None                                      # data is acceptable again
+    t.tick(now + pd.Timedelta(minutes=10))                                         # the very next tick may buy; no hour-long wait
+    assert t.account.state.get("last_buy_attempt_ts") is not None
