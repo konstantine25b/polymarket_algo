@@ -224,7 +224,7 @@ class PaperTrader:
     def _refresh_model(self, event: Event, now: pd.Timestamp, blocking=False):
         """Run the (slow) forecast in the background; pick the result up on a later tick. At most one job in flight."""
         if self.pred_source == "light":
-            return self._refresh_light(now)
+            return self._refresh_light(now, blocking)
         if self._restore_tried != event.slug and not self.model.ready:
             self._restore_forecast(event, now)
         if self._forecast_result is not None:
@@ -264,7 +264,7 @@ class PaperTrader:
             self._forecast_thread = threading.Thread(target=work, daemon=True)
             self._forecast_thread.start()
 
-    def _refresh_light(self, now: pd.Timestamp):
+    def _refresh_light(self, now: pd.Timestamp, blocking: bool = False):
         """The light model needs no forecast job: it is always ready. What can go stale is the tweet history it learns the
         daily profile from, so refresh that (XTracker export) in the background every `model_refresh` minutes with backoff."""
         self.model.reload()                                     # picks up a refreshed CSV (cheap: mtime check)
@@ -284,6 +284,18 @@ class PaperTrader:
         if not (due and (self._next_retry_at is None or now >= self._next_retry_at)):
             return
         self._last_attempt_at = now
+        if blocking:                                            # first tick after a start: refresh BEFORE deciding anything
+            log.info("start-up: refreshing the tweet history before the first decision")
+            try:
+                info = self.feed.refresh_tweet_data()
+            except Exception as ex:
+                info = {"ok": False, "error": f"refresh raised {ex!r}"}
+            if info.get("ok"):
+                self._last_forecast_at, self._fail_count, self._last_failure, self._next_retry_at = now, 0, None, None
+                self.model.reload()
+            else:
+                self._forecast_failed(info.get("error", "refresh failed"), now)
+            return
 
         def work():
             try:
@@ -414,7 +426,7 @@ class PaperTrader:
             "count_used": self.tweets, "count_source": source, "quotes_ok": len(quotes), "buckets": len(ev.buckets),
             "model_age_min": age, "tick_seconds": round(time.time() - t_start, 1), "note": note,
             "fc_state": self.forecast_state, "fc_fails": self._fail_count, "fc_last_failure": (self._last_failure or "")[:120]})
-        self._refresh_model(ev, now, blocking=self.ticks == 0 and not self.model.ready)
+        self._refresh_model(ev, now, blocking=self.ticks == 0 and (self.pred_source == "light" or not self.model.ready))
         if not self.model.ready or self.tweets is None or not quotes:
             log.info("waiting for data (model ready=%s, tweets=%s, quotes=%d)", self.model.ready, self.tweets, len(quotes))
             self.con.say("  waiting for the first ensemble forecast / data before any decision is possible")

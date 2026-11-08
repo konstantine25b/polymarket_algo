@@ -1096,7 +1096,7 @@ def test_light_strategy_does_not_trade_on_a_fallback_tweet_count(tmp_path):
     t = PaperTrader(feed, rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
     t.event, t.events["light-fake"] = ev, ev
     now = ev.start + pd.Timedelta(days=5)
-    t._refresh_light = lambda n: None                           # no background XTracker refresh in this test
+    t._refresh_light = lambda *a, **k: None                           # no background XTracker refresh in this test
     t.tick(now)
     assert t._count_source == "local_csv"
     assert "unavailable from Polymarket" in t.buy_block_reason(now, None, 100)
@@ -1105,3 +1105,34 @@ def test_light_strategy_does_not_trade_on_a_fallback_tweet_count(tmp_path):
     feed.broken = False                                           # Polymarket's count is back -> trading is allowed again
     t.tick(now + pd.Timedelta(hours=1))
     assert t._count_source == "polymarket" and t.buy_block_reason(now, 100, 100) is None
+
+
+def test_light_start_refreshes_tweet_history_before_the_first_decision(tmp_path):
+    order = []
+
+    class RefreshFeed(LightFeed):
+        mode = "live"
+
+        def refresh_tweet_data(self):
+            order.append("refresh")
+            return {"ok": True, "new_tweets": 3}
+
+        def quotes(self, event, now):
+            order.append("quotes")
+            return LightFeed.quotes(self, event, now)
+
+        def local_count(self, event, now):
+            return LightFeed.tweet_count(self, event, now), None
+
+        def next_event(self, *a):
+            return None
+    ev, feed = light_event(), RefreshFeed()
+    t = PaperTrader(feed, Rules(top_k=3), str(tmp_path), 40.0, "light", start_after_days=4.0, chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    t.tick(ev.start + pd.Timedelta(days=5))
+    assert order.count("refresh") == 1
+    # the refresh happened synchronously inside the first tick (not in a background thread that finishes later)
+    assert t.forecast_state == "idle" and t._last_forecast_at is not None
+    n = order.count("refresh")
+    t.tick(ev.start + pd.Timedelta(days=5, minutes=10))                 # later ticks do NOT refresh again (3 h interval)
+    assert order.count("refresh") == n
