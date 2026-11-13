@@ -55,6 +55,9 @@ def quotes_to_keys(event, quotes):
 
 
 class PaperTrader:
+    LIGHT_COUNT_SOURCES = ("xtracker", "page_above_xtracker", "page_only")
+    XT_WAIT_MIN = 60          # light strategy: minutes to wait for XTracker before selling on the page count instead
+
     def __init__(self, feed, rules: Rules, run_dir: str, bankroll: float = 30.0, pred_source: str = "calibrated",
                  buy_every_min: int = 60, sell_every_min: int = 10, model_refresh_min: int = 60, seed: int = 42,
                  b: float = 1.15, auto_roll: bool = True, start_after_days: float = 2.0, max_slippage: float = 0.01,
@@ -88,6 +91,8 @@ class PaperTrader:
         self._fails = 0
         self._count_source = "polymarket"
         self._gap_ticks = 0
+        self._sell_count, self._sell_hold, self._count_decision = None, None, ""
+        self._xt_down_since = None
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -312,9 +317,15 @@ class PaperTrader:
         if self.pred_source == "light":
             if not self.model.ready:
                 return "tweet history not loaded"
-            if self.feed.mode == "live" and self._count_source != "polymarket":
-                return (f"live tweet count unavailable from Polymarket (using '{self._count_source}', which can be hours old) - "
-                        "the light strategy only trades on a real-time count")
+            if self.feed.mode == "live":
+                src = self._count_source
+                if src == "page_above_xtracker":
+                    return f"Polymarket page shows more tweets ({poly}) than XTracker ({local}) - no new buys until XTracker catches up"
+                if src == "page_only":
+                    return "XTracker count unavailable or its refresh is failing - no new buys (buys are priced on XTracker)"
+                if src != "xtracker":
+                    return (f"live tweet count unavailable from Polymarket (using '{src}', which can be hours old) - "
+                            "the light strategy only trades on a real-time count")
             newest = self.model.newest_tweet().tz_localize("US/Eastern", ambiguous=True, nonexistent="shift_forward")
             age_h = (now - newest) / pd.Timedelta(hours=1)
             if age_h > self.max_data_age_h:
@@ -407,15 +418,49 @@ class PaperTrader:
             log.warning("local tweet count failed: %s", ex)
             local, newest = None, None
         note = ""
+        light_live = self.pred_source == "light" and self.feed.mode == "live"
+        self._sell_count, self._sell_hold, self._count_decision = None, None, ""
         if poly is not None:
-            # The page count is ALWAYS the traded number: the market resolves on it. The CSV (XTracker export) only ever
-            # produces the warning below - it can run ahead (reposts the page does not count) or behind, and is never a signal.
-            self.tweets, source = poly, "polymarket"
-            if local is not None and abs(poly - local) > 5:
-                note = (f"count mismatch: polymarket {poly} vs our data {local} (diff {poly - local:+d}) - trading on the Polymarket count; "
-                        "the export can include posts the page does not count (e.g. 'RT @' reposts) or lag it")
-                log.warning(note)
-            self._gap_ticks = self._gap_ticks + 1 if (local is not None and abs(poly - local) > 5) else 0
+            mismatch = local is not None and abs(poly - local) > 5
+            if light_live:
+                # Light strategy count rules (XTracker = our refreshed CSV is trusted over the page):
+                #   page <= XTracker : buys AND sells use XTracker
+                #   page >  XTracker : NO new buys; sells use the page count
+                #   XTracker missing : no new buys; sells wait up to XT_WAIT_MIN minutes, then use the page count
+                xt_ok = local is not None and self._fail_count == 0
+                if xt_ok:
+                    self._xt_down_since = None
+                    if poly <= local:
+                        self.tweets, source, self._sell_count = local, "xtracker", local
+                        self._count_decision = (f"page {poly} == XTracker {local}: using XTracker for buys and sells" if poly == local else
+                                                f"page {poly} < XTracker {local}: using XTracker ({local}) for BOTH buys and sells")
+                    else:
+                        self.tweets, source, self._sell_count = local, "page_above_xtracker", poly
+                        self._count_decision = (f"page {poly} > XTracker {local} (diff {poly - local:+d}): NO NEW BUYS; sells use the PAGE count ({poly}). "
+                                                "Buys resume when XTracker catches up to the page")
+                else:
+                    why = ("XTracker/our tweet count cannot be read" if local is None else
+                           f"XTracker refresh is failing ({self._fail_count} in a row: {(self._last_failure or '?')[:140]})")
+                    if self._xt_down_since is None:
+                        self._xt_down_since = now
+                    down = (now - self._xt_down_since) / pd.Timedelta(minutes=1)
+                    self.tweets, source = poly, "page_only"
+                    if down >= self.XT_WAIT_MIN:
+                        self._sell_count = poly
+                        self._count_decision = (f"{why} for {down:.0f} min (>= {self.XT_WAIT_MIN}): NO NEW BUYS; sells now use the PAGE count ({poly})")
+                    else:
+                        self._sell_hold = f"waiting for XTracker ({down:.0f} of {self.XT_WAIT_MIN} min)"
+                        self._count_decision = (f"{why}: NO NEW BUYS; sells are HELD for up to {self.XT_WAIT_MIN} min "
+                                                f"({down:.0f} so far), then they use the page count ({poly})")
+            else:
+                self.tweets, source = poly, "polymarket"
+            if light_live and (poly != local or source == "page_only"):
+                note = f"count mismatch: polymarket page {poly} vs xtracker/our data {local}. {self._count_decision}"
+                (log.warning if (mismatch or source == "page_only") else log.info)("COUNT CHECK: %s", note)
+            elif local is not None and poly != local:
+                note = (f"count mismatch: polymarket {poly} vs our data {local} (diff {poly - local:+d}) - trading on the Polymarket count")
+                (log.warning if mismatch else log.info)(note)
+            self._gap_ticks = self._gap_ticks + 1 if mismatch else 0
             if self._gap_ticks == 5:
                 log.error("our tweet database has differed from Polymarket by >5 for %d ticks in a row (diff %+d); last refresh: %s",
                           self._gap_ticks, poly - local, self._last_failure or "no recorded failure (refresh may be succeeding with stale/different data)")
@@ -461,25 +506,33 @@ class PaperTrader:
             self._log_equity_only(now, quotes)
             return
         preds = dict(zip(titles, probs.tolist()))
+        preds_sell = preds                                      # SELL decisions may use a different count than the buy decisions (light/live)
+        if light_live and self._sell_count is not None and self._sell_count != self.tweets:
+            try:
+                preds_sell = dict(zip(titles, self.model.probs(ev.ranges, so_far=self._sell_count, days_left=days_left, event=ev, now=now).tolist()))
+            except ForecastError as ex:
+                log.warning("could not price sells on count %s (%s) - holding sells this tick", self._sell_count, ex)
+                self._sell_hold = f"sell probabilities unavailable ({ex})"
         if self.pred_source == "light":
             self._log_light_forecast(ev, now, days_left)
         self._write_snapshot(ev, now, titles, preds, quotes, days_left)
         self._show_market(ev, titles, preds, quotes, days_left)
 
         # ---- SELL checks (not on a possibly stale count: 'bid above our probability' would then sell winners)
-        stale_count = self.pred_source == "light" and self.feed.mode == "live" and source != "polymarket"
+        stale_count = light_live and (source not in self.LIGHT_COUNT_SOURCES or self._sell_hold is not None)
         if stale_count and acct.positions:
-            log.warning("sell checks skipped: tweet count source is '%s', not Polymarket's live count", source)
+            log.warning("SELL CHECKS SKIPPED for %d open position(s): %s", len(acct.positions),
+                        self._sell_hold or f"tweet count source is '{source}', not a live count")
         for key, pos in list(acct.positions.items()):
             if stale_count or pos["event"] != ev.slug:
                 continue
             q, b = quotes.get(pos["bucket"]), self._bucket(ev, pos["bucket"])
             if q is None or b is None or q.best_bid is None:
                 continue
-            reason = sell_reason(preds.get(pos["bucket"], 0.0), q.best_bid, rules)
+            reason = sell_reason(preds_sell.get(pos["bucket"], 0.0), q.best_bid, rules)
             if not reason:
                 continue
-            fill, why = plan_sell(q.bids, pos["shares"], b.fees, preds.get(pos["bucket"], 0.0), reason, rules)
+            fill, why = plan_sell(q.bids, pos["shares"], b.fees, preds_sell.get(pos["bucket"], 0.0), reason, rules)
             if fill is not None and fill.notional < rules.min_sell_usd:
                 fill, why = None, "below the minimum sell value"
             if fill is None:
@@ -489,7 +542,7 @@ class PaperTrader:
                 continue
             if fill.shares < pos["shares"] - 0.011:
                 log.info("PARTIAL exit %s: %.2f of %.2f shares fit inside the price limit", pos["bucket"], fill.shares, pos["shares"])
-            acct.sell(key, fill, now, reason, {"pred": round(preds.get(pos["bucket"], 0.0), 5), "bid": q.best_bid, "ask": q.best_ask})
+            acct.sell(key, fill, now, reason, {"pred": round(preds_sell.get(pos["bucket"], 0.0), 5), "bid": q.best_bid, "ask": q.best_ask})
             log.info("SELL %s: %.2f sh @ %.3f, fee %.4f (%s)  realised so far %+.2f", pos["bucket"], fill.shares,
                      fill.avg_price, fill.fee, reason, acct.state["realized_pnl"])
             self.con.section("SELL EXECUTED")
@@ -561,6 +614,8 @@ class PaperTrader:
             d = poly - local
             c.say("  -> MATCH: both sources agree" if d == 0 else
                   f"  -> difference {d:+d}: {'XTracker has newer tweets than our database (refreshed hourly)' if d > 0 else 'our database is ahead of the page'}")
+        if self._count_decision:
+            c.say(f"  DECISION: {self._count_decision}")
         c.say(f"  Order books fetched                 : {n_quotes}/{n_buckets}")
 
     def _held_map(self, ev):

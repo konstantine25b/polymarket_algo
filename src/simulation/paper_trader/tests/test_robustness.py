@@ -1104,7 +1104,7 @@ def test_light_strategy_does_not_trade_on_a_fallback_tweet_count(tmp_path):
     assert "blocked" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
     feed.broken = False                                           # Polymarket's count is back -> trading is allowed again
     t.tick(now + pd.Timedelta(hours=1))
-    assert t._count_source == "polymarket" and t.buy_block_reason(now, 100, 100) is None
+    assert t._count_source == "xtracker" and t.buy_block_reason(now, 100, 100) is None
 
 
 def test_light_start_refreshes_tweet_history_before_the_first_decision(tmp_path):
@@ -1339,26 +1339,93 @@ def test_http_get_deadline_bounds_total_time(monkeypatch):
     assert clock[0] < 60                                               # without a deadline: 10 tries x 20s+
 
 
-def test_page_count_is_traded_even_when_the_export_runs_far_ahead(tmp_path):
-    """Nov 7: page stuck at 134 while the export said 165. The traded count / model input must stay the page's number;
-    the mismatch is only a warning + data_log note, and never changes the buy block or the count source."""
-    class Ahead(LightFeed):
+def _xt_trader(tmp_path, delta):
+    """Live light trader whose XTracker (local) count = true count + delta (None = unreadable); the page shows the true count."""
+    class F(LightFeed):
         mode = "live"
+        xt = delta
 
         def local_count(self, event, now):
-            return LightFeed.tweet_count(self, event, now) + 31, None
+            return (None, None) if self.xt is None else (LightFeed.tweet_count(self, event, now) + self.xt, None)
 
         def next_event(self, *a):
             return None
     ev = light_event()
     rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, include_exit_fee=False, top_k=3, max_adds=0, pick_best=True)
-    t = PaperTrader(Ahead(), rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
+    t = PaperTrader(F(), rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
     t.event, t.events["light-fake"] = ev, ev
-    now = ev.start + pd.Timedelta(days=5)
     t._refresh_light = lambda *a, **k: None
+    now = ev.start + pd.Timedelta(days=5)
+    return t, ev, now, LightFeed.tweet_count(t.feed, ev, now)
+
+
+def _spy_probs(t):
+    seen = []
+    orig = t.model.probs
+    t.model.probs = lambda ranges, so_far, **kw: seen.append(so_far) or orig(ranges, so_far=so_far, **kw)
+    return seen
+
+
+def test_page_below_xtracker_uses_xtracker_for_buys_and_sells(tmp_path, caplog):
+    t, ev, now, page = _xt_trader(tmp_path, +31)
+    seen = _spy_probs(t)
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+    assert t.tweets == page + 31 and t._count_source == "xtracker" and t._sell_count == page + 31 and t._sell_hold is None
+    assert seen == [page + 31]                                           # ONE probability set: buys and sells share XTracker's count
+    assert t.buy_block_reason(now, page, page + 31) is None
+    assert "COUNT CHECK" in caplog.text and "for BOTH buys and sells" in caplog.text
+    assert "BOTH buys and sells" in list(csv.DictReader(open(tmp_path / "data_log.csv")))[-1]["note"]
+
+
+def test_page_equal_to_xtracker_uses_xtracker_no_warning(tmp_path, caplog):
+    t, ev, now, page = _xt_trader(tmp_path, 0)
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+    assert t.tweets == page and t._count_source == "xtracker" and t._sell_count == page
+    assert t.buy_block_reason(now, page, page) is None and "COUNT CHECK" not in caplog.text
+    assert list(csv.DictReader(open(tmp_path / "data_log.csv")))[-1]["note"] == ""
+
+
+def test_page_above_xtracker_blocks_buys_and_sells_on_the_page(tmp_path, caplog):
+    t, ev, now, page = _xt_trader(tmp_path, -31)
+    seen = _spy_probs(t)
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+    assert t._count_source == "page_above_xtracker" and t.tweets == page - 31 and t._sell_count == page and t._sell_hold is None
+    assert seen == [page - 31, page]                                     # buy-side probs on XTracker, sell-side probs on the page
+    assert t.account.state["n_buys"] == 0
+    assert "Polymarket page shows more" in t.buy_block_reason(now, page, page - 31)
+    assert "blocked" in list(csv.DictReader(open(tmp_path / "decisions.csv")))[-1]["result"]
+    assert "NO NEW BUYS" in caplog.text and "sells use the PAGE count" in caplog.text
+
+
+def test_xtracker_unavailable_holds_sells_for_an_hour_then_sells_on_the_page(tmp_path, caplog):
+    t, ev, now, page = _xt_trader(tmp_path, None)
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+        assert t._count_source == "page_only" and t._sell_hold and t._sell_count is None and t.account.state["n_buys"] == 0
+        assert "XTracker count unavailable" in t.buy_block_reason(now, page, None)
+        assert "HELD" in caplog.text
+        t.tick(now + pd.Timedelta(minutes=30))
+        assert t._sell_hold and t._sell_count is None                    # still inside the hour
+        t.tick(now + pd.Timedelta(minutes=61))
+    assert t._sell_hold is None and t._sell_count == LightFeed.tweet_count(t.feed, ev, now + pd.Timedelta(minutes=61))
+    assert t.account.state["n_buys"] == 0                                # buys stay blocked
+    assert "sells now use the PAGE count" in caplog.text
+
+
+def test_xtracker_coming_back_resets_the_wait(tmp_path):
+    t, ev, now, page = _xt_trader(tmp_path, None)
     t.tick(now)
-    page = LightFeed.tweet_count(t.feed, ev, now)
-    assert t.tweets == page and t._count_source == "polymarket"
-    assert t.buy_block_reason(now, page, page + 31) is None            # light: a big gap blocks nothing
-    row = list(csv.DictReader(open(tmp_path / "data_log.csv")))[-1]
-    assert row["count_used"] == str(page) and "count mismatch" in row["note"] and "RT @" in row["note"]
+    assert t._xt_down_since is not None
+    t.feed.xt = 0
+    t.tick(now + pd.Timedelta(minutes=10))
+    assert t._xt_down_since is None and t._count_source == "xtracker" and t._sell_hold is None
+
+
+def test_failing_xtracker_refresh_counts_as_unavailable(tmp_path):
+    t, ev, now, page = _xt_trader(tmp_path, 0)
+    t._fail_count, t._last_failure = 2, "HTTP 403 Forbidden"
+    t.tick(now)
+    assert t._count_source == "page_only" and t._sell_hold and "403" in t._count_decision

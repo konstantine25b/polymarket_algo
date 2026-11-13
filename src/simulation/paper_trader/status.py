@@ -93,7 +93,7 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
         last = dat.iloc[-1]
         ratio = last.quotes_ok / last.buckets if last.buckets else 0
         add("OK" if ratio >= 0.9 else "WARN", f"order books {int(last.quotes_ok)}/{int(last.buckets)} on the last tick")
-        add("OK" if last.count_source == "polymarket" else "WARN", f"tweet count source: {last.count_source} (count used {last.count_used})")
+        add("OK" if last.count_source in ("polymarket", "xtracker") else "WARN", f"tweet count source: {last.count_source} (count used {last.count_used})")
         d = pd.to_numeric(dat["diff"].tail(6), errors="coerce").dropna()
         if len(d) and (d.abs() > 5).all():
             add("WARN", f"our tweet database has differed from Polymarket by >5 for the last {len(d)} ticks (diff {d.iloc[-1]:+.0f}) - XTracker refresh may be failing")
