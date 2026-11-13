@@ -16,9 +16,9 @@ POLYMARKET_ORDER_BOOK_API = "https://polymarket.com/api/order-books"
 
 # Polymarket Event URLs
 # Current Elon Musk tweets event (update together with the window below when a new weekly market starts)
-POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-november-3-november-10-2026"
+POLYMARKET_ELON_TWEETS_URL = "https://polymarket.com/event/elon-musk-of-tweets-november-10-november-17-2026"
 
-# Data Paths
+# Data Path
 DATA_DIR = Path("src/polymarket/data")
 PLOTS_DIR = Path("src/polymarket/plots")
 PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
@@ -26,9 +26,9 @@ PREDICTOR_PLOTS_DIR = Path("src/polymarket_predictor/plots")
 # Tweet Predictor Constants
 ET_TIMEZONE = pytz.timezone('US/Eastern')
 MARKET_ID = ""  # NOTE: update when new market_id is known
-MARKET_HASH = "elon-musk-of-tweets-november-3-november-10-2026"
-EVENT_HASH = "elon-musk-of-tweets-november-3-november-10-2026"
-FULL_EVENT_HASH = "elon-musk-of-tweets-november-3-november-10-2026"
+MARKET_HASH = "elon-musk-of-tweets-november-10-november-17-2026"
+EVENT_HASH = "elon-musk-of-tweets-november-10-november-17-2026"
+FULL_EVENT_HASH = "elon-musk-of-tweets-november-10-november-17-2026"
 
 # Default data path for tweet analysis
 DEFAULT_DATA_PATH = os.path.join(
