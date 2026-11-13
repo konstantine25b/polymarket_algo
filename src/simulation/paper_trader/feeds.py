@@ -12,10 +12,11 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -37,20 +38,51 @@ SLUG_PREFIX = "elon-musk-of-tweets"
 ET = "US/Eastern"
 
 
-def http_get(url, params=None, tries=4, timeout=25):
-    last = None
+class StartupCheckError(RuntimeError):
+    """A live-run prerequisite (browser, page scrape) is missing; the message says how to fix it."""
+
+
+def http_get(url, params=None, tries=4, timeout=25, deadline=None):
+    """GET + json with retries. `deadline` (seconds, whole call) bounds the total time so one slow endpoint cannot stall a tick."""
+    last, t0 = None, time.monotonic()
     for i in range(tries):
+        left = None if deadline is None else deadline - (time.monotonic() - t0)
+        if left is not None and left <= 0.5:
+            last = (last or "") + " (time budget used up)"
+            break
         try:
-            r = requests.get(url, params=params, timeout=timeout)
+            r = requests.get(url, params=params, timeout=timeout if left is None else max(1.0, min(timeout, left)))
             if r.status_code == 200:
                 return r.json()
             last = f"HTTP {r.status_code}"
             if r.status_code in (400, 404):          # permanent (e.g. a delisted bucket's book): retrying only slows every tick down
                 break
+            if r.status_code == 429:                 # rate limited: honour Retry-After instead of hammering
+                try:
+                    time.sleep(min(float(r.headers.get("Retry-After", 0)), 10.0))
+                except (TypeError, ValueError):
+                    pass
         except Exception as e:  # network hiccup: retry with backoff
             last = repr(e)
-        time.sleep(1.5 * (i + 1))
+        if i < tries - 1:
+            time.sleep(1.5 * (i + 1))
     raise RuntimeError(f"GET {url} failed: {last}")
+
+
+def run_bounded(cmd, timeout, **kw):
+    """Run a command in its own process group and return a CompletedProcess. On timeout the WHOLE group (python + the Chromium it
+    spawned) is killed, so a hung scrape cannot stall the tick or leave orphan browsers behind; the partial output rides on the error."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, **kw)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, err = proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 @dataclass
@@ -60,6 +92,7 @@ class Bucket:
     hi: int
     token: str
     fees: FeeSchedule
+    closed: bool = False          # market closed / not accepting orders / no order book: expected to have no book
 
 
 @dataclass
@@ -119,41 +152,164 @@ def resolution_from_gamma(e: dict) -> Optional[Dict[str, bool]]:
 class LiveFeed:
     mode = "live"
 
-    def __init__(self, tweet_refresh_timeout=240, model_timeout=1500, backup_dir=None):
+    def __init__(self, tweet_refresh_timeout=420, model_timeout=1500, backup_dir=None, book_budget=45, scrape_timeout=90,
+                 meta_every_min=30):
         self.backup_dir = backup_dir
         self.tweet_refresh_timeout = tweet_refresh_timeout
         self.model_timeout = model_timeout
+        self.book_budget = book_budget              # seconds for ALL order-book requests of one tick
+        self.scrape_timeout = scrape_timeout        # seconds for the page scrape (browser launch + load + read)
+        self.meta_every = pd.Timedelta(minutes=meta_every_min)
+        self._no_book = {}                          # token -> title: Polymarket answered 404 "no orderbook" (closed/delisted bucket)
+        self._meta_at = {}                          # slug -> UTC time of the last bucket-metadata refresh
+        self.book_report = {}                       # last quotes() outcome: expected / ok / failed / closed
+        self.count_error = None                     # why the last tweet_count() returned None (None = it worked)
+        self.timings = {}                           # seconds spent in each step of the last tick
 
     def load_event(self, slug: str) -> Event:
         data = http_get(f"{GAMMA}/events", {"slug": slug})
         if not data:
             raise RuntimeError(f"event not found: {slug}")
+        self._meta_at[slug] = pd.Timestamp.now(tz="UTC")
         return _event_from_gamma(data[0], only_open=True)
 
-    def quotes(self, event: Event, now=None) -> Dict[str, Quote]:
-        def one(b: Bucket):
+    def sync_markets(self, event: Event, force=False):
+        """Re-read the buckets' current token ids and open/closed state from gamma (the event object is built once at start-up, so
+        a token that changes or a bucket that closes mid-week would otherwise 404 on every tick). Never raises."""
+        now = pd.Timestamp.now(tz="UTC")
+        last = self._meta_at.get(event.slug)
+        if not force and last is not None and now - last < self.meta_every:
+            return
+        self._meta_at[event.slug] = now
+        try:
+            data = http_get(f"{GAMMA}/events", {"slug": event.slug}, tries=2, timeout=10, deadline=20)
+            markets = {m.get("groupItemTitle"): m for m in data[0]["markets"]}
+        except Exception as ex:
+            log.warning("could not refresh bucket metadata (keeping the previous one): %s", ex)
+            return
+        for b in event.buckets:
+            m = markets.get(b.title)
+            if m is None:
+                continue
             try:
-                book = http_get(f"{CLOB}/book", {"token_id": b.token}, tries=3)
+                token = json.loads(m["clobTokenIds"])[0]
+            except Exception:
+                token = b.token
+            if token != b.token:
+                log.warning("bucket %s: token id changed - using the new one", b.title)
+                self._no_book.pop(b.token, None)
+                b.token = token
+            closed = bool(m.get("closed")) or not m.get("enableOrderBook", True) or not m.get("acceptingOrders", True)
+            if closed != b.closed:
+                log.info("bucket %s is now %s", b.title, "CLOSED (no order book expected)" if closed else "open")
+            b.closed = closed
+            if not closed and b.token in self._no_book:
+                self._no_book.pop(b.token)            # it has a market again: try its book
+
+    def quotes(self, event: Event, now=None) -> Dict[str, Quote]:
+        """Order books of every bucket that should have one, within `book_budget` seconds in total. Closed buckets / known-404
+        tokens are skipped (and reported separately, not as failures); transient failures get a second, slower pass."""
+        self.sync_markets(event)
+        t0 = time.monotonic()
+        live = [b for b in event.buckets if not b.closed and b.token not in self._no_book]
+        closed = [b.title for b in event.buckets if b.closed or b.token in self._no_book]
+        out: Dict[str, Quote] = {}
+        failed: Dict[str, str] = {}
+
+        def one(b: Bucket):
+            left = self.book_budget - (time.monotonic() - t0)
+            try:
+                book = http_get(f"{CLOB}/book", {"token_id": b.token}, tries=3, timeout=10, deadline=max(left, 1.0))
                 bids = [(float(x["price"]), float(x["size"])) for x in book.get("bids", [])]
                 asks = [(float(x["price"]), float(x["size"])) for x in book.get("asks", [])]
-                return b.title, Quote(bids, asks)
+                return b, Quote(bids, asks), None
             except Exception as ex:
-                log.warning("book fetch failed for %s: %s", b.title, ex)
-                return b.title, None
-        with ThreadPoolExecutor(8) as ex:
-            return {t: q for t, q in ex.map(one, event.buckets) if q is not None}
+                return b, None, str(ex)
+
+        def collect(buckets, workers):
+            pool = ThreadPoolExecutor(workers)
+            futs = [pool.submit(one, b) for b in buckets]
+            done, pending = wait(futs, timeout=max(self.book_budget - (time.monotonic() - t0), 1.0))
+            pool.shutdown(wait=False, cancel_futures=True)           # never block the tick on a hung request
+            for f in done:
+                b, q, err = f.result()
+                if q is not None:
+                    out[b.title] = q
+                    failed.pop(b.title, None)
+                else:
+                    failed[b.title] = err
+            for f in pending:
+                failed.setdefault(buckets[futs.index(f)].title, "timed out")
+
+        collect(live, 6)
+        retry = [b for b in live if b.title in failed and "HTTP 404" not in failed[b.title] and "HTTP 400" not in failed[b.title]]
+        if retry and time.monotonic() - t0 < self.book_budget - 5:
+            time.sleep(1.0)
+            collect(retry, 2)                                         # slower second pass: rate limits / transient errors
+        for b in live:
+            err = failed.get(b.title)
+            if err and ("HTTP 404" in err or "HTTP 400" in err):     # permanent: the bucket has no book (closed / delisted)
+                self._no_book[b.token] = b.title
+                closed.append(b.title)
+                failed.pop(b.title)
+                log.warning("bucket %s has no order book (%s) - treated as closed, will not be requested again until its market changes", b.title, err[-40:])
+        for t, err in failed.items():
+            log.warning("book fetch failed for %s: %s", t, err)
+        self.book_report = {"expected": len(live) - sum(1 for b in live if b.token in self._no_book), "ok": len(out),
+                            "failed": sorted(failed), "closed": closed, "seconds": round(time.monotonic() - t0, 1)}
+        self.timings["order_books"] = self.book_report["seconds"]
+        return out
 
     def tweet_count(self, event: Event, now=None) -> Optional[int]:
-        """Polymarket's own count for the event (this is what the market resolves on)."""
+        """Polymarket's own count for the event (this is what the market resolves on). None = unreadable; the reason is
+        in self.count_error and is logged here (a missing browser is logged as an ERROR on every attempt)."""
+        t0 = time.monotonic()
+        self.count_error = None
         try:
-            p = subprocess.run([sys.executable, "-m", "src.xpath_scraper.NumberGetter", "--url", event.url],
-                               capture_output=True, text=True, cwd=ROOT, timeout=120)
+            p = run_bounded([sys.executable, "-m", "src.xpath_scraper.NumberGetter", "--url", event.url], self.scrape_timeout, cwd=ROOT)
             m = re.search(r"Tweet count: (-?\d+)", p.stdout)
             n = int(m.group(1)) if m else -1
-            return n if n >= 0 else None
+            if n >= 0:
+                return n
+            if p.returncode == 3 or "BROWSER_ERROR" in p.stdout:
+                self.count_error = (re.search(r"BROWSER_ERROR: (.*)", p.stdout) or [None, "browser unavailable"])[1]
+                log.error("tweet count NOT READ - the browser is unusable: %s", self.count_error)
+            else:
+                tail = " | ".join(l for l in (p.stderr or "").splitlines() if "ERROR" in l or "Error" in l)[-300:] or (p.stderr or p.stdout)[-300:]
+                self.count_error = f"page scrape failed (rc={p.returncode}): {tail}"
+                log.warning("tweet count not read: %s", self.count_error)
+        except subprocess.TimeoutExpired:
+            self.count_error = f"page scrape timed out after {self.scrape_timeout}s (process group killed)"
+            log.warning("tweet count not read: %s", self.count_error)
         except Exception as ex:
+            self.count_error = repr(ex)
             log.warning("tweet count failed: %s", ex)
-            return None
+        finally:
+            self.timings["page_scrape"] = round(time.monotonic() - t0, 1)
+        return None
+
+    def preflight(self, event: Event, attempts=2):
+        """Start-up check for a LIVE run: Chromium is installed and NumberGetter can read the event page's count.
+        Raises StartupCheckError with the fix in the message. Without this the bot would quietly fall back to the CSV count
+        (which the light strategy refuses to trade on) and sit idle."""
+        try:
+            import playwright.sync_api  # noqa: F401
+        except ImportError:
+            raise StartupCheckError("The Python package 'playwright' is not installed. Run: pip install -r requirements-light.txt")
+        for i in range(attempts):
+            n = self.tweet_count(event)
+            if n is not None:
+                log.info("start-up check OK: Chromium works and the Polymarket page shows %d tweets", n)
+                return n
+            if self.count_error and ("not installed" in self.count_error or "failed to launch" in self.count_error):
+                break                                           # an installation problem: retrying cannot help
+            time.sleep(3)
+        reason = self.count_error or "unknown"
+        hint = ("Install the browser:  python -m playwright install chromium   (Linux: add --with-deps)"
+                if "hromium" in reason or "browser" in reason.lower() else
+                "The browser works but the count could not be read from the page: check the network and that the event URL is right")
+        raise StartupCheckError(f"START-UP CHECK FAILED - cannot read Polymarket's tweet count from {event.url}\n  reason: {reason}\n  fix   : {hint}\n"
+                                "  (the light strategy only trades on that count; refusing to start and sit idle. Use --skip-preflight to override.)")
 
     csv_path = str(ROOT / "src" / "data" / "elonmusk_reformatted.csv")
 
@@ -165,6 +321,22 @@ class LiveFeed:
         hi = (now or pd.Timestamp.now(tz="UTC")).tz_convert(ET).tz_localize(None)
         return int(((t >= lo) & (t <= hi)).sum()), (t.max() if len(t) else None)
 
+    @staticmethod
+    def _refresh_error_text(stdout: str, stderr: str) -> str:
+        """The exact cause of a failed refresh. TweetCSVGetter prints a REFRESH_ERROR line listing every attempt's error (e.g.
+        'XTracker answered HTTP 403 Forbidden ...'); without it, fall back to the ERROR lines of the log, then the raw tail."""
+        m = re.search(r"REFRESH_ERROR (\{.*\})", stdout or "")
+        if m:
+            try:
+                d = json.loads(m.group(1))
+                return " | ".join(d.get("attempts") or []) or d.get("error", "")
+            except Exception:
+                pass
+        errs = [l.split(" - ", 3)[-1] for l in (stderr or "").splitlines() if " - ERROR - " in l]
+        if errs:
+            return " | ".join(errs)[-1200:]
+        return ((stderr or "") + (stdout or ""))[-800:] or "no output"
+
     def refresh_tweet_data(self) -> dict:
         """Download the XTracker export and merge it into the CSV (src.xpath_scraper.TweetCSVGetter).
         Success needs exit code 0 AND the pipeline's own REFRESH_RESULT line - exit 0 alone is not proof (B04/B05)."""
@@ -172,16 +344,19 @@ class LiveFeed:
         info = {"ok": False, "new_tweets": None, "seconds": 0.0}
         try:
             p = subprocess.run([sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"], cwd=ROOT,
-                               capture_output=True, text=True, timeout=self.tweet_refresh_timeout)
+                               capture_output=True, text=True, timeout=self.tweet_refresh_timeout, start_new_session=True)
             m = re.search(r"REFRESH_RESULT (\{.*\})", p.stdout)
             if p.returncode != 0:
-                info["error"] = f"exit code {p.returncode}: " + (p.stderr or p.stdout)[-300:]
+                info["error"] = f"exit code {p.returncode}: " + self._refresh_error_text(p.stdout, p.stderr)
             elif not m:
-                info["error"] = "refresh exited 0 but reported no REFRESH_RESULT (treated as failure): " + (p.stderr or p.stdout)[-200:]
+                info["error"] = "refresh exited 0 but reported no REFRESH_RESULT (treated as failure): " + self._refresh_error_text(p.stdout, p.stderr)
             else:
                 res = json.loads(m.group(1))
                 info.update(ok=True, new_tweets=res.get("new_rows"), rows=res.get("total_rows"), newest=res.get("newest"),
                             sha256=res.get("sha256"))
+        except subprocess.TimeoutExpired as ex:
+            out, err = (x.decode(errors="replace") if isinstance(x, bytes) else (x or "") for x in (ex.stdout, ex.stderr))
+            info["error"] = f"timed out after {self.tweet_refresh_timeout}s: " + self._refresh_error_text(out, err)
         except Exception as ex:
             info["error"] = repr(ex)
         info["seconds"] = round(time.time() - t0, 1)

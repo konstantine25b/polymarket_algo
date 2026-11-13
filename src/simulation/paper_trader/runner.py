@@ -87,6 +87,7 @@ class PaperTrader:
         self._last_beat = 0.0
         self._fails = 0
         self._count_source = "polymarket"
+        self._gap_ticks = 0
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -393,9 +394,13 @@ class PaperTrader:
         t_start = time.time()
         days_left = ev.days_left(now)
         self.con.banner(f"TICK #{self.ticks + 1}  |  {now.tz_convert('US/Eastern'):%a %b %d %Y %H:%M:%S} ET  |  {ev.title}  |  {days_left:.2f} days left")
+        t_step = time.time()
         quotes = self.feed.quotes(ev, now)
+        t_quotes = time.time() - t_step
         # ---- tweet count: Polymarket's own number (what the market resolves on) with our CSV as cross-check/fallback
+        t_step = time.time()
         poly = self.feed.tweet_count(ev, now)
+        t_page = time.time() - t_step
         try:
             local, newest = self.feed.local_count(ev, now)
         except Exception as ex:
@@ -403,30 +408,45 @@ class PaperTrader:
             local, newest = None, None
         note = ""
         if poly is not None:
+            # The page count is ALWAYS the traded number: the market resolves on it. The CSV (XTracker export) only ever
+            # produces the warning below - it can run ahead (reposts the page does not count) or behind, and is never a signal.
             self.tweets, source = poly, "polymarket"
             if local is not None and abs(poly - local) > 5:
-                note = f"count mismatch: polymarket {poly} vs our data {local} (our data may lag XTracker)"
+                note = (f"count mismatch: polymarket {poly} vs our data {local} (diff {poly - local:+d}) - trading on the Polymarket count; "
+                        "the export can include posts the page does not count (e.g. 'RT @' reposts) or lag it")
                 log.warning(note)
+            self._gap_ticks = self._gap_ticks + 1 if (local is not None and abs(poly - local) > 5) else 0
+            if self._gap_ticks == 5:
+                log.error("our tweet database has differed from Polymarket by >5 for %d ticks in a row (diff %+d); last refresh: %s",
+                          self._gap_ticks, poly - local, self._last_failure or "no recorded failure (refresh may be succeeding with stale/different data)")
         elif local is not None:
             self.tweets, source = local, "local_csv"
-            note = "polymarket count unavailable - using our own tweet data"
-            log.warning(note)
+            why = getattr(self.feed, "count_error", None) or "unknown reason"
+            note = f"polymarket count unavailable ({why[:160]}) - using our own tweet data"
+            log.error("TWEET COUNT FALLBACK to local_csv: %s%s", why,
+                      " - the light strategy will neither buy nor sell until the page count is readable" if self.pred_source == "light" else "")
         else:
             source = "last_known"
             note = "no tweet count available - using the last known value"
             log.warning(note)
         self._count_source = source
-        log.info("data: polymarket count %s | our csv count %s (newest tweet %s) | %d/%d order books",
-                 poly, local, newest, len(quotes), len(ev.buckets))
-        self._show_tweet_check(poly, local, newest, len(quotes), len(ev.buckets))
+        report = getattr(self.feed, "book_report", None) or {}
+        n_books = report.get("expected", len(ev.buckets))          # closed / delisted buckets are not expected to have a book
+        if report.get("failed"):
+            log.warning("order books %d/%d - failed: %s", len(quotes), n_books, ", ".join(report["failed"]))
+        log.info("data: polymarket count %s | our csv count %s (newest tweet %s) | %d/%d order books%s",
+                 poly, local, newest, len(quotes), n_books, f" ({len(report['closed'])} closed buckets skipped)" if report.get("closed") else "")
+        self._show_tweet_check(poly, local, newest, len(quotes), n_books)
         age = None if self._last_forecast_at is None else round(self.model_age_min(now), 1)
         append_csv(os.path.join(self.run_dir, "data_log.csv"), DATA_FIELDS, {
             "ts": now.isoformat(timespec="seconds"), "event": ev.slug, "polymarket_count": poly, "csv_count": local,
             "diff": (poly - local) if (poly is not None and local is not None) else "", "csv_newest_tweet": newest,
-            "count_used": self.tweets, "count_source": source, "quotes_ok": len(quotes), "buckets": len(ev.buckets),
+            "count_used": self.tweets, "count_source": source, "quotes_ok": len(quotes), "buckets": n_books,
             "model_age_min": age, "tick_seconds": round(time.time() - t_start, 1), "note": note,
-            "fc_state": self.forecast_state, "fc_fails": self._fail_count, "fc_last_failure": (self._last_failure or "")[:120]})
+            "fc_state": self.forecast_state, "fc_fails": self._fail_count, "fc_last_failure": (self._last_failure or "")[:400]})
+        t_step = time.time()
         self._refresh_model(ev, now, blocking=self.ticks == 0 and (self.pred_source == "light" or not self.model.ready))
+        self._t_refresh = time.time() - t_step
         if not self.model.ready or self.tweets is None or not quotes:
             log.info("waiting for data (model ready=%s, tweets=%s, quotes=%d)", self.model.ready, self.tweets, len(quotes))
             self.con.say("  waiting for the first ensemble forecast / data before any decision is possible")
@@ -513,6 +533,10 @@ class PaperTrader:
         write_summary(self.run_dir, acct.state, {"event": ev.slug, "tweets so far": self.tweets,
                                                  "equity (conservative)": f"${eq['equity_conservative']:.2f}",
                                                  "last tick": now.isoformat(timespec="seconds"), "prediction source": self.model.name})
+        total = time.time() - t_start
+        log.log(logging.WARNING if total > 120 else logging.INFO,
+                "tick timing: total %.1fs | order books %.1fs | page scrape %.1fs | model/refresh %.1fs | rest %.1fs",
+                total, t_quotes, t_page, getattr(self, "_t_refresh", 0.0), max(total - t_quotes - t_page - getattr(self, "_t_refresh", 0.0), 0.0))
         log.info("tick: cash $%.2f | equity $%.2f | %d open | tweets %s | %.2f d left", acct.cash, eq["equity_conservative"],
                  len(acct.positions), self.tweets, days_left)
         self._show_account(eq, now)

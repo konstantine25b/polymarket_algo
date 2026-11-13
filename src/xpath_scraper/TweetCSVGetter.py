@@ -19,6 +19,10 @@ logger = logging.getLogger('TweetCSVGetter')
 EXPECTED_HEADER = ("id", "text", "created_at")
 
 
+USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/124.0.0.0 Safari/537.36")      # headless Chromium's default UA contains "HeadlessChrome", which bot filters answer with 403
+
+
 class ExportInvalid(RuntimeError):
     """The downloaded file is not a usable XTracker tweet export (error page, empty, wrong schema)."""
 
@@ -44,7 +48,9 @@ def validate_export(path: str, min_rows: int = 1):
 
 
 class TweetCSVGetter:
-    def __init__(self, tries: int = 3):
+    def __init__(self, tries: int = 3, max_seconds: float = 330.0):
+        self.max_seconds = max_seconds            # total budget for all attempts, so the caller's subprocess timeout never hits first
+        self.attempt_errors = []
         # Anchor on the repo root so the getter works from any working directory
         self.repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         self.download_dir = os.path.join(self.repo_root, "src", "xpath_scraper", "temp")
@@ -57,12 +63,12 @@ class TweetCSVGetter:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                context = browser.new_context(accept_downloads=True)
+                context = browser.new_context(accept_downloads=True, user_agent=USER_AGENT, locale="en-US")
                 page = context.new_page()
                 logger.info("Navigating to %s", url)
                 resp = page.goto(url, timeout=60000, wait_until="domcontentloaded")
                 if resp is not None and resp.status >= 400:
-                    raise ExportInvalid(f"XTracker answered HTTP {resp.status}")
+                    raise ExportInvalid(f"XTracker answered HTTP {resp.status} {resp.status_text} for {resp.url}")
                 button = page.locator("xpath=//*[text()='Export Data']").first
                 button.wait_for(state="visible", timeout=30000)          # DOM readiness / missing-button detection
                 logger.info("Clicking 'Export Data' button")
@@ -89,20 +95,26 @@ class TweetCSVGetter:
                 path = os.path.join(self.download_dir, stale)
                 if os.path.exists(path):
                     os.remove(path)
-            last = None
+            ok, t0 = False, time.time()
+            self.attempt_errors = []
             for attempt in range(1, self.tries + 1):
                 try:
                     path = self.download()
                     n = validate_export(path)
                     logger.info("Export validated: %d tweet rows", n)
+                    ok = True
                     break
                 except Exception as ex:                                            # network, site, DOM, bad content
-                    last = ex
-                    logger.warning("download attempt %d/%d failed: %r", attempt, self.tries, ex)
+                    self.attempt_errors.append(f"attempt {attempt}: {ex!r:.400}")
+                    logger.error("download attempt %d/%d failed: %r", attempt, self.tries, ex)
                     if attempt < self.tries:
-                        time.sleep(min(60.0, 5.0 * 2 ** attempt) * (0.5 + random.random()))
-            else:
-                raise RuntimeError(f"XTracker export failed after {self.tries} attempts: {last!r}")
+                        pause = min(60.0, 5.0 * 2 ** attempt) * (0.5 + random.random())
+                        if time.time() - t0 + pause + 120 > self.max_seconds:      # no room for another full attempt
+                            logger.error("stopping retries: time budget of %.0fs would be exceeded", self.max_seconds)
+                            break
+                        time.sleep(pause)
+            if not ok:
+                raise RuntimeError(f"XTracker export failed after {len(self.attempt_errors)} attempt(s): " + " | ".join(self.attempt_errors))
             self.format()
             return self.merge()
 
@@ -142,5 +154,12 @@ class TweetCSVGetter:
 
 
 if __name__ == '__main__':
-    result = TweetCSVGetter().getCSV()
+    getter = TweetCSVGetter()
+    try:
+        result = getter.getCSV()
+    except Exception as ex:
+        # machine-readable failure line for the caller (src.simulation.paper_trader.feeds), then a non-zero exit
+        print("REFRESH_ERROR " + json.dumps({"error": f"{ex!r}"[:1500], "attempts": getter.attempt_errors}), flush=True)
+        logger.error("tweet refresh failed: %r", ex)
+        sys.exit(1)
     print("REFRESH_RESULT " + json.dumps(result), flush=True)

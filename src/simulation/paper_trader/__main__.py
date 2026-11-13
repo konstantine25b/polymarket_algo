@@ -79,6 +79,7 @@ def build_parser():
     ap.add_argument("--max-count-gap", type=int, default=30, help="no NEW entries when our tweet database is more than this many tweets behind Polymarket")
     ap.add_argument("--backup-dir", default=None, help="durable location (other disk / synced folder) that also receives every checkpoint and the tweet dataset")
     ap.add_argument("--allow-new-state", action="store_true", help="deliberately start a NEW account in a run folder whose old state is gone (otherwise refused)")
+    ap.add_argument("--skip-preflight", action="store_true", help="live: do not require Chromium + a readable Polymarket page count at start-up")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-auto-roll", action="store_true", help="stop trading when the current market ends instead of moving to the next")
     ap.add_argument("--chart-every", type=int, default=1, help="rewrite charts every N ticks")
@@ -162,6 +163,13 @@ def _main(argv=None):
         from constants import EVENT_HASH
         slug = a.slug or trader.account.state.get("current_slug") or EVENT_HASH
         trader.event = feed.load_event(slug)
+        if not a.skip_preflight and not a.once:
+            from .feeds import StartupCheckError
+            try:
+                feed.preflight(trader.event)
+            except StartupCheckError as ex:
+                logging.getLogger("paper_trader").error("%s", ex)
+                raise SystemExit(f"\n{ex}\n")
         trader.events[slug] = trader.event
         trader.account.state["current_slug"] = slug
         trader.account.state["rules"] = rules.as_dict()

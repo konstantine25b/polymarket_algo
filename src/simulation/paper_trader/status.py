@@ -98,7 +98,7 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
         if len(d) and (d.abs() > 5).all():
             add("WARN", f"our tweet database has differed from Polymarket by >5 for the last {len(d)} ticks (diff {d.iloc[-1]:+.0f}) - XTracker refresh may be failing")
         slow = dat.tick_seconds.tail(6).max()
-        if slow and slow > 240:
+        if slow and slow > 150:       # steps are bounded (books 45s + page scrape 90s): more means a bound is not holding
             add("WARN", f"slow ticks (up to {slow:.0f}s) - network or browser problems")
 
     # 4) model freshness

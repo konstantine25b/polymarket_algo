@@ -1152,3 +1152,213 @@ def test_a_blocked_buy_attempt_does_not_use_up_the_hour(tmp_path):
     t.buy_block_reason = lambda *a, **k: None                                      # data is acceptable again
     t.tick(now + pd.Timedelta(minutes=10))                                         # the very next tick may buy; no hour-long wait
     assert t.account.state.get("last_buy_attempt_ts") is not None
+
+
+# ---------------------------------------------------------------- Nov 3-10 run problems (1-5)
+def test_refresh_failure_reports_the_exact_http_error(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    out = 'REFRESH_ERROR {"error": "x", "attempts": ["attempt 1: ExportInvalid(\'XTracker answered HTTP 403 Forbidden for https://www.xtracker.io/\')"]}'
+    monkeypatch.setattr(feeds.subprocess, "run", _fake_run(stdout=out, rc=1))
+    r = feeds.LiveFeed().refresh_tweet_data()
+    assert not r["ok"] and "HTTP 403 Forbidden" in r["error"]
+
+
+def test_refresh_timeout_keeps_the_partial_output(monkeypatch):
+    from src.simulation.paper_trader import feeds
+
+    def run(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 1, output=b"", stderr=b"x - TweetCSVGetter - ERROR - download attempt 1/3 failed: HTTP 403")
+    monkeypatch.setattr(feeds.subprocess, "run", run)
+    r = feeds.LiveFeed().refresh_tweet_data()
+    assert not r["ok"] and "timed out" in r["error"] and "HTTP 403" in r["error"]
+
+
+def test_csv_getter_retries_then_succeeds_and_reports_every_failure(monkeypatch):
+    from src.xpath_scraper import TweetCSVGetter as T
+    g = T.TweetCSVGetter(tries=3)
+    calls = []
+
+    def download():
+        calls.append(1)
+        if len(calls) < 3:
+            raise T.ExportInvalid("XTracker answered HTTP 403 Forbidden")
+        return "p"
+    monkeypatch.setattr(g, "download", download)
+    monkeypatch.setattr(T, "validate_export", lambda p: 5)
+    monkeypatch.setattr(T.time, "sleep", lambda s: None)
+    monkeypatch.setattr(g, "format", lambda: None)
+    monkeypatch.setattr(g, "merge", lambda: {"new_rows": 1})
+    assert g.getCSV() == {"new_rows": 1} and len(calls) == 3 and len(g.attempt_errors) == 2
+
+
+def test_csv_getter_all_attempts_fail_lists_each_error(monkeypatch):
+    from src.xpath_scraper import TweetCSVGetter as T
+    g = T.TweetCSVGetter(tries=2)
+    monkeypatch.setattr(g, "download", lambda: (_ for _ in ()).throw(T.ExportInvalid("HTTP 403 Forbidden")))
+    monkeypatch.setattr(T.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="attempt 1.*403.*attempt 2.*403"):
+        g.getCSV()
+
+
+class _Ev:
+    url = "https://polymarket.com/event/x"
+
+
+def _scrape(monkeypatch, rc, out="", err=""):
+    from src.simulation.paper_trader import feeds
+    monkeypatch.setattr(feeds, "run_bounded", lambda cmd, timeout, **kw: subprocess.CompletedProcess(cmd, rc, out, err))
+    return feeds.LiveFeed()
+
+
+MISSING = "BROWSER_ERROR: Chromium is not installed (expected /x). Run: python -m playwright install chromium\n"
+
+
+def test_missing_chromium_is_reported_not_silent(monkeypatch, caplog):
+    f = _scrape(monkeypatch, 3, MISSING)
+    with caplog.at_level("ERROR"):
+        assert f.tweet_count(_Ev()) is None
+    assert "playwright install chromium" in f.count_error and "NOT READ" in caplog.text
+
+
+def test_preflight_fails_loudly_without_chromium_and_passes_with_it(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    with pytest.raises(feeds.StartupCheckError, match="playwright install chromium"):
+        _scrape(monkeypatch, 3, MISSING).preflight(_Ev())
+    assert _scrape(monkeypatch, 0, "Tweet count: 42\n").preflight(_Ev()) == 42
+
+
+def test_scrape_timeout_returns_none_with_a_reason(monkeypatch):
+    from src.simulation.paper_trader import feeds
+
+    def hang(cmd, timeout, **kw):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    monkeypatch.setattr(feeds, "run_bounded", hang)
+    f = feeds.LiveFeed(scrape_timeout=1)
+    assert f.tweet_count(_Ev()) is None and "timed out" in f.count_error
+
+
+def test_run_bounded_kills_a_hung_process_group():
+    import time as _t
+    from src.simulation.paper_trader import feeds
+    t0 = _t.time()
+    with pytest.raises(subprocess.TimeoutExpired):
+        feeds.run_bounded([sys.executable, "-c", "import time; time.sleep(60)"], 1)
+    assert _t.time() - t0 < 10
+
+
+def _bucket(title, token, closed=False):
+    from src.simulation.paper_trader import feeds
+    from src.simulation.paper_trader.fills import FeeSchedule
+    return feeds.Bucket(title, 0, 1, token, FeeSchedule(0.05, 1.0), closed)
+
+
+def _event(*buckets):
+    from src.simulation.paper_trader import feeds
+    return feeds.Event("s", "t", pd.Timestamp("2026-01-01", tz="UTC"), pd.Timestamp("2026-01-08", tz="UTC"), list(buckets))
+
+
+def test_books_404_bucket_is_marked_closed_once_and_not_a_failure(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    ev = _event(_bucket("a", "ta"), _bucket("b", "tb"), _bucket("gone", "tg"))
+    calls = []
+
+    def get(url, params=None, **kw):
+        tok = params["token_id"]
+        calls.append(tok)
+        if tok == "tg":
+            raise RuntimeError("GET failed: HTTP 404")
+        return {"bids": [{"price": "0.1", "size": "5"}], "asks": [{"price": "0.2", "size": "5"}]}
+    monkeypatch.setattr(feeds, "http_get", get)
+    f = feeds.LiveFeed()
+    f._meta_at["s"] = pd.Timestamp.now(tz="UTC")                     # metadata is fresh: no gamma call in this test
+    q = f.quotes(ev)
+    assert set(q) == {"a", "b"} and f.book_report["expected"] == 2 and f.book_report["failed"] == [] and "gone" in f.book_report["closed"]
+    calls.clear()
+    f.quotes(ev)
+    assert "tg" not in calls                                          # not requested again
+
+
+def test_books_closed_bucket_from_metadata_is_skipped(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    ev = _event(_bucket("a", "ta"), _bucket("old", "to", closed=True))
+    monkeypatch.setattr(feeds, "http_get", lambda url, params=None, **kw: {"bids": [], "asks": [{"price": "0.2", "size": "5"}]})
+    f = feeds.LiveFeed()
+    f._meta_at["s"] = pd.Timestamp.now(tz="UTC")
+    assert set(f.quotes(ev)) == {"a"} and f.book_report["expected"] == 1
+
+
+def test_books_transient_failure_gets_a_second_pass(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    ev = _event(_bucket("a", "ta"))
+    n = []
+
+    def get(url, params=None, **kw):
+        n.append(1)
+        if len(n) == 1:
+            raise RuntimeError("GET failed: HTTP 429")
+        return {"bids": [], "asks": [{"price": "0.2", "size": "5"}]}
+    monkeypatch.setattr(feeds, "http_get", get)
+    monkeypatch.setattr(feeds.time, "sleep", lambda s: None)
+    f = feeds.LiveFeed()
+    f._meta_at["s"] = pd.Timestamp.now(tz="UTC")
+    assert set(f.quotes(ev)) == {"a"}
+
+
+def test_books_hung_request_cannot_stall_the_tick(monkeypatch):
+    import threading
+    import time as _t
+    from src.simulation.paper_trader import feeds
+    ev = _event(_bucket("a", "ta"), _bucket("hung", "th"))
+    release = threading.Event()
+
+    def get(url, params=None, **kw):
+        if params["token_id"] == "th":
+            release.wait(30)
+        return {"bids": [], "asks": [{"price": "0.2", "size": "5"}]}
+    monkeypatch.setattr(feeds, "http_get", get)
+    f = feeds.LiveFeed(book_budget=2)
+    f._meta_at["s"] = pd.Timestamp.now(tz="UTC")
+    t0 = _t.time()
+    q = f.quotes(ev)
+    release.set()
+    assert _t.time() - t0 < 12 and set(q) == {"a"} and f.book_report["failed"] == ["hung"]
+
+
+def test_http_get_deadline_bounds_total_time(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    clock = [0.0]
+    monkeypatch.setattr(feeds.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(feeds.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+
+    def slow(*a, **k):
+        clock[0] += 20
+        raise RuntimeError("timeout")
+    monkeypatch.setattr(feeds.requests, "get", slow)
+    with pytest.raises(RuntimeError):
+        feeds.http_get("http://x", tries=10, timeout=25, deadline=30)
+    assert clock[0] < 60                                               # without a deadline: 10 tries x 20s+
+
+
+def test_page_count_is_traded_even_when_the_export_runs_far_ahead(tmp_path):
+    """Nov 7: page stuck at 134 while the export said 165. The traded count / model input must stay the page's number;
+    the mismatch is only a warning + data_log note, and never changes the buy block or the count source."""
+    class Ahead(LightFeed):
+        mode = "live"
+
+        def local_count(self, event, now):
+            return LightFeed.tweet_count(self, event, now) + 31, None
+
+        def next_event(self, *a):
+            return None
+    ev = light_event()
+    rules = Rules(min_pred=0.10, min_mkt=0.02, min_edge=0.0, min_net_edge=0.02, include_exit_fee=False, top_k=3, max_adds=0, pick_best=True)
+    t = PaperTrader(Ahead(), rules, str(tmp_path), 40.0, "light", buy_every_min=60, sell_every_min=60, start_after_days=4.0, chart_every=10 ** 6)
+    t.event, t.events["light-fake"] = ev, ev
+    now = ev.start + pd.Timedelta(days=5)
+    t._refresh_light = lambda *a, **k: None
+    t.tick(now)
+    page = LightFeed.tweet_count(t.feed, ev, now)
+    assert t.tweets == page and t._count_source == "polymarket"
+    assert t.buy_block_reason(now, page, page + 31) is None            # light: a big gap blocks nothing
+    row = list(csv.DictReader(open(tmp_path / "data_log.csv")))[-1]
+    assert row["count_used"] == str(page) and "count mismatch" in row["note"] and "RT @" in row["note"]
