@@ -42,7 +42,7 @@ class StartupCheckError(RuntimeError):
     """A live-run prerequisite (browser, page scrape) is missing; the message says how to fix it."""
 
 
-def http_get(url, params=None, tries=4, timeout=25, deadline=None):
+def http_get(url, params=None, tries=4, timeout=25, deadline=None, headers=None):
     """GET + json with retries. `deadline` (seconds, whole call) bounds the total time so one slow endpoint cannot stall a tick."""
     last, t0 = None, time.monotonic()
     for i in range(tries):
@@ -51,7 +51,7 @@ def http_get(url, params=None, tries=4, timeout=25, deadline=None):
             last = (last or "") + " (time budget used up)"
             break
         try:
-            r = requests.get(url, params=params, timeout=timeout if left is None else max(1.0, min(timeout, left)))
+            r = requests.get(url, params=params, headers=headers, timeout=timeout if left is None else max(1.0, min(timeout, left)))
             if r.status_code == 200:
                 return r.json()
             last = f"HTTP {r.status_code}"
@@ -260,6 +260,24 @@ class LiveFeed:
                             "failed": sorted(failed), "closed": closed, "seconds": round(time.monotonic() - t0, 1)}
         self.timings["order_books"] = self.book_report["seconds"]
         return out
+
+    XTRACKER_STATS = "https://www.xtracker.io/api/users"
+
+    def xtracker_sync(self, now=None) -> dict:
+        """When did XTracker itself last sync with X, and did that sync report an error? A cheap HTTP call (no browser) that tells a
+        quiet account apart from a stalled XTracker pipeline. Never raises: {'ok': False, 'error': ...} if the check itself fails."""
+        t0 = time.monotonic()
+        try:
+            users = http_get(self.XTRACKER_STATS, {"stats": "true", "platform": "X"}, tries=2, timeout=10, deadline=20,
+                             headers={"User-Agent": "Mozilla/5.0"})
+            u = next(x for x in users if x.get("handle") == "elonmusk")
+            last = pd.Timestamp(u["lastSync"])
+            now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
+            return {"ok": True, "last_sync": last, "age_min": (now - last) / pd.Timedelta(minutes=1), "error": u.get("lastSyncError")}
+        except Exception as ex:
+            return {"ok": False, "error": f"XTracker sync status unreadable: {ex!r}"[:300]}
+        finally:
+            self.timings["xtracker_sync"] = round(time.monotonic() - t0, 1)
 
     def tweet_count(self, event: Event, now=None) -> Optional[int]:
         """Polymarket's own count for the event (this is what the market resolves on). None = unreadable; the reason is

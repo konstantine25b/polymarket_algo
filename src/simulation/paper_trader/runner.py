@@ -56,6 +56,7 @@ def quotes_to_keys(event, quotes):
 
 class PaperTrader:
     XT_FRESH_MIN = 30                  # XTracker data counts as "available" while its last successful refresh is at most this old
+    XT_SYNC_MAX_MIN = 120              # XTracker's own last sync with X older than this (or reporting an error) = its pipeline is stalled
     XT_RATE_LIMIT_BACKOFF_MIN = 30     # after an HTTP 403/429 do not touch XTracker again for at least this long
     LIGHT_COUNT_SOURCES = ("xtracker", "page_above_xtracker", "page_only")
     XT_WAIT_MIN = 60          # light strategy: minutes to wait for XTracker before selling on the page count instead
@@ -71,6 +72,7 @@ class PaperTrader:
         self.pred_source, self.buy_every, self.sell_every = pred_source, buy_every_min, sell_every_min
         self.model_refresh, self.auto_roll = model_refresh_min, auto_roll
         self.xt_refresh_min = xt_refresh_min
+        self._xt_sync_bad = None                   # reason string while XTracker's own sync is stalled/erroring (blocks new buys), else None
         self._xt_ok_at = None                      # UTC time of the last SUCCESSFUL XTracker refresh (light strategy)
         self.start_after_days, self.max_slippage, self.chart_every = start_after_days, max_slippage, chart_every
         self.backup_dir = backup_dir
@@ -306,6 +308,27 @@ class PaperTrader:
         else:
             self._xt_failed(info.get("error", "refresh failed"), now)
 
+    def _check_xt_sync(self, now: pd.Timestamp):
+        """Light strategy: ask XTracker when IT last synced with X. A stalled sync means our counts can lag the truth no matter how often we
+        download the export -> no new buys (sells are not affected). If this check itself fails it only warns: it is an extra signal."""
+        self._xt_sync_bad = None
+        if not hasattr(self.feed, "xtracker_sync"):
+            return
+        try:
+            st = self.feed.xtracker_sync(now)
+        except Exception as ex:
+            st = {"ok": False, "error": repr(ex)}
+        if not st.get("ok"):
+            log.warning("XTRACKER SYNC CHECK unavailable (%s) - not blocking anything on it", st.get("error"))
+            return
+        self._xt_sync_age = st["age_min"]
+        if st.get("error"):
+            self._xt_sync_bad = f"XTracker reports a sync error: {str(st['error'])[:160]}"
+        elif st["age_min"] > self.XT_SYNC_MAX_MIN:
+            self._xt_sync_bad = f"XTracker last synced with X {st['age_min'] / 60:.1f} h ago (limit {self.XT_SYNC_MAX_MIN / 60:.0f} h)"
+        if self._xt_sync_bad:
+            log.warning("XTRACKER SYNC STALLED: %s - NO NEW BUYS until it syncs again (the account may be quiet, but our counts cannot be trusted)", self._xt_sync_bad)
+
     def _xt_failed(self, reason: str, now: pd.Timestamp):
         self._fail_count += 1
         self._last_failure = reason
@@ -330,6 +353,8 @@ class PaperTrader:
                     return f"Polymarket page shows more tweets ({poly}) than XTracker ({local}) - no new buys until XTracker catches up"
                 if src == "page_only":
                     return "XTracker count unavailable or its refresh is failing - no new buys (buys are priced on XTracker)"
+                if self._xt_sync_bad:
+                    return f"{self._xt_sync_bad} - no new buys until XTracker syncs again"
                 if src != "xtracker":
                     return (f"live tweet count unavailable from Polymarket (using '{src}', which can be hours old) - "
                             "the light strategy only trades on a real-time count")
@@ -422,6 +447,7 @@ class PaperTrader:
         t_step = time.time()
         if self.pred_source == "light":
             self._refresh_light(now)                           # BEFORE reading any count: this tick's buys and sells use the newest XTracker data
+            self._check_xt_sync(now)
         self._t_refresh_light = time.time() - t_step
         try:
             local, newest = self.feed.local_count(ev, now)
@@ -632,6 +658,8 @@ class PaperTrader:
             d = poly - local
             c.say("  -> MATCH: both sources agree" if d == 0 else
                   f"  -> difference {d:+d}: {'XTracker has newer tweets than our database (refreshed hourly)' if d > 0 else 'our database is ahead of the page'}")
+        if getattr(self, "_xt_sync_age", None) is not None:
+            c.say(f"  XTracker last synced with X          : {self._xt_sync_age:.0f} min ago" + (f"  <- {self._xt_sync_bad}" if self._xt_sync_bad else ""))
         if self._count_decision:
             c.say(f"  DECISION: {self._count_decision}")
         c.say(f"  Order books fetched                 : {n_quotes}/{n_buckets}")

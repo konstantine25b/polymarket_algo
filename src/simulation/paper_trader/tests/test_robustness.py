@@ -1489,3 +1489,50 @@ def test_failing_xtracker_refresh_counts_as_unavailable(tmp_path):
     t._xt_ok_at, t._last_failure = now - pd.Timedelta(hours=2), "HTTP 403 Forbidden"    # ... but whose last good refresh was 2 h ago
     t.tick(now)
     assert t._count_source == "page_only" and t._sell_hold and "403" in t._count_decision
+
+
+# ---------------------------------------------------------------- XTracker's own sync status
+def test_xtracker_sync_status_parses_last_sync(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    monkeypatch.setattr(feeds, "http_get", lambda *a, **k: [{"handle": "other"}, {"handle": "elonmusk", "lastSync": "2026-11-14T07:00:00Z", "lastSyncError": None}])
+    st = feeds.LiveFeed().xtracker_sync(pd.Timestamp("2026-11-14T07:30:00Z"))
+    assert st["ok"] and abs(st["age_min"] - 30) < 1e-6 and st["error"] is None
+
+
+def test_xtracker_sync_check_failure_never_raises(monkeypatch):
+    from src.simulation.paper_trader import feeds
+    monkeypatch.setattr(feeds, "http_get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 403")))
+    st = feeds.LiveFeed().xtracker_sync()
+    assert st["ok"] is False and "403" in st["error"]
+
+
+def _sync_trader(tmp_path, status):
+    t, ev, now, page = _xt_trader(tmp_path, 0)
+    t.feed.xtracker_sync = lambda n=None: status
+    t._refresh_light = lambda *a, **k: None
+    return t, ev, now, page
+
+
+def test_stalled_xtracker_sync_blocks_buys_with_a_warning(tmp_path, caplog):
+    t, ev, now, page = _sync_trader(tmp_path, {"ok": True, "age_min": 300.0, "error": None})
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+    assert "XTRACKER SYNC STALLED" in caplog.text and t._xt_sync_bad
+    assert "XTracker last synced" in t.buy_block_reason(now, page, page)
+    assert t.account.state["n_buys"] == 0 and t._sell_hold is None        # sells are not affected
+
+
+def test_xtracker_sync_error_blocks_buys_and_fresh_sync_does_not(tmp_path):
+    t, ev, now, page = _sync_trader(tmp_path, {"ok": True, "age_min": 5.0, "error": "rate limited by X"})
+    t.tick(now)
+    assert "sync error" in t.buy_block_reason(now, page, page)
+    t.feed.xtracker_sync = lambda n=None: {"ok": True, "age_min": 5.0, "error": None}
+    t.tick(now + pd.Timedelta(minutes=10))
+    assert t._xt_sync_bad is None and t.buy_block_reason(now, page, page) is None
+
+
+def test_unreadable_sync_check_only_warns(tmp_path, caplog):
+    t, ev, now, page = _sync_trader(tmp_path, {"ok": False, "error": "HTTP 403"})
+    with caplog.at_level("WARNING"):
+        t.tick(now)
+    assert "SYNC CHECK unavailable" in caplog.text and t._xt_sync_bad is None and t.buy_block_reason(now, page, page) is None
