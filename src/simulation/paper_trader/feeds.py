@@ -153,8 +153,9 @@ class LiveFeed:
     mode = "live"
 
     def __init__(self, tweet_refresh_timeout=420, model_timeout=1500, backup_dir=None, book_budget=45, scrape_timeout=90,
-                 meta_every_min=30):
+                 meta_every_min=30, refresh_tries=3, refresh_budget=330):
         self.backup_dir = backup_dir
+        self.refresh_tries, self.refresh_budget = refresh_tries, refresh_budget     # per-refresh retry count / total seconds (small when refreshing every tick)
         self.tweet_refresh_timeout = tweet_refresh_timeout
         self.model_timeout = model_timeout
         self.book_budget = book_budget              # seconds for ALL order-book requests of one tick
@@ -343,7 +344,8 @@ class LiveFeed:
         t0 = time.time()
         info = {"ok": False, "new_tweets": None, "seconds": 0.0}
         try:
-            p = subprocess.run([sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter"], cwd=ROOT,
+            p = subprocess.run([sys.executable, "-m", "src.xpath_scraper.TweetCSVGetter", "--tries", str(self.refresh_tries),
+                                "--max-seconds", str(self.refresh_budget)], cwd=ROOT,
                                capture_output=True, text=True, timeout=self.tweet_refresh_timeout, start_new_session=True)
             m = re.search(r"REFRESH_RESULT (\{.*\})", p.stdout)
             if p.returncode != 0:

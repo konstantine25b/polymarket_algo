@@ -55,6 +55,8 @@ def quotes_to_keys(event, quotes):
 
 
 class PaperTrader:
+    XT_FRESH_MIN = 30                  # XTracker data counts as "available" while its last successful refresh is at most this old
+    XT_RATE_LIMIT_BACKOFF_MIN = 30     # after an HTTP 403/429 do not touch XTracker again for at least this long
     LIGHT_COUNT_SOURCES = ("xtracker", "page_above_xtracker", "page_only")
     XT_WAIT_MIN = 60          # light strategy: minutes to wait for XTracker before selling on the page count instead
 
@@ -62,11 +64,14 @@ class PaperTrader:
                  buy_every_min: int = 60, sell_every_min: int = 10, model_refresh_min: int = 60, seed: int = 42,
                  b: float = 1.15, auto_roll: bool = True, start_after_days: float = 2.0, max_slippage: float = 0.01,
                  chart_every: int = 1, verbose: bool = False, model_stale_min: int = 150, max_count_gap: int = 30,
-                 max_data_age_h: float = 36.0, count_lag_h: float = 0.0, backup_dir: Optional[str] = None, allow_new_state: bool = False):
+                 max_data_age_h: float = 12.0, count_lag_h: float = 0.0, backup_dir: Optional[str] = None, allow_new_state: bool = False,
+                 xt_refresh_min: int = 10):
         self.con = Console(run_dir, verbose)
         self.feed, self.rules, self.run_dir = feed, rules, run_dir
         self.pred_source, self.buy_every, self.sell_every = pred_source, buy_every_min, sell_every_min
         self.model_refresh, self.auto_roll = model_refresh_min, auto_roll
+        self.xt_refresh_min = xt_refresh_min
+        self._xt_ok_at = None                      # UTC time of the last SUCCESSFUL XTracker refresh (light strategy)
         self.start_after_days, self.max_slippage, self.chart_every = start_after_days, max_slippage, chart_every
         self.backup_dir = backup_dir
         self.account = PaperAccount(run_dir, bankroll, backup_dir, allow_new_state)
@@ -230,7 +235,7 @@ class PaperTrader:
     def _refresh_model(self, event: Event, now: pd.Timestamp, blocking=False):
         """Run the (slow) forecast in the background; pick the result up on a later tick. At most one job in flight."""
         if self.pred_source == "light":
-            return self._refresh_light(now, blocking)
+            return                                   # the light strategy refreshes at the START of the tick (_refresh_light), before any count is read
         if self._restore_tried != event.slug and not self.model.ready:
             self._restore_forecast(event, now)
         if self._forecast_result is not None:
@@ -270,47 +275,49 @@ class PaperTrader:
             self._forecast_thread = threading.Thread(target=work, daemon=True)
             self._forecast_thread.start()
 
-    def _refresh_light(self, now: pd.Timestamp, blocking: bool = False):
-        """The light model needs no forecast job: it is always ready. What can go stale is the tweet history it learns the
-        daily profile from, so refresh that (XTracker export) in the background every `model_refresh` minutes with backoff."""
-        self.model.reload()                                     # picks up a refreshed CSV (cheap: mtime check)
-        if self._forecast_result is not None:
-            kind, payload = self._forecast_result[:2]
-            self._forecast_result = None
-            if kind == "ok":
-                self._last_forecast_at, self._fail_count, self._last_failure, self._next_retry_at = now, 0, None, None
-                self.model.reload()
-            else:
-                self._forecast_failed(payload, now)
-        if self._last_forecast_at is None and self._next_retry_at is None and not hasattr(self.feed, "refresh_tweet_data"):
-            self._last_forecast_at = now                       # replay: nothing to refresh
-        if self.forecast_state == "in_flight" or not hasattr(self.feed, "refresh_tweet_data"):
-            return
-        due = self._last_forecast_at is None or (now - self._last_forecast_at) >= pd.Timedelta(minutes=self.model_refresh)
-        if not (due and (self._next_retry_at is None or now >= self._next_retry_at)):
-            return
-        self._last_attempt_at = now
-        if blocking:                                            # first tick after a start: refresh BEFORE deciding anything
-            log.info("start-up: refreshing the tweet history before the first decision")
-            try:
-                info = self.feed.refresh_tweet_data()
-            except Exception as ex:
-                info = {"ok": False, "error": f"refresh raised {ex!r}"}
-            if info.get("ok"):
-                self._last_forecast_at, self._fail_count, self._last_failure, self._next_retry_at = now, 0, None, None
-                self.model.reload()
-            else:
-                self._forecast_failed(info.get("error", "refresh failed"), now)
-            return
+    def _xt_fresh(self, now: pd.Timestamp) -> bool:
+        """Is the XTracker data (our CSV) recent enough to trade on? Needs a successful refresh in the last XT_FRESH_MIN minutes."""
+        if not hasattr(self.feed, "refresh_tweet_data"):
+            return True                                           # replay / feeds without a refresh: nothing to go stale
+        return self._xt_ok_at is not None and (now - self._xt_ok_at) <= pd.Timedelta(minutes=self.XT_FRESH_MIN)
 
-        def work():
-            try:
-                info = self.feed.refresh_tweet_data()
-                self._forecast_result = ("ok", info) if info.get("ok") else ("fail", info.get("error", "refresh failed"))
-            except Exception as ex:
-                self._forecast_result = ("fail", f"refresh raised {ex!r}")
-        self._forecast_thread = threading.Thread(target=work, daemon=True)
-        self._forecast_thread.start()
+    def _refresh_light(self, now: pd.Timestamp, blocking: bool = False):
+        """Light strategy: download the XTracker export and merge it at the START of the tick, so BOTH the buy and the sell decisions of this
+        tick see the newest data. Rate-limit safety: at most one attempt per `xt_refresh_min` minutes, exponential backoff with jitter after
+        a failure (5, 10, 20 ... 60 min), at least XT_RATE_LIMIT_BACKOFF_MIN after an HTTP 403/429, bounded duration per attempt."""
+        self.model.reload()                                     # picks up a CSV changed by anyone else (cheap: mtime check)
+        if not hasattr(self.feed, "refresh_tweet_data"):
+            if self._last_forecast_at is None:
+                self._last_forecast_at = now                    # replay: nothing to refresh
+            return
+        if self._next_retry_at is not None and now < self._next_retry_at:
+            return                                              # backing off after a failure
+        if self._last_attempt_at is not None and (now - self._last_attempt_at) < pd.Timedelta(minutes=max(self.xt_refresh_min / 2, 1)):
+            return                                              # spacing: at most one attempt per tick (ticks are `xt_refresh_min` apart)
+        self._last_attempt_at = now
+        try:
+            info = self.feed.refresh_tweet_data()
+        except Exception as ex:
+            info = {"ok": False, "error": f"refresh raised {ex!r}"}
+        if info.get("ok"):
+            self._xt_ok_at = self._last_forecast_at = now
+            self._fail_count, self._last_failure, self._next_retry_at = 0, None, None
+            self.model.reload()
+        else:
+            self._xt_failed(info.get("error", "refresh failed"), now)
+
+    def _xt_failed(self, reason: str, now: pd.Timestamp):
+        self._fail_count += 1
+        self._last_failure = reason
+        delay = min(60.0, 5.0 * 2 ** (self._fail_count - 1)) * (0.8 + 0.4 * self._jitter.random())
+        limited = "403" in reason or "429" in reason
+        if limited:                                             # blocked / rate limited: back off hard instead of hammering
+            delay = max(delay, self.XT_RATE_LIMIT_BACKOFF_MIN * (0.8 + 0.4 * self._jitter.random()))
+        self._next_retry_at = now + pd.Timedelta(minutes=delay)
+        age = "never succeeded" if self._xt_ok_at is None else f"{(now - self._xt_ok_at) / pd.Timedelta(minutes=1):.0f} min old"
+        log.error("XTRACKER REFRESH FAILED (%d in a row)%s: %s | next try in %.0f min | our XTracker data is %s; it counts as unavailable "
+                  "after %d min (no new buys, sells held %d min, then priced on the page count)", self._fail_count,
+                  " [blocked/rate-limited: long backoff]" if limited else "", reason, delay, age, self.XT_FRESH_MIN, self.XT_WAIT_MIN)
 
     def buy_block_reason(self, now: pd.Timestamp, poly, local) -> Optional[str]:
         """Why NEW entries must not happen right now (None = allowed). Exits are never blocked by this."""
@@ -412,6 +419,10 @@ class PaperTrader:
         t_step = time.time()
         poly = self.feed.tweet_count(ev, now)
         t_page = time.time() - t_step
+        t_step = time.time()
+        if self.pred_source == "light":
+            self._refresh_light(now)                           # BEFORE reading any count: this tick's buys and sells use the newest XTracker data
+        self._t_refresh_light = time.time() - t_step
         try:
             local, newest = self.feed.local_count(ev, now)
         except Exception as ex:
@@ -427,7 +438,7 @@ class PaperTrader:
                 #   page <= XTracker : buys AND sells use XTracker
                 #   page >  XTracker : NO new buys; sells use the page count
                 #   XTracker missing : no new buys; sells wait up to XT_WAIT_MIN minutes, then use the page count
-                xt_ok = local is not None and self._fail_count == 0
+                xt_ok = local is not None and self._xt_fresh(now)
                 if xt_ok:
                     self._xt_down_since = None
                     if poly <= local:
@@ -439,13 +450,20 @@ class PaperTrader:
                         self._count_decision = (f"page {poly} > XTracker {local} (diff {poly - local:+d}): NO NEW BUYS; sells use the PAGE count ({poly}). "
                                                 "Buys resume when XTracker catches up to the page")
                 else:
+                    age_min = None if self._xt_ok_at is None else (now - self._xt_ok_at) / pd.Timedelta(minutes=1)
                     why = ("XTracker/our tweet count cannot be read" if local is None else
-                           f"XTracker refresh is failing ({self._fail_count} in a row: {(self._last_failure or '?')[:140]})")
+                           f"XTracker data is {'never refreshed' if age_min is None else f'{age_min:.0f} min old'} (limit {self.XT_FRESH_MIN}; "
+                           f"last error: {(self._last_failure or 'none')[:140]})")
                     if self._xt_down_since is None:
                         self._xt_down_since = now
                     down = (now - self._xt_down_since) / pd.Timedelta(minutes=1)
                     self.tweets, source = poly, "page_only"
-                    if down >= self.XT_WAIT_MIN:
+                    if down >= self.XT_WAIT_MIN and local is not None and poly < local:
+                        # the page can never legitimately be BELOW a count we already saw: it is stuck/lagging, so it must not price sells
+                        self._sell_hold = f"page count {poly} is BELOW the XTracker count {local} we already saw - the page counter is unreliable"
+                        self._count_decision = (f"{why}; NO NEW BUYS; sells stay HELD: the page shows {poly} but we already saw {local} on XTracker, "
+                                                "so the page counter is stuck/lagging and cannot be used to price sells")
+                    elif down >= self.XT_WAIT_MIN:
                         self._sell_count = poly
                         self._count_decision = (f"{why} for {down:.0f} min (>= {self.XT_WAIT_MIN}): NO NEW BUYS; sells now use the PAGE count ({poly})")
                     else:
@@ -491,7 +509,7 @@ class PaperTrader:
             "fc_state": self.forecast_state, "fc_fails": self._fail_count, "fc_last_failure": (self._last_failure or "")[:400]})
         t_step = time.time()
         self._refresh_model(ev, now, blocking=self.ticks == 0 and (self.pred_source == "light" or not self.model.ready))
-        self._t_refresh = time.time() - t_step
+        self._t_refresh = getattr(self, "_t_refresh_light", 0.0) + (time.time() - t_step)
         if not self.model.ready or self.tweets is None or not quotes:
             log.info("waiting for data (model ready=%s, tweets=%s, quotes=%d)", self.model.ready, self.tweets, len(quotes))
             self.con.say("  waiting for the first ensemble forecast / data before any decision is possible")

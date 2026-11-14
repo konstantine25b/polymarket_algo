@@ -154,7 +154,12 @@ class TweetCSVGetter:
 
 
 if __name__ == '__main__':
-    getter = TweetCSVGetter()
+    import argparse
+    ap = argparse.ArgumentParser(description="Download the XTracker export and merge it into the tweet CSV")
+    ap.add_argument("--tries", type=int, default=3)
+    ap.add_argument("--max-seconds", type=float, default=330.0, help="total time budget over all attempts")
+    cli = ap.parse_args()
+    getter = TweetCSVGetter(tries=cli.tries, max_seconds=cli.max_seconds)
     try:
         result = getter.getCSV()
     except Exception as ex:

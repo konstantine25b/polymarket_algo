@@ -1107,7 +1107,7 @@ def test_light_strategy_does_not_trade_on_a_fallback_tweet_count(tmp_path):
     assert t._count_source == "xtracker" and t.buy_block_reason(now, 100, 100) is None
 
 
-def test_light_start_refreshes_tweet_history_before_the_first_decision(tmp_path):
+def test_light_refreshes_xtracker_every_interval_before_any_count_is_read(tmp_path):
     order = []
 
     class RefreshFeed(LightFeed):
@@ -1117,25 +1117,84 @@ def test_light_start_refreshes_tweet_history_before_the_first_decision(tmp_path)
             order.append("refresh")
             return {"ok": True, "new_tweets": 3}
 
-        def quotes(self, event, now):
-            order.append("quotes")
-            return LightFeed.quotes(self, event, now)
+        def local_count(self, event, now):
+            order.append("count")
+            return LightFeed.tweet_count(self, event, now), None
+
+        def next_event(self, *a):
+            return None
+    ev, feed = light_event(), RefreshFeed()
+    t = PaperTrader(feed, Rules(top_k=3), str(tmp_path), 40.0, "light", start_after_days=4.0, chart_every=10 ** 6, xt_refresh_min=10)
+    t.event, t.events["light-fake"] = ev, ev
+    t0 = ev.start + pd.Timedelta(days=5)
+    t.tick(t0)
+    assert order[:2] == ["refresh", "count"]                           # refreshed BEFORE the count of the very first tick
+    assert t.forecast_state == "idle" and t._xt_ok_at == t0
+    t.tick(t0 + pd.Timedelta(minutes=3))                                # inside the spacing: no extra download
+    assert order.count("refresh") == 1
+    t.tick(t0 + pd.Timedelta(minutes=10))                               # next 10-minute tick: refreshed again, sells see fresh data
+    assert order.count("refresh") == 2
+
+
+def _refreshing_trader(tmp_path, results):
+    """Live light trader whose refresh_tweet_data pops results; page == XTracker count."""
+    class F(LightFeed):
+        mode = "live"
+
+        def refresh_tweet_data(self):
+            return results.pop(0) if results else {"ok": True, "new_tweets": 0}
 
         def local_count(self, event, now):
             return LightFeed.tweet_count(self, event, now), None
 
         def next_event(self, *a):
             return None
-    ev, feed = light_event(), RefreshFeed()
-    t = PaperTrader(feed, Rules(top_k=3), str(tmp_path), 40.0, "light", start_after_days=4.0, chart_every=10 ** 6)
+    ev = light_event()
+    t = PaperTrader(F(), Rules(top_k=3), str(tmp_path), 40.0, "light", start_after_days=4.0, chart_every=10 ** 6, xt_refresh_min=10)
     t.event, t.events["light-fake"] = ev, ev
-    t.tick(ev.start + pd.Timedelta(days=5))
-    assert order.count("refresh") == 1
-    # the refresh happened synchronously inside the first tick (not in a background thread that finishes later)
-    assert t.forecast_state == "idle" and t._last_forecast_at is not None
-    n = order.count("refresh")
-    t.tick(ev.start + pd.Timedelta(days=5, minutes=10))                 # later ticks do NOT refresh again (3 h interval)
-    assert order.count("refresh") == n
+    return t, ev, ev.start + pd.Timedelta(days=5)
+
+
+def test_refresh_failure_backs_off_and_xtracker_stays_usable_for_30_minutes(tmp_path, caplog):
+    t, ev, t0 = _refreshing_trader(tmp_path, [{"ok": True}] + [{"ok": False, "error": "exit code 1: timed out"}] * 10)
+    t.tick(t0)
+    with caplog.at_level("ERROR"):
+        t.tick(t0 + pd.Timedelta(minutes=10))                           # refresh fails
+    assert t._fail_count == 1 and t._next_retry_at is not None and "XTRACKER REFRESH FAILED" in caplog.text
+    assert t._count_source == "xtracker"                                # 10 min old data is still fine
+    t.tick(t0 + pd.Timedelta(minutes=20))                               # still backing off (5-6 min): retried or not, data is 20 min old
+    assert t._count_source == "xtracker"
+    t.tick(t0 + pd.Timedelta(minutes=40))                               # > 30 min without a successful refresh -> unavailable
+    assert t._count_source == "page_only" and "XTracker count unavailable" in t.buy_block_reason(t0 + pd.Timedelta(minutes=40), 314, 314)
+
+
+def test_http_403_or_429_backs_off_for_at_least_30_minutes(tmp_path):
+    t, ev, t0 = _refreshing_trader(tmp_path, [{"ok": False, "error": "XTracker answered HTTP 403 Forbidden"}])
+    t.tick(t0)
+    assert t._next_retry_at - t0 >= pd.Timedelta(minutes=24)            # 30 min x jitter(0.8..1.2)
+    calls = []
+    t.feed.refresh_tweet_data = lambda: calls.append(1) or {"ok": True}
+    t.tick(t0 + pd.Timedelta(minutes=10))
+    t.tick(t0 + pd.Timedelta(minutes=20))
+    assert calls == []                                                  # no hammering while blocked
+    t.tick(t0 + pd.Timedelta(minutes=40))
+    assert calls == [1]
+
+
+def test_sells_use_page_only_after_an_hour_and_never_a_page_below_what_xtracker_showed(tmp_path, caplog):
+    t, ev, t0 = _refreshing_trader(tmp_path, [{"ok": False, "error": "boom"}] * 50)
+    t.feed.local_count = lambda e, n: (LightFeed.tweet_count(t.feed, e, n) + 40, None)      # XTracker is AHEAD of the page, but stale
+    t._xt_ok_at = t0 - pd.Timedelta(minutes=29)                         # last good refresh 29 min ago
+    t._last_attempt_at = t0
+    t._next_retry_at = t0 + pd.Timedelta(days=1)                        # keep the refresh quiet in this test
+    t.tick(t0 + pd.Timedelta(minutes=5))                                # now 34 min old -> unavailable, wait starts
+    assert t._count_source == "page_only" and t._sell_hold and "waiting for XTracker" in t._sell_hold
+    with caplog.at_level("WARNING"):
+        t.tick(t0 + pd.Timedelta(minutes=70))                           # an hour later: would use the page ... but page < XTracker count we saw
+    assert t._sell_count is None and "BELOW the XTracker count" in t._sell_hold and "stuck/lagging" in caplog.text
+    t.feed.local_count = lambda e, n: (LightFeed.tweet_count(t.feed, e, n) - 40, None)      # page is HIGHER than what we saw -> page is usable
+    t.tick(t0 + pd.Timedelta(minutes=80))
+    assert t._sell_hold is None and t._sell_count == LightFeed.tweet_count(t.feed, ev, t0 + pd.Timedelta(minutes=80))
 
 
 def test_a_blocked_buy_attempt_does_not_use_up_the_hour(tmp_path):
@@ -1426,6 +1485,7 @@ def test_xtracker_coming_back_resets_the_wait(tmp_path):
 
 def test_failing_xtracker_refresh_counts_as_unavailable(tmp_path):
     t, ev, now, page = _xt_trader(tmp_path, 0)
-    t._fail_count, t._last_failure = 2, "HTTP 403 Forbidden"
+    t.feed.refresh_tweet_data = lambda: {"ok": False}                   # a feed that refreshes (so freshness is enforced) ...
+    t._xt_ok_at, t._last_failure = now - pd.Timedelta(hours=2), "HTTP 403 Forbidden"    # ... but whose last good refresh was 2 h ago
     t.tick(now)
     assert t._count_source == "page_only" and t._sell_hold and "403" in t._count_decision

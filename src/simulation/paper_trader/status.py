@@ -94,9 +94,13 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
         ratio = last.quotes_ok / last.buckets if last.buckets else 0
         add("OK" if ratio >= 0.9 else "WARN", f"order books {int(last.quotes_ok)}/{int(last.buckets)} on the last tick")
         add("OK" if last.count_source in ("polymarket", "xtracker") else "WARN", f"tweet count source: {last.count_source} (count used {last.count_used})")
-        d = pd.to_numeric(dat["diff"].tail(6), errors="coerce").dropna()
-        if len(d) and (d.abs() > 5).all():
-            add("WARN", f"our tweet database has differed from Polymarket by >5 for the last {len(d)} ticks (diff {d.iloc[-1]:+.0f}) - XTracker refresh may be failing")
+        d = pd.to_numeric(dat["diff"].tail(6), errors="coerce").dropna()          # diff = polymarket page - XTracker/our data
+        if len(d) and (d > 5).all():
+            add("WARN", f"Polymarket page is ABOVE XTracker by >5 for the last {len(d)} ticks (diff {d.iloc[-1]:+.0f}): our XTracker data is behind "
+                        "(refresh failing, or XTracker's export lags) - no new buys until it catches up; sells use the page count")
+        elif len(d) and (d < -5).all():
+            add("WARN", f"Polymarket page is BELOW XTracker by >5 for the last {len(d)} ticks (diff {d.iloc[-1]:+.0f}): the page counter looks stuck/lagging. "
+                        "Trading uses XTracker; this is not a refresh failure")
         slow = dat.tick_seconds.tail(6).max()
         if slow and slow > 150:       # steps are bounded (books 45s + page scrape 90s): more means a bound is not holding
             add("WARN", f"slow ticks (up to {slow:.0f}s) - network or browser problems")
@@ -113,7 +117,7 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
     # 5) errors in the log (new logs carry an explicit UTC offset; legacy naive lines are read as host-local time)
     log_path = os.path.join(run_dir, "paper_trader.log")
     if os.path.exists(log_path):
-        recent_err, recent_warn, last_errs = 0, 0, []
+        recent_err, recent_warn, last_errs, xt_fail = 0, 0, [], 0
         cutoff = now - pd.Timedelta(minutes=60)
         for line in open(log_path, errors="replace"):
             m = LOG_LINE.match(line)
@@ -123,12 +127,16 @@ def check(run_dir: str, stale_min: int = 25, model_stale_min: int = 150):
             if t is None:
                 continue
             if t >= cutoff:
+                if "XTRACKER REFRESH FAILED" in m.group(4) or "tweet data refresh FAILED" in m.group(4):
+                    xt_fail += 1
                 if m.group(3) == "ERROR":
                     recent_err += 1
                     last_errs.append(m.group(4)[:140])
                 else:
                     recent_warn += 1
         add("OK" if recent_err == 0 else ("CRIT" if recent_err >= 5 else "WARN"), f"last 60 min in paper_trader.log: {recent_err} errors, {recent_warn} warnings")
+        if xt_fail:
+            add("WARN", f"XTracker refresh FAILED {xt_fail}x in the last 60 min - see 'XTRACKER REFRESH FAILED' in paper_trader.log for the exact error (e.g. HTTP 403)")
         for e in last_errs[-3:]:
             add("INFO", f"   error: {e}")
 

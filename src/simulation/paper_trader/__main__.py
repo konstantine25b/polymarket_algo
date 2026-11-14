@@ -49,7 +49,7 @@ def build_parser():
     ap.add_argument("--max-stake", type=float, default=None, help="largest single order in USDC when --kelly is on")
     ap.add_argument("--min-shares", type=float, default=5.0, help="Polymarket CLOB minimum order size in shares (orders are raised to this)")
     ap.add_argument("--pick-random", action="store_true", help="draw the bucket at random (weight = edge) instead of taking the best net edge")
-    ap.add_argument("--max-data-age-h", type=float, default=36.0, help="light model: no new buys if the newest tweet in our history is older than this")
+    ap.add_argument("--max-data-age-h", type=float, default=12.0, help="light model: no new buys if the newest tweet in our history is older than this")
     ap.add_argument("--count-lag-h", type=float, default=0.0, help="light model: hours the tweet count lags reality; the expected unseen tweets are added")
     ap.add_argument("--bid-sell-margin", type=float, default=None,
                     help="ENABLE selling a held bucket when its best bid exceeds our probability by more than this many points "
@@ -69,6 +69,7 @@ def build_parser():
     rk.add_argument("--exit-min-ratio", type=float, default=0.0, help="hold a model-driven exit if net proceeds/share < ratio x our probability (0 = off)")
     ap.add_argument("--buy-every", type=int, default=60, help="minutes between buys")
     ap.add_argument("--sell-every", type=int, default=10, help="minutes between ticks / sell checks")
+    ap.add_argument("--xt-refresh-min", type=int, default=10, help="light strategy: minutes between XTracker export refreshes (done at the start of a tick, before any decision)")
     ap.add_argument("--model-refresh", type=int, default=None, help="minutes between ensemble re-runs")
     ap.add_argument("--pred-source", choices=["light", "calibrated", "ensemble"], default=None,
                     help="calibrated = ensemble total + recalibrated bucket shape (backtested); ensemble = its native probabilities")
@@ -155,11 +156,12 @@ def _main(argv=None):
             st = trader.run_replay(a.replay)
             print(open(os.path.join(run_dir, "summary.txt")).read())
             return 0
-        feed = LiveFeed(backup_dir=a.backup_dir)
+        feed = (LiveFeed(backup_dir=a.backup_dir, tweet_refresh_timeout=150, refresh_tries=2, refresh_budget=100)   # refreshed every tick: short and bounded
+                if a.pred_source == "light" else LiveFeed(backup_dir=a.backup_dir))
         trader = PaperTrader(feed, rules, run_dir, a.bankroll, a.pred_source, a.buy_every, a.sell_every, a.model_refresh,
                              a.seed, a.b, not a.no_auto_roll, a.start_after_days, a.max_slippage / 100, a.chart_every, verbose=True,
                              model_stale_min=a.model_stale_min, max_count_gap=a.max_count_gap, max_data_age_h=a.max_data_age_h, count_lag_h=a.count_lag_h,
-                             backup_dir=a.backup_dir, allow_new_state=a.allow_new_state)
+                             backup_dir=a.backup_dir, allow_new_state=a.allow_new_state, xt_refresh_min=a.xt_refresh_min)
         from constants import EVENT_HASH
         slug = a.slug or trader.account.state.get("current_slug") or EVENT_HASH
         trader.event = feed.load_event(slug)
