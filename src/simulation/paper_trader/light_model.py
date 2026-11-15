@@ -37,6 +37,9 @@ class LightParams:
     prior_a: float = 16.0       # strength of the "level = recent level" prior (relative sd of the weekly level = 1/sqrt(a))
     phi: float = 12.0           # variance inflation of tweet counts relative to Poisson
     level_floor: float = 5.0    # tweets/day floor so a quiet stretch can never give a zero rate
+    momentum: float = 0.35      # weight of the last `momentum_hours` pace in the weekly level (0 = off). Backtest: +$1.5/week, t=2.9
+    momentum_hours: float = 48.0
+    momentum_clip: Tuple[float, float] = (0.5, 2.0)   # observed/expected pace is clipped to this range before it is used
 
     def as_dict(self):
         return asdict(self)
@@ -53,6 +56,7 @@ class LightModel:
         self.p = params or LightParams()
         self.times = times
         self._hourly = None
+        self.last_pace: Optional[float] = None
 
     # ---- profile -------------------------------------------------------------------------------------------
     def _hour_counts(self) -> pd.Series:
@@ -97,6 +101,22 @@ class LightModel:
         rate = self.level / 24.0 * self.dow[hours.dayofweek.values] * self.hod[hours.hour.values] * 24.0
         return float((rate * frac).sum())
 
+    def recent_pace(self, now) -> Optional[float]:
+        """Tweets seen in the last `momentum_hours` / tweets the profile expects for those hours (clipped), or None when
+        momentum is off, the window is nearly empty of expectation, or our tweet history is stale (a gap would read as 'cold')."""
+        p = self.p
+        if not p.momentum:
+            return None
+        now = pd.Timestamp(now)
+        if now - pd.Timestamp(self.times[-1]) > pd.Timedelta(hours=STALE_GAP_H):
+            return None
+        a = now - pd.Timedelta(hours=p.momentum_hours)
+        exp = self.exposure(a, now)
+        if exp < 5.0:
+            return None
+        obs = np.searchsorted(self.times, np.datetime64(now), "right") - np.searchsorted(self.times, np.datetime64(a), "right")
+        return float(np.clip(obs / exp, *p.momentum_clip))
+
     # ---- forecast ------------------------------------------------------------------------------------------
     def remaining(self, start, now, end, n_so_far: float) -> Tuple[float, float]:
         """(mean, variance) of tweets still to come between `now` and `end` given `n_so_far` counted since `start`."""
@@ -108,6 +128,10 @@ class LightModel:
         n_p, e_p = max(n_so_far, 0.0) / p.phi, e_sofar / p.phi          # variance-inflated pseudo counts
         post_shape, post_rate = a + n_p, a + e_p
         lam, var_lam = post_shape / post_rate, post_shape / post_rate ** 2
+        pace = self.recent_pace(now)
+        self.last_pace = pace
+        if pace is not None:                                             # pull the level toward the pace of the last 48 h
+            lam = lam + p.momentum * (pace - lam)
         mu = lam * e_rem
         var = var_lam * e_rem ** 2 + p.phi * mu
         return float(mu), float(var)
@@ -144,6 +168,7 @@ class LightPredictor:
         self.model: Optional[LightModel] = None
         self.updated = None
         self.last_mean_total: Optional[float] = None
+        self.last_pace: Optional[float] = None               # last-48h pace vs profile used by the momentum term (None = not applied)
         self.reload()
 
     def reload(self):
@@ -171,4 +196,5 @@ class LightPredictor:
         p = self.model.bucket_probs(ranges, start, now_et, end, int(round(so)))
         mu, _v = self.model.remaining(start, now_et, end, so)
         self.last_mean_total = float(so + mu)
+        self.last_pace = self.model.last_pace
         return p

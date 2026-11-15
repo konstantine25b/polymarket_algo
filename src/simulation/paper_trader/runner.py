@@ -223,7 +223,7 @@ class PaperTrader:
         self._last_light_row = hour
         append_csv(os.path.join(self.run_dir, "forecasts.csv"), ["ts", "event", "total_predicted", "current_tweets", "days_left", "models"],
                    {"ts": now.isoformat(), "event": ev.slug, "total_predicted": round(self.model.last_mean_total, 2),
-                    "current_tweets": self.tweets, "days_left": round(days_left, 3), "models": json.dumps({"light": self.model.last_mean_total})})
+                    "current_tweets": self.tweets, "days_left": round(days_left, 3), "models": json.dumps({"light": self.model.last_mean_total, "pace_48h": self.model.last_pace})})
 
     def _forecast_failed(self, reason: str, now: pd.Timestamp):
         """Record a failure and schedule the next attempt with exponential backoff + jitter (5, 10, 20, ... max 60 min)."""
